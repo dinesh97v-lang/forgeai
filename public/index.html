@@ -1,0 +1,1952 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>ForgeAI — Private Developer Platform</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#ffffff;--bg2:#f7f7f5;--bg3:#f0efeb;
+  --text:#1a1a1a;--text2:#6b6b6b;--text3:#9b9b9b;
+  --border:#e5e5e0;--border2:#d0d0c8;
+  --accent:#E24B4A;--accent2:#A32D2D;
+  --success:#3B6D11;--sbg:#EAF3DE;
+  --warning:#854F0B;--wbg:#FAEEDA;
+  --danger:#A32D2D;--dbg:#FCEBEB;
+  --info:#185FA5;--ibg:#E6F1FB;
+  --r:8px;--rlg:12px;
+}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:var(--bg3);color:var(--text);min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+
+/* WELCOME */
+.welcome{position:fixed;inset:0;background:var(--bg3);display:flex;align-items:center;justify-content:center;z-index:1000;padding:20px}
+.wbox{width:100%;max-width:680px}
+.wlogo{text-align:center;margin-bottom:36px}
+.wlogo-text{font-size:44px;font-weight:800;letter-spacing:-2px;color:var(--text)}
+.wlogo-text span{color:var(--accent)}
+.wtagline{font-size:14px;color:var(--text2);margin-top:6px}
+.wcards{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:24px}
+.wcard{background:var(--bg);border:2px solid var(--border);border-radius:16px;padding:28px 22px;cursor:pointer;transition:all .25s;position:relative}
+.wcard:hover{border-color:var(--accent);transform:translateY(-3px);box-shadow:0 8px 32px rgba(226,75,74,.12)}
+.wcard-badge{position:absolute;top:14px;right:14px;font-size:10px;padding:3px 8px;border-radius:10px;font-weight:700}
+.wcard-badge.g{background:var(--sbg);color:var(--success)}
+.wcard-badge.b{background:var(--ibg);color:var(--info)}
+.wcard-icon{font-size:36px;margin-bottom:12px}
+.wcard-title{font-size:20px;font-weight:700;margin-bottom:6px}
+.wcard-sub{font-size:12px;color:var(--text2);line-height:1.5;margin-bottom:14px}
+.wcard-feats{margin-bottom:18px}
+.wcard-feat{font-size:12px;color:var(--text2);padding:3px 0;display:flex;gap:6px}
+.wcard-feat span{color:var(--success);font-weight:700}
+.wcard-btn{width:100%;padding:11px;border-radius:10px;border:none;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;transition:all .2s}
+.wcard-btn.pro{background:var(--accent);color:white}
+.wcard-btn.pro:hover{background:var(--accent2)}
+.wcard-btn.simple{background:var(--text);color:white}
+.wfooter{text-align:center;font-size:12px;color:var(--text3)}
+
+/* APP */
+.app{display:none;width:100%;max-width:1100px;height:680px;background:var(--bg);border:1px solid var(--border);border-radius:var(--rlg);overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,.08)}
+.app.show{display:flex}
+.sidebar{width:210px;background:var(--bg2);border-right:1px solid var(--border);display:flex;flex-direction:column;flex-shrink:0;overflow:hidden}
+.logo-area{padding:14px 16px;border-bottom:1px solid var(--border);flex-shrink:0}
+.logo{font-size:20px;font-weight:800;letter-spacing:-1px}
+.logo span{color:var(--accent)}
+.logo-sub{font-size:10px;color:var(--text3);margin-top:1px;text-transform:uppercase;letter-spacing:.5px}
+.mode-bar{display:flex;margin:10px;background:var(--bg);border:1px solid var(--border);border-radius:var(--r);overflow:hidden;flex-shrink:0}
+.mbar-btn{flex:1;padding:7px 4px;font-size:11px;font-weight:600;border:none;background:transparent;color:var(--text2);cursor:pointer;font-family:inherit;transition:all .2s}
+.mbar-btn.active{background:var(--accent);color:white}
+.nav-sec{padding:8px 12px 3px;font-size:9px;color:var(--text3);text-transform:uppercase;letter-spacing:1px;font-weight:700;flex-shrink:0}
+.ni{display:flex;align-items:center;gap:7px;padding:7px 10px;margin:1px 6px;border-radius:var(--r);cursor:pointer;font-size:12px;color:var(--text2);transition:all .15s;flex-shrink:0}
+.ni:hover{background:var(--bg);color:var(--text)}
+.ni.active{background:var(--bg);color:var(--text);font-weight:700;border:1px solid var(--border)}
+.ni-icon{font-size:14px;width:18px;text-align:center;flex-shrink:0}
+.nbadge{margin-left:auto;font-size:9px;padding:2px 5px;border-radius:8px;font-weight:700}
+.nbadge.g{background:var(--sbg);color:var(--success)}
+.nbadge.r{background:var(--dbg);color:var(--danger)}
+.nbadge.a{background:var(--wbg);color:var(--warning)}
+.ai-group-hd{display:flex;align-items:center;gap:6px;padding:6px 10px;cursor:pointer;font-size:12px;font-weight:600;color:var(--text2);border-radius:5px;margin:1px 6px;user-select:none}
+.ai-group-hd:hover{background:var(--bg);color:var(--text)}
+.ai-group-arr{margin-left:auto;font-size:11px;display:inline-block;transition:transform .2s;line-height:1}
+.ai-group.open .ai-group-arr{transform:rotate(180deg)}
+.ai-group-body{overflow:hidden;max-height:0;transition:max-height .25s ease}
+.ai-group.open .ai-group-body{max-height:400px}
+.ni-sub{padding-left:26px}
+.sb-bot{margin-top:auto;padding:10px;border-top:1px solid var(--border);flex-shrink:0}
+.ch-new-btn{display:block;margin:8px 10px 4px;padding:7px 12px;background:var(--accent);color:white;border:none;border-radius:var(--r);cursor:pointer;font-size:12px;font-weight:600;text-align:left;width:calc(100% - 20px);font-family:inherit}
+.ch-new-btn:hover{opacity:.88}
+.ch-list{overflow-y:auto;max-height:160px}
+.nav-scroll{flex:1;min-height:0;overflow-y:auto;scrollbar-width:thin;scrollbar-color:var(--border2) transparent}
+.nav-scroll::-webkit-scrollbar{width:4px}
+.nav-scroll::-webkit-scrollbar-thumb{background:var(--border2);border-radius:2px}
+.ch-item{display:flex;align-items:center;padding:8px 12px;cursor:pointer;font-size:12px;color:var(--text2);border-radius:6px;margin:2px 6px;gap:4px;transition:background .12s;background:#e9e8e4}
+.ch-item:hover{background:#d8d7d1;color:var(--text)}
+.ch-item.active{background:var(--accent);color:white}
+.ch-title{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ch-del{background:none;border:none;cursor:pointer;color:var(--text3);font-size:16px;padding:0 3px;line-height:1;opacity:0.45;transition:opacity .15s;flex-shrink:0}
+.ch-item:hover .ch-del{opacity:0.8}
+.ch-item.active .ch-del{color:rgba(255,255,255,.7);opacity:1}
+.proj-item{display:flex;align-items:center;padding:7px 12px;cursor:pointer;font-size:12px;color:var(--text2);border-radius:6px;margin:2px 6px;gap:5px;transition:background .12s;background:#e9e8e4}
+.proj-item:hover{background:#d8d7d1;color:var(--text)}
+.proj-new-btn{display:block;margin:4px 8px 2px;padding:5px 10px;background:transparent;color:var(--accent);border:1px dashed var(--accent);border-radius:var(--r);cursor:pointer;font-size:11px;font-weight:600;text-align:left;font-family:inherit;width:calc(100% - 16px)}
+.proj-new-btn:hover{background:var(--dbg)}
+.proj-picker{position:fixed;background:var(--bg);border:1px solid var(--border2);border-radius:var(--r);box-shadow:0 4px 20px rgba(0,0,0,.15);z-index:9999;min-width:160px;padding:4px 0;display:none;max-height:220px;overflow-y:auto}
+.proj-picker-hd{padding:5px 12px;font-size:10px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid var(--border)}
+.proj-picker-item{padding:8px 14px;cursor:pointer;color:var(--text2);font-size:12px}
+.proj-picker-item:hover{background:var(--bg3);color:var(--text)}
+.urow{display:flex;align-items:center;gap:8px;padding:6px;border-radius:var(--r);cursor:pointer}
+.urow:hover{background:var(--bg)}
+.uav{width:26px;height:26px;border-radius:50%;background:var(--ibg);display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:var(--info)}
+.uname{font-size:12px;font-weight:600}
+.uplan{font-size:10px;color:var(--text3)}
+
+/* MAIN */
+.main{flex:1;display:flex;flex-direction:column;overflow:hidden;min-width:0}
+.topbar{display:flex;align-items:center;gap:10px;padding:11px 15px;border-bottom:1px solid var(--border);flex-shrink:0}
+.tb-title{font-size:14px;font-weight:700;flex:1}
+.tb-badge{font-size:10px;padding:3px 9px;border-radius:10px;background:var(--sbg);color:var(--success);font-weight:700}
+.tb-badge.warn{background:var(--wbg);color:var(--warning)}
+.tb-badge.danger{background:var(--dbg);color:var(--danger)}
+.ib{width:28px;height:28px;border:1px solid var(--border);border-radius:var(--r);background:transparent;cursor:pointer;font-size:14px;display:flex;align-items:center;justify-content:center;color:var(--text2);transition:all .15s}
+.ib:hover{background:var(--bg2)}
+
+/* PANELS */
+.panel{display:none;flex-direction:column;flex:1;overflow:hidden}
+.panel.active{display:flex}
+.scroll{flex:1;overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:10px}
+
+/* CHAT */
+.msgs{flex:1;overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:10px}
+.msg{display:flex;gap:8px;max-width:88%}
+.msg.u{align-self:flex-end;flex-direction:row-reverse}
+.mav{width:26px;height:26px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;flex-shrink:0;margin-top:2px}
+.mav.ai{background:var(--accent);color:white}
+.mav.u{background:var(--ibg);color:var(--info)}
+.bub{padding:9px 12px;border-radius:11px;font-size:12px;line-height:1.6;color:var(--text);border:1px solid var(--border);background:var(--bg)}
+.msg.u .bub{background:var(--ibg);border-color:transparent;color:var(--info)}
+.msg-acts{display:flex;gap:2px;margin-top:3px;opacity:0.4;transition:opacity .15s}
+.msg:hover .msg-acts{opacity:1}
+@media(max-width:600px){.msg-acts{opacity:1}}
+.msg.u .msg-acts{justify-content:flex-end}
+.mac{background:none;border:none;cursor:pointer;padding:3px 4px;border-radius:4px;color:var(--text3);display:inline-flex;align-items:center;transition:background .12s,color .12s}
+.mac:hover{background:rgba(0,0,0,.07);color:var(--text)}
+.tag{display:inline-block;background:var(--sbg);color:var(--success);font-size:10px;padding:1px 5px;border-radius:4px;margin:1px;font-weight:700}
+.tag.r{background:var(--dbg);color:var(--danger)}
+.tag.a{background:var(--wbg);color:var(--warning)}
+.pills{display:flex;gap:5px;flex-wrap:wrap;padding:0 14px 8px}
+.pill{font-size:11px;padding:4px 9px;border:1px solid var(--border);border-radius:16px;color:var(--text2);cursor:pointer;background:var(--bg);transition:all .15s;white-space:nowrap}
+.pill:hover{background:var(--accent);color:white;border-color:var(--accent)}
+.cin-area{padding:10px 14px;border-top:1px solid var(--border);flex-shrink:0}
+.cin-row{display:flex;gap:7px;align-items:flex-end}
+.cin{flex:1;border:1px solid var(--border2);border-radius:var(--r);padding:8px 11px;font-size:12px;font-family:inherit;color:var(--text);background:var(--bg);resize:none;min-height:36px;max-height:80px;outline:none;transition:border .2s}
+.cin:focus{border-color:var(--accent)}
+.sbtn{width:34px;height:34px;border-radius:var(--r);background:var(--accent);border:none;cursor:pointer;color:white;font-size:15px;flex-shrink:0;transition:all .2s}
+.sbtn:hover{background:var(--accent2)}
+
+/* CARDS */
+.card{border:1px solid var(--border);border-radius:var(--r);overflow:hidden;background:var(--bg)}
+.card-hd{padding:10px 13px;background:var(--bg2);display:flex;align-items:center;gap:8px;border-bottom:1px solid var(--border)}
+.card-title{font-size:13px;font-weight:700;flex:1}
+.card-bd{padding:10px 13px}
+.row{display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid var(--border)}
+.row:last-child{border-bottom:none}
+.rl{font-size:11px;color:var(--text2);display:flex;align-items:center;gap:5px}
+.rv{font-size:11px;font-weight:600;color:var(--text)}
+.rv.ok{color:var(--success)}
+.rv.warn{color:var(--warning)}
+.rv.err{color:var(--danger)}
+.rv.lnk{color:var(--info);cursor:pointer;text-decoration:underline}
+.sdot{width:7px;height:7px;border-radius:50%;flex-shrink:0}
+.sdot.g{background:#4CAF50}
+.sdot.a{background:#FF9800;animation:pulse 1s infinite}
+.sdot.r{background:#F44336}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+.prog-bar{height:4px;background:var(--bg3);border-radius:2px;overflow:hidden;margin-top:6px}
+.prog-fill{height:100%;border-radius:2px;background:#4CAF50;transition:width .5s}
+.stat-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:7px}
+.stat{background:var(--bg2);border-radius:var(--r);padding:10px;text-align:center}
+.stat-n{font-size:18px;font-weight:700}
+.stat-l{font-size:10px;color:var(--text3);margin-top:1px;text-transform:uppercase;letter-spacing:.4px}
+.feat-grid{display:grid;grid-template-columns:1fr 1fr;gap:7px}
+.feat-card{border:1px solid var(--border);border-radius:var(--r);padding:11px;cursor:pointer;transition:all .2s;background:var(--bg)}
+.feat-card:hover{border-color:var(--accent);background:var(--bg2)}
+.feat-icon{width:30px;height:30px;border-radius:var(--r);display:flex;align-items:center;justify-content:center;font-size:15px;margin-bottom:7px}
+.feat-title{font-size:12px;font-weight:700;margin-bottom:3px}
+.feat-desc{font-size:11px;color:var(--text2);line-height:1.4}
+.alert-box{border-radius:var(--r);padding:11px 13px}
+.alert-box.r{background:var(--dbg);border:1px solid #f0c0c0}
+.alert-box.a{background:var(--wbg);border:1px solid #f5d080}
+.alert-box.b{background:var(--ibg);border:1px solid #b5d4f4}
+.alert-box.g{background:var(--sbg);border:1px solid #c0dd97}
+.at{font-size:11px;font-weight:700;margin-bottom:5px}
+.at.r{color:var(--danger)}
+.at.a{color:var(--warning)}
+.at.b{color:var(--info)}
+.at.g{color:var(--success)}
+.atxt{font-size:11px;line-height:1.6}
+.atxt.r{color:var(--danger)}
+.atxt.a{color:var(--warning)}
+.atxt.b{color:var(--info)}
+.atxt.g{color:var(--success)}
+.btn{padding:7px 13px;border-radius:var(--r);font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;transition:all .2s;border:1px solid var(--border)}
+.btn.prim{background:var(--accent);color:white;border-color:var(--accent)}
+.btn.prim:hover{background:var(--accent2)}
+.btn.ghost{background:transparent;color:var(--text)}
+.btn.ghost:hover{background:var(--bg2)}
+.btn-row{display:flex;gap:7px;margin-top:9px}
+.trow{display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid var(--border)}
+.trow:last-child{border-bottom:none}
+.tbar{flex:1;height:5px;background:var(--bg3);border-radius:3px;overflow:hidden}
+.tbar-fill{height:100%;border-radius:3px}
+.mem-item{display:flex;gap:8px;padding:8px;border:1px solid var(--border);border-radius:var(--r);cursor:pointer;transition:border .15s;margin-bottom:5px}
+.mem-item:hover{border-color:var(--border2)}
+.mic{width:28px;height:28px;border-radius:var(--r);display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0}
+.mt{font-size:12px;font-weight:700;margin-bottom:2px}
+.mm{font-size:10px;color:var(--text3)}
+.fin-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px}
+.fin-card{background:var(--bg2);border-radius:var(--r);padding:11px}
+.fin-l{font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px}
+.fin-n{font-size:17px;font-weight:700}
+.fin-t{font-size:10px;margin-top:2px}
+.fin-t.up{color:var(--danger)}
+.fin-t.dn{color:var(--success)}
+.sbar{display:flex;gap:8px;align-items:center;background:var(--bg2);border:1px solid var(--border);border-radius:var(--r);padding:9px 12px}
+.sbar input{flex:1;border:none;background:transparent;font-size:13px;color:var(--text);outline:none;font-family:inherit}
+.sres{padding:10px;border:1px solid var(--border);border-radius:var(--r);background:var(--bg);cursor:pointer;margin-bottom:6px;transition:border .15s}
+.sres:hover{border-color:var(--border2)}
+.srt{font-size:13px;font-weight:700;color:var(--info);margin-bottom:2px}
+.sru{font-size:10px;color:var(--success);margin-bottom:4px}
+.srn{font-size:11px;color:var(--text2);line-height:1.5}
+.aisum{background:var(--bg2);border:1px solid var(--border);border-left:3px solid var(--accent);border-radius:0 var(--r) var(--r) 0;padding:10px 12px;margin-bottom:6px}
+.aisum-l{font-size:10px;color:var(--accent);font-weight:700;margin-bottom:4px}
+.aisum-t{font-size:12px;color:var(--text2);line-height:1.6}
+/* ONE PROMPT */
+.dw-steps{display:flex;gap:0;padding:12px 14px;border-bottom:1px solid var(--border);flex-shrink:0}
+.dws{display:flex;align-items:center;gap:5px;font-size:10px;color:var(--text3);white-space:nowrap}
+.dws.done{color:var(--success)}
+.dws.active{color:var(--accent);font-weight:700}
+.dws-num{width:18px;height:18px;border-radius:50%;border:1.5px solid currentColor;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700}
+.dws-arr{color:var(--border2);margin:0 5px;font-size:11px}
+.dw-examples{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:10px}
+.dw-ex{border:1px solid var(--border);border-radius:var(--r);padding:9px;cursor:pointer;transition:all .2s;background:var(--bg)}
+.dw-ex:hover{border-color:var(--accent);background:var(--bg2)}
+.dw-ex-icon{font-size:16px;margin-bottom:3px}
+.dw-ex-text{font-size:11px;color:var(--text2);line-height:1.4}
+.dw-log{padding:10px 13px;font-family:monospace;font-size:11px;line-height:1.8;color:var(--text2);max-height:180px;overflow-y:auto;background:var(--bg3)}
+.dw-ll.done{color:var(--success)}
+.dw-ll.active{color:var(--accent)}
+.dw-result{background:var(--sbg);border:1px solid #c0dd97;border-radius:var(--r);padding:14px;text-align:center}
+.dw-url{font-size:15px;font-weight:700;color:var(--success);margin:6px 0}
+.dw-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;margin-top:11px}
+.dw-stat{background:white;border-radius:6px;padding:8px;text-align:center}
+.dw-stat-n{font-size:14px;font-weight:700}
+.dw-stat-l{font-size:10px;color:var(--text3)}
+/* WHATSAPP */
+.wa-hd{padding:12px 14px;background:#075E54;display:flex;align-items:center;gap:9px;flex-shrink:0}
+.wa-hd-av{width:34px;height:34px;border-radius:50%;background:#25D366;display:flex;align-items:center;justify-content:center;font-size:16px;flex-shrink:0}
+.wa-hd-title{font-size:14px;font-weight:700;color:white}
+.wa-hd-status{font-size:11px;color:#B2DFDB}
+.wa-body{flex:1;overflow-y:auto;padding:12px;background:#E5DDD5;display:flex;flex-direction:column;gap:7px}
+.wa-msg{max-width:80%}
+.wa-msg.in{align-self:flex-start}
+.wa-msg.out{align-self:flex-end}
+.wa-bub{padding:8px 11px;border-radius:8px;font-size:12px;line-height:1.5}
+.wa-msg.in .wa-bub{background:white;color:#1a1a1a;border-radius:0 8px 8px 8px}
+.wa-msg.out .wa-bub{background:#DCF8C6;color:#1a1a1a;border-radius:8px 0 8px 8px}
+.wa-time{font-size:10px;color:#999;margin-top:2px;text-align:right}
+.wa-cmds{padding:9px 13px;border-top:1px solid #ddd;background:white;flex-shrink:0}
+.wa-cmd-title{font-size:10px;color:var(--text3);font-weight:700;text-transform:uppercase;margin-bottom:6px}
+.wa-cmd-grid{display:grid;grid-template-columns:1fr 1fr;gap:5px}
+.wa-cmd{font-size:11px;padding:6px 9px;border:1px solid #25D366;border-radius:14px;color:#075E54;cursor:pointer;background:white;font-family:inherit;transition:all .15s;font-weight:700}
+.wa-cmd:hover{background:#25D366;color:white}
+.wa-in-area{padding:7px 11px;background:#F0F0F0;display:flex;gap:7px;align-items:center;flex-shrink:0}
+.wa-in{flex:1;border:none;border-radius:18px;padding:8px 13px;font-size:12px;font-family:inherit;outline:none;background:white}
+.wa-send{width:34px;height:34px;border-radius:50%;background:#25D366;border:none;cursor:pointer;color:white;font-size:14px;display:flex;align-items:center;justify-content:center}
+.wa-send:hover{background:#128C7E}
+/* PRIVACY */
+.prv-hero{background:var(--bg2);border:1px solid var(--border);border-radius:var(--rlg);padding:18px;text-align:center;margin-bottom:10px}
+.prv-score{font-size:34px;font-weight:800;color:var(--success)}
+.pchk{display:flex;align-items:center;gap:9px;padding:9px 0;border-bottom:1px solid var(--border)}
+.pchk:last-child{border-bottom:none}
+.pchk-icon{width:26px;height:26px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;flex-shrink:0}
+.pchk-icon.pass{background:var(--sbg)}
+.pchk-icon.warn{background:var(--wbg)}
+.pchk-label{flex:1;font-size:12px;font-weight:700}
+.pchk-sub{font-size:10px;color:var(--text2)}
+.pbadge{font-size:10px;padding:2px 7px;border-radius:8px;font-weight:700;white-space:nowrap}
+.pbadge.pass{background:var(--sbg);color:var(--success)}
+.pbadge.warn{background:var(--wbg);color:var(--warning)}
+.pnet{display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--border)}
+.pnet:last-child{border-bottom:none}
+.pnet-l{font-size:12px;color:var(--text2)}
+.pnet-v{font-size:12px;font-weight:700}
+.pnet-v.safe{color:var(--success)}
+.pnet-v.warn{color:var(--warning)}
+.prv-btn{width:100%;padding:10px;border-radius:var(--r);border:none;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;margin-bottom:7px;display:flex;align-items:center;justify-content:center;gap:7px;transition:all .2s}
+.prv-btn.exp{background:var(--ibg);color:var(--info)}
+.prv-btn.del{background:var(--dbg);color:var(--danger)}
+.prv-btn.aud{background:var(--sbg);color:var(--success)}
+.ldot{width:7px;height:7px;border-radius:50%;background:var(--success);animation:pulse 2s infinite;display:inline-block;margin-right:5px}
+/* TYPING */
+.typing{display:flex;gap:3px;align-items:center;padding:7px 11px}
+.dot{width:5px;height:5px;border-radius:50%;background:var(--text3);animation:bounce 1.2s infinite}
+.dot:nth-child(2){animation-delay:.2s}
+.dot:nth-child(3){animation-delay:.4s}
+@keyframes bounce{0%,60%,100%{transform:translateY(0)}30%{transform:translateY(-5px)}}
+/* NOTIF */
+.notif{position:fixed;top:16px;right:16px;background:var(--text);color:var(--bg);padding:10px 15px;border-radius:var(--r);font-size:12px;font-weight:600;z-index:9999;opacity:0;transition:opacity .3s;pointer-events:none;max-width:280px;line-height:1.4}
+.notif.show{opacity:1}
+@media(max-width:700px){.sidebar{width:170px}}
+/* ── PREVIEW PANEL ──────────────────────────────────────────────────────── */
+#panels-wrap{flex:1;display:flex;flex-direction:column;overflow:hidden}
+#panels-wrap.pv-open{flex-direction:row}
+#panels-wrap.pv-open .panel.active{flex:0 0 55%;min-width:0;overflow:hidden}
+#panels-wrap.pv-open #preview-panel{display:flex;flex:1;min-width:0;animation:pvIn .18s ease}
+@keyframes pvIn{from{opacity:0;transform:translateX(16px)}to{opacity:1;transform:translateX(0)}}
+#preview-panel{display:none;flex-direction:column;background:var(--bg);border-left:1px solid var(--border)}
+#pvh{display:flex;align-items:center;gap:6px;padding:7px 10px;border-bottom:1px solid var(--border);flex-shrink:0;background:var(--bg2)}
+.pv-tabs{display:flex;background:var(--bg3);border-radius:6px;padding:2px;gap:2px}
+.pv-tab{background:transparent;border:none;cursor:pointer;font-size:11px;font-weight:600;padding:3px 9px;border-radius:4px;color:var(--text2);font-family:inherit;transition:all .15s;white-space:nowrap}
+.pv-tab.active{background:var(--bg);color:var(--text);box-shadow:0 1px 3px rgba(0,0,0,.1)}
+.pv-ib{width:24px;height:24px;border:1px solid var(--border);border-radius:var(--r);background:transparent;cursor:pointer;font-size:13px;display:flex;align-items:center;justify-content:center;color:var(--text2);transition:all .15s;flex-shrink:0;line-height:1}
+.pv-ib:hover{background:var(--bg3);color:var(--text)}
+@media(max-width:600px){
+  #panels-wrap.pv-open{flex-direction:column}
+  #panels-wrap.pv-open .panel.active{flex:1}
+  #panels-wrap.pv-open #preview-panel{position:fixed;inset:0;z-index:200;display:flex;flex:none;border-left:none;border-top:1px solid var(--border)}
+}
+/* ── Quote Reply ── */
+#sel-btn{position:fixed;display:none;z-index:9999;padding:4px 12px;font-size:11px;font-weight:700;border-radius:12px;border:none;cursor:pointer;background:var(--accent);color:#fff;box-shadow:0 2px 10px rgba(0,0,0,.25);pointer-events:auto;user-select:none;-webkit-user-select:none;animation:srIn .12s ease}
+@keyframes srIn{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:translateY(0)}}
+.qt-bar{display:none;align-items:center;gap:6px;padding:5px 14px;background:var(--bg2);border-bottom:1px solid var(--border);margin:-10px -14px 10px;flex-shrink:0}
+.qt-bar.on{display:flex}
+.qt-accent{width:3px;min-height:20px;border-radius:2px;background:var(--accent);align-self:stretch;flex-shrink:0}
+.qt-txt{flex:1;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;color:var(--text);font-size:11px}
+.qt-x{background:none;border:none;cursor:pointer;font-size:16px;color:var(--text3);padding:0 2px;line-height:1;flex-shrink:0}
+.qt-x:hover{color:var(--danger)}
+.qt-msg{background:rgba(0,0,0,.1);border-left:3px solid rgba(255,255,255,.6);border-radius:0 4px 4px 0;padding:4px 8px;margin-bottom:5px;font-size:10.5px;color:inherit;line-height:1.4;white-space:pre-wrap;word-break:break-word;max-height:52px;overflow:hidden}
+</style>
+</head>
+<body>
+<div class="notif" id="notif"></div>
+<button id="sel-btn" title="Quote reply">↩ Reply</button>
+
+<!-- WELCOME -->
+<div class="welcome" id="welcome">
+  <div class="wbox">
+    <div class="wlogo">
+      <div class="wlogo-text">Forge<span>AI</span></div>
+      <div class="wtagline">Choose your mode to get started</div>
+    </div>
+    <div class="wcards">
+      <div class="wcard" id="wc-pro" onclick="enterMode('pro')">
+        <div class="wcard-badge g">For Teams</div>
+        <div class="wcard-icon">⚙️</div>
+        <div class="wcard-title">Pro Mode</div>
+        <div class="wcard-sub">Developers, IT companies, Banking and Hospital teams. Full developer workspace.</div>
+        <div class="wcard-feats">
+          <div class="wcard-feat"><span>✓</span> Code + GitHub + Deploy</div>
+          <div class="wcard-feat"><span>✓</span> AI Testing (10K users)</div>
+          <div class="wcard-feat"><span>✓</span> API Studio + DB Manager</div>
+          <div class="wcard-feat"><span>✓</span> Private cloud — data safe</div>
+          <div class="wcard-feat"><span>✓</span> Banking / Hospital modules</div>
+        </div>
+        <button class="wcard-btn pro">Enter Pro Mode →</button>
+      </div>
+      <div class="wcard" id="wc-simple" onclick="enterMode('simple')">
+        <div class="wcard-badge b">For Everyone</div>
+        <div class="wcard-icon">👤</div>
+        <div class="wcard-title">Simple Mode</div>
+        <div class="wcard-sub">Students, business owners, families. Ask in Tamil — everything ready!</div>
+        <div class="wcard-feats">
+          <div class="wcard-feat"><span>✓</span> Student AI — Tamil summary</div>
+          <div class="wcard-feat"><span>✓</span> Finance + Shopping helper</div>
+          <div class="wcard-feat"><span>✓</span> Travel + Health assistant</div>
+          <div class="wcard-feat"><span>✓</span> Govt services guide</div>
+          <div class="wcard-feat"><span>✓</span> Business invoice tools</div>
+        </div>
+        <button class="wcard-btn simple">Enter Simple Mode →</button>
+      </div>
+    </div>
+    <div class="wfooter">🔒 100% Private — Your data stays on your device. No tracking. No ads.</div>
+  </div>
+</div>
+
+<!-- APP -->
+<div class="app" id="app">
+  <div class="sidebar">
+    <div class="logo-area">
+      <div class="logo">Forge<span>AI</span></div>
+      <div class="logo-sub">Private Platform</div>
+    </div>
+    <div class="mode-bar">
+      <button class="mbar-btn active" id="pro-btn" onclick="switchMode('pro')">⚙ Pro</button>
+      <button class="mbar-btn" id="simple-btn" onclick="switchMode('simple')">👤 Simple</button>
+    </div>
+    <div class="nav-scroll">
+    <button class="ch-new-btn" onclick="chNewChat()">+ New Chat</button>
+    <div class="ai-group open" id="recent-group">
+      <div class="ai-group-hd" onclick="toggleAiTools(this.parentElement)">Recent<span class="ai-group-arr">▾</span></div>
+      <div class="ai-group-body">
+        <div id="ch-list" class="ch-list"></div>
+      </div>
+    </div>
+    <div id="pro-nav">
+      <div class="nav-sec">Developer</div>
+      <div class="ai-group open" id="ai-tools-pro">
+        <div class="ai-group-hd" onclick="toggleAiTools(this.parentElement)"><span class="ni-icon">🤖</span>AI Tools<span class="ai-group-arr">▾</span></div>
+        <div class="ai-group-body">
+          <div class="ni ni-sub active" onclick="go('chat',this)"><span class="ni-icon">💬</span>Chat</div>
+          <div class="ni ni-sub" onclick="go('search',this)"><span class="ni-icon">🔍</span>Search</div>
+          <div class="ni ni-sub" onclick="go('oneprompt',this)"><span class="ni-icon">⚡</span>One Prompt<span class="nbadge r">New</span></div>
+        </div>
+      </div>
+      <div class="ni" onclick="go('deploy',this)"><span class="ni-icon">🚀</span>Deploy<span class="nbadge g">Live</span></div>
+      <div class="ni" onclick="go('test',this)"><span class="ni-icon">🧪</span>Testing<span class="nbadge r">2</span></div>
+      <div class="ni" onclick="go('memory',this)"><span class="ni-icon">🧠</span>Memory</div>
+      <div class="ni" onclick="go('api',this)"><span class="ni-icon">⚡</span>API Studio</div>
+      <div class="ni" onclick="go('database',this)"><span class="ni-icon">🗄</span>Database</div>
+      <div class="ni" onclick="go('monitor',this)"><span class="ni-icon">📊</span>Monitor<span class="nbadge a">3</span></div>
+      <div class="ni" onclick="go('tamil',this)"><span class="ni-icon">🌟</span>Tamil AI<span class="nbadge r">New</span></div>
+      <div class="ni" onclick="go('whatsapp',this)"><span class="ni-icon">💬</span>WhatsApp<span class="nbadge r">New</span></div>
+      <div class="ni" onclick="go('privacy',this)"><span class="ni-icon">🛡</span>Privacy<span class="nbadge g">99.9%</span></div>
+      <div class="nav-sec">Integrations</div>
+      <div class="ni"><span class="ni-icon">🐙</span>GitHub<span class="nbadge g">✓</span></div>
+      <div class="ni"><span class="ni-icon">▲</span>Vercel<span class="nbadge g">✓</span></div>
+      <div class="ni"><span class="ni-icon">🚂</span>Railway<span class="nbadge g">✓</span></div>
+      <div class="ni"><span class="ni-icon">🐳</span>Docker<span class="nbadge g">✓</span></div>
+      <div class="ni"><span class="ni-icon">💳</span>Razorpay<span class="nbadge g">✓</span></div>
+      <div class="ai-group open" id="proj-group">
+        <div class="ai-group-hd" onclick="toggleAiTools(this.parentElement)">📁 Projects<span class="ai-group-arr">▾</span></div>
+        <div class="ai-group-body">
+          <button class="proj-new-btn" onclick="prjNew()">+ New Project</button>
+          <div id="proj-list"></div>
+        </div>
+      </div>
+    </div>
+    <div id="simple-nav" style="display:none">
+      <div class="nav-sec">For You</div>
+      <div class="ai-group open" id="ai-tools-simple">
+        <div class="ai-group-hd" onclick="toggleAiTools(this.parentElement)"><span class="ni-icon">🤖</span>AI Tools<span class="ai-group-arr">▾</span></div>
+        <div class="ai-group-body">
+          <div class="ni ni-sub active" onclick="go('chat',this)"><span class="ni-icon">💬</span>Chat</div>
+          <div class="ni ni-sub" onclick="go('search',this)"><span class="ni-icon">🔍</span>Search</div>
+        </div>
+      </div>
+      <div class="ai-group open" id="my-tools-simple">
+        <div class="ai-group-hd" onclick="toggleAiTools(this.parentElement)"><span class="ni-icon">🛠</span>My Tools<span class="ai-group-arr">▾</span></div>
+        <div class="ai-group-body">
+          <div class="ni ni-sub" onclick="go('student',this)"><span class="ni-icon">📚</span>Student</div>
+          <div class="ni ni-sub" onclick="go('finance',this)"><span class="ni-icon">💰</span>Finance</div>
+          <div class="ni ni-sub" onclick="go('shop',this)"><span class="ni-icon">🛒</span>Shopping</div>
+          <div class="ni ni-sub" onclick="go('travel',this)"><span class="ni-icon">✈️</span>Travel</div>
+          <div class="ni ni-sub" onclick="go('health',this)"><span class="ni-icon">🏥</span>Health</div>
+          <div class="ni ni-sub" onclick="go('govt',this)"><span class="ni-icon">🏛</span>Govt Help</div>
+          <div class="ni ni-sub" onclick="go('business',this)"><span class="ni-icon">💼</span>Business</div>
+        </div>
+      </div>
+      <div class="ni" onclick="go('tamil',this)"><span class="ni-icon">🌟</span>Tamil AI<span class="nbadge r">New</span></div>
+      <div class="ni" onclick="go('whatsapp',this)"><span class="ni-icon">💬</span>WhatsApp<span class="nbadge r">New</span></div>
+      <div class="ni" onclick="go('privacy',this)"><span class="ni-icon">🛡</span>Privacy</div>
+    </div>
+    </div>
+    <div class="sb-bot">
+      <div class="urow">
+        <div class="uav">VK</div>
+        <div><div class="uname">Vignesh K</div><div class="uplan" id="plan-lbl">Enterprise</div></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="main">
+    <div class="topbar">
+      <span class="tb-title" id="tb-title">AI Chat</span>
+      <span class="tb-badge" id="tb-badge">Private</span>
+      <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:11px;user-select:none" title="Enterprise mode — production-grade code">
+        <span id="ent-label" style="font-weight:600;color:var(--text2)">⚡ Enterprise</span>
+        <span id="ent-toggle" onclick="toggleEnterprise()" style="display:inline-flex;width:32px;height:18px;border-radius:9px;background:var(--border2);align-items:center;padding:2px;transition:background .2s">
+          <span id="ent-knob" style="width:14px;height:14px;border-radius:50%;background:white;transition:transform .2s;display:block;box-shadow:0 1px 3px rgba(0,0,0,.25)"></span>
+        </span>
+      </label>
+      <button class="ib" onclick="notify('Settings coming soon!')">⚙</button>
+      <button class="ib" onclick="notify('No new notifications')">🔔</button>
+    </div>
+    <div id="panels-wrap">
+
+    <!-- CHAT -->
+    <div class="panel active" id="panel-chat">
+      <div style="display:flex;align-items:center;justify-content:flex-end;padding:5px 12px 4px;border-bottom:1px solid var(--border);flex-shrink:0"><button class="ib" onclick="clearChat()" title="Clear chat">🗑</button></div>
+      <div class="msgs" id="chat-msgs">
+        <div class="msg"><div class="mav ai">F</div><div><div class="bub" id="welcome-bub">Welcome to Forge AI! I can help you code, deploy, test, search, and more. Your data stays private on your server. What shall we build today?</div></div></div>
+      </div>
+      <div class="pills" id="chat-pills">
+        <div class="pill" onclick="ask(this.dataset.q)" data-q="Create Next.js project and push to GitHub">🚀 Create project</div>
+        <div class="pill" onclick="ask(this.dataset.q)" data-q="Run full test suite in background">🧪 Run tests</div>
+        <div class="pill" onclick="ask(this.dataset.q)" data-q="Deploy to Vercel now">⚡ Deploy</div>
+        <div class="pill" onclick="ask(this.dataset.q)" data-q="Run security vulnerability scan">🔒 Security</div>
+        <div class="pill" onclick="ask(this.dataset.q)" data-q="Generate API documentation">📄 Docs</div>
+      </div>
+      <div class="cin-area">
+        <div class="qt-bar" id="qt-bar">
+          <div class="qt-accent"></div>
+          <span class="qt-txt" id="qt-txt"></span>
+          <button class="qt-x" onclick="qCancel()" title="Cancel quote">×</button>
+        </div>
+        <div class="cin-row">
+          <textarea class="cin" id="chat-in" placeholder="Type in Tamil or English..." rows="1" onkeydown="ck(event)" oninput="rsz(this)"></textarea>
+          <button class="sbtn" onclick="send()">➤</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- SEARCH -->
+    <div class="panel" id="panel-search">
+      <div class="scroll">
+        <div class="sbar"><span>🔍</span><input type="text" id="search-in" placeholder="Search anything — private, no tracking..." onkeydown="if(event.key==='Enter')runSearch()" style="flex:1"/><button onclick="runSearch()" style="padding:4px 12px;font-size:12px;background:var(--accent);color:white;border:none;border-radius:var(--r);cursor:pointer;font-weight:700;flex-shrink:0;font-family:inherit">Search</button></div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap">
+          <div class="pill active" style="background:var(--accent);color:white;border-color:var(--accent)">All</div>
+          <div class="pill" onclick="notify('Filter: Web')">Web</div>
+          <div class="pill" onclick="notify('Filter: News')">News</div>
+          <div class="pill" onclick="notify('Filter: Docs')">Docs</div>
+          <div class="pill" onclick="notify('Filter: Tamil')">Tamil</div>
+          <div class="pill" onclick="notify('Filter: My Files')">My Files</div>
+        </div>
+        <div id="search-results-area"></div>
+      </div>
+    </div>
+
+    <!-- DEPLOY -->
+    <div class="panel" id="panel-deploy">
+      <div class="scroll">
+        <div class="card"><div class="card-hd"><div class="sdot g"></div><div class="card-title">my-ecommerce-app — Production</div><span class="nbadge g">Live</span></div><div class="card-bd"><div class="row"><span class="rl">🌐 URL</span><span class="rv ok lnk" onclick="notify('Opening app...')">my-app.vercel.app</span></div><div class="row"><span class="rl">🌿 Commit</span><span class="rv">main @ a3f9c12</span></div><div class="row"><span class="rl">⏱ Deployed</span><span class="rv">3 minutes ago</span></div><div class="row"><span class="rl">📡 Uptime</span><span class="rv ok">99.9%</span></div><div class="row"><span class="rl">👥 Users</span><span class="rv">1,247 now</span></div></div></div>
+        <div class="card"><div class="card-hd"><div class="sdot a"></div><div class="card-title">api-service — Building</div><span class="nbadge a">67%</span></div><div class="card-bd"><div class="row"><span class="rl">🚂 Platform</span><span class="rv">Railway</span></div><div class="row"><span class="rl">📦 Step</span><span class="rv warn">Installing dependencies...</span></div><div class="prog-bar"><div class="prog-fill" id="dp" style="width:67%"></div></div></div></div>
+        <div class="card"><div class="card-hd"><div class="sdot r"></div><div class="card-title">admin-panel — Failed</div><span class="nbadge r">Error</span></div><div class="card-bd"><div class="row"><span class="rl">❌ Error</span><span class="rv err">Missing ENV: DATABASE_URL</span></div><div class="row"><span class="rl">🤖 Fix</span><span class="rv lnk" onclick="ask(this.dataset.q)" data-q="Auto-fix admin-panel deploy error">Apply auto-fix</span></div></div></div>
+        <div class="card"><div class="card-hd"><span>💰</span><div class="card-title">Cloud Cost — November 2024</div></div><div class="card-bd"><div class="row"><span class="rl">▲ Vercel</span><span class="rv">Rs.2,400</span></div><div class="row"><span class="rl">🚂 Railway</span><span class="rv">Rs.1,800</span></div><div class="row"><span class="rl">🗄 Supabase</span><span class="rv">Rs.600</span></div><div class="row"><span class="rl">Total</span><span class="rv warn">Rs.4,800 (+23%)</span></div></div></div>
+      </div>
+    </div>
+
+    <!-- TEST -->
+    <div class="panel" id="panel-test">
+      <div class="scroll">
+        <!-- Server health: populated by tpLoad() on panel open -->
+        <div id="tp-health">
+          <div style="text-align:center;padding:36px 16px;color:var(--text2);font-size:13px">Checking server…</div>
+        </div>
+        <!-- Load test -->
+        <div class="card">
+          <div class="card-hd">
+            <div class="card-title">Load Test</div>
+            <button class="btn prim" id="tp-run-btn" onclick="tpRunLoadTest()" style="padding:4px 10px;font-size:11px">Run (50 req)</button>
+          </div>
+          <div class="card-bd">
+            <div id="tp-lt-result" style="font-size:12px;color:var(--text2);line-height:1.6">No test run yet. Fires 50 concurrent GET /api/health requests and verifies zero server crashes.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- MEMORY -->
+    <div class="panel" id="panel-memory">
+      <div class="scroll">
+        <div class="stat-grid"><div class="stat"><div class="stat-n">15,847</div><div class="stat-l">Memories</div></div><div class="stat"><div class="stat-n">4.2 GB</div><div class="stat-l">Storage</div></div><div class="stat"><div class="stat-n">5 yrs</div><div class="stat-l">History</div></div></div>
+        <div class="sbar"><span>🔍</span><input type="text" placeholder="Search company memory..."/><button class="btn prim" style="padding:4px 9px;font-size:11px" onclick="notify('Searching memory...')">Search</button></div>
+        <div class="mem-item" onclick="ask(this.dataset.q)" data-q="Show HDFC auth module JWT fix details from 2022"><div class="mic" style="background:var(--sbg)">💻</div><div><div class="mt">HDFC auth module — JWT timeout fix (2022)</div><div class="mm">Code snippet • Recalled 2hr ago • Developer: Arun K</div></div></div>
+        <div class="mem-item" onclick="ask(this.dataset.q)" data-q="Show retail sector client proposal template"><div class="mic" style="background:var(--ibg)">📄</div><div><div class="mt">Client proposal template — Retail sector</div><div class="mm">Word doc • Recalled 1d ago • Sales team</div></div></div>
+        <div class="mem-item" onclick="ask(this.dataset.q)" data-q="Show Razorpay API rate limit solution"><div class="mic" style="background:var(--wbg)">💬</div><div><div class="mt">Razorpay API rate limit workaround</div><div class="mm">Chat conversation • Recalled 3d ago • Priya S</div></div></div>
+        <button class="btn ghost" style="width:100%;border-style:dashed;margin-top:4px" onclick="ask(this.dataset.q)" data-q="Add new memory from current project">+ Add memory</button>
+      </div>
+    </div>
+
+    <!-- API -->
+    <div class="panel" id="panel-api">
+      <div class="scroll">
+        <div style="display:flex;gap:7px"><select style="font-size:12px;padding:6px 8px;border:1px solid var(--border);border-radius:var(--r);background:var(--bg2);font-family:inherit"><option>GET</option><option>POST</option><option>PUT</option><option>DELETE</option></select><input type="text" id="api-url" value="https://api.myapp.com/v1/users" style="flex:1;font-size:12px;padding:6px 10px;border:1px solid var(--border);border-radius:var(--r);font-family:monospace;outline:none"/><button class="btn prim" onclick="testApi()">Send</button></div>
+        <div class="card"><div class="card-hd"><div class="card-title">Response</div><span class="nbadge g" id="api-status">200 OK — 124ms</span></div><div class="card-bd"><pre style="font-size:11px;color:var(--text2);font-family:monospace;line-height:1.6;white-space:pre-wrap">{"users":[{"id":1,"name":"Vignesh K","role":"admin"},{"id":2,"name":"Priya S","role":"dev"}],"total":2}</pre></div></div>
+        <div class="card"><div class="card-hd"><div class="card-title">Endpoint performance</div></div><div class="card-bd"><div class="row"><span class="rl">GET /users</span><span class="rv ok">124ms avg</span></div><div class="row"><span class="rl">POST /login</span><span class="rv ok">340ms avg</span></div><div class="row"><span class="rl">GET /reports</span><span class="rv err">4,200ms — needs index!</span></div><div class="row"><span class="rl">DELETE /user</span><span class="rv ok">89ms avg</span></div></div></div>
+      </div>
+    </div>
+
+    <!-- DATABASE -->
+    <div class="panel" id="panel-database">
+      <div class="scroll">
+        <div style="display:flex;gap:7px"><select style="font-size:12px;padding:6px 8px;border:1px solid var(--border);border-radius:var(--r);background:var(--bg2);font-family:inherit"><option>users</option><option>orders</option><option>products</option><option>payments</option></select><input type="text" value="SELECT * FROM users LIMIT 10" style="flex:1;font-size:12px;padding:6px 10px;border:1px solid var(--border);border-radius:var(--r);font-family:monospace;outline:none"/><button class="btn prim" onclick="notify('Query running...')">Run</button></div>
+        <div class="stat-grid"><div class="stat"><div class="stat-n">48,291</div><div class="stat-l">Users</div></div><div class="stat"><div class="stat-n">1.2M</div><div class="stat-l">Rows</div></div><div class="stat"><div class="stat-n">2.8 GB</div><div class="stat-l">DB Size</div></div></div>
+        <div class="card"><div class="card-hd"><div class="card-title">Table health</div></div><div class="card-bd"><div class="row"><span class="rl">users</span><span class="rv ok">Healthy — 12ms</span></div><div class="row"><span class="rl">orders</span><span class="rv warn">Slow — 890ms (missing index)</span></div><div class="row"><span class="rl">products</span><span class="rv ok">Healthy — 45ms</span></div><div class="row"><span class="rl">payments</span><span class="rv err">Critical — no index on user_id!</span></div></div></div>
+        <div class="alert-box a"><div class="at a">AI Recommendation</div><div class="atxt a">2 missing indexes found. Adding them will improve query performance by 80-95%.</div><div class="btn-row"><button class="btn prim" onclick="ask(this.dataset.q)" data-q="Auto-add missing database indexes">Add indexes</button></div></div>
+      </div>
+    </div>
+
+    <!-- MONITOR -->
+    <div class="panel" id="panel-monitor">
+      <div class="scroll">
+        <div class="stat-grid"><div class="stat"><div class="stat-n" style="color:var(--success)">99.9%</div><div class="stat-l">Uptime</div></div><div class="stat"><div class="stat-n" style="color:var(--warning)">1,247</div><div class="stat-l">Active users</div></div><div class="stat"><div class="stat-n" style="color:var(--danger)">3</div><div class="stat-l">Errors/hr</div></div></div>
+        <div class="card"><div class="card-hd"><div class="card-title"><span class="ldot"></span>Live error log</div><span class="nbadge r">3 new</span></div><div class="card-bd"><div class="row"><span class="rl" style="flex:1">❌ /api/reports — 500 error</span><span class="rv err">2m ago</span></div><div class="row"><span class="rl" style="flex:1">⚠ /api/login — 4,200ms slow</span><span class="rv warn">8m ago</span></div><div class="row"><span class="rl" style="flex:1">❌ Memory 94% — Dashboard leak</span><span class="rv err">15m ago</span></div></div></div>
+        <div class="alert-box a"><div class="at a">AI Root Cause</div><div class="atxt a">/api/reports slow: Missing index on created_at — full table scan. Fix: CREATE INDEX on reports(user_id, created_at DESC) — 97% faster!</div><div class="btn-row"><button class="btn prim" onclick="ask(this.dataset.q)" data-q="Auto-fix /api/reports slow query">Auto fix</button></div></div>
+      </div>
+    </div>
+
+    <!-- ONE PROMPT DEPLOY -->
+    <div class="panel" id="panel-oneprompt">
+      <div class="dw-steps">
+        <div class="dws active" id="dws1"><div class="dws-num">1</div>Describe</div>
+        <div class="dws-arr">→</div>
+        <div class="dws" id="dws2"><div class="dws-num">2</div>AI Builds</div>
+        <div class="dws-arr">→</div>
+        <div class="dws" id="dws3"><div class="dws-num">3</div>Ready</div>
+        <div class="dws-arr">→</div>
+        <div class="dws" id="dws4"><div class="dws-num">4</div>Download</div>
+      </div>
+      <div class="scroll">
+        <div id="dw-p1">
+          <div style="border:2px dashed var(--border2);border-radius:var(--rlg);padding:14px;text-align:center;margin-bottom:10px">
+            <div style="font-size:28px;margin-bottom:6px">⚡</div>
+            <div style="font-size:14px;font-weight:700;margin-bottom:4px">One Prompt - Full App Live!</div>
+            <div style="font-size:12px;color:var(--text2)">Describe your app idea — AI builds and deploys it!</div>
+          </div>
+          <div style="font-size:10px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">Quick examples:</div>
+          <div class="dw-examples">
+            <div class="dw-ex" onclick="setPrompt('Restaurant booking app with Razorpay payment')"><div class="dw-ex-icon">🍽️</div><div class="dw-ex-text">Restaurant booking with payments</div></div>
+            <div class="dw-ex" onclick="setPrompt('E-commerce app with product catalog and UPI payments')"><div class="dw-ex-icon">🛒</div><div class="dw-ex-text">E-commerce with UPI payments</div></div>
+            <div class="dw-ex" onclick="setPrompt('Hospital appointment booking with doctor profiles')"><div class="dw-ex-icon">🏥</div><div class="dw-ex-text">Hospital appointment system</div></div>
+            <div class="dw-ex" onclick="setPrompt('Employee attendance tracker with QR code')"><div class="dw-ex-icon">👥</div><div class="dw-ex-text">Employee attendance with QR</div></div>
+          </div>
+          <div style="display:flex;gap:7px">
+            <textarea id="dw-in" style="flex:1;border:1.5px solid var(--border2);border-radius:var(--r);padding:9px 11px;font-size:12px;font-family:inherit;height:70px;resize:none;outline:none" placeholder="Describe your app idea..."></textarea>
+            <button class="btn prim" style="align-self:flex-end;white-space:nowrap" onclick="startBuild()">Build and Deploy</button>
+          </div>
+          <div style="margin-top:9px">
+            <div style="font-size:10px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">App name (optional)</div>
+            <input id="dw-name" type="text" placeholder="e.g. citycare-booking" oninput="cleanDwName(this)" style="width:100%;border:1.5px solid var(--border);border-radius:var(--r);padding:7px 10px;font-size:12px;font-family:inherit;outline:none;color:var(--text);background:var(--bg);transition:border .2s">
+            <div id="dw-name-preview" style="font-size:10px;color:var(--text3);margin-top:3px;min-height:14px"></div>
+          </div>
+        </div>
+        <div id="dw-p2" style="display:none">
+          <div class="card">
+            <div class="card-hd"><span id="dw-icon">⚙️</span><div class="card-title" id="dw-title">Building...</div><span class="nbadge a" id="dw-badge">In Progress</span></div>
+            <div class="prog-bar"><div class="prog-fill" id="dw-prog" style="width:0%"></div></div>
+            <div class="dw-log" id="dw-log"></div>
+          </div>
+        </div>
+        <div id="dw-p3" style="display:none"></div>
+      </div>
+    </div>
+
+    <!-- TAMIL AI -->
+    <div class="panel" id="panel-tamil">
+      <div style="padding:13px 14px;background:linear-gradient(135deg,#FF6B35,#E24B4A);flex-shrink:0;display:flex;align-items:center">
+        <div style="flex:1"><div style="font-size:14px;font-weight:700;color:white">Tamil AI Coding Assistant</div>
+        <div style="font-size:11px;color:rgba(255,255,255,.8);margin-top:2px">Tamil-l kaelungka — Code, Deploy, Debug ellam ready!</div></div>
+        <button class="ib" onclick="clearTamil()" title="Clear chat" style="border-color:rgba(255,255,255,.4);color:white">🗑</button>
+      </div>
+      <div class="msgs" id="tamil-msgs">
+        <div class="msg"><div class="mav ai" style="background:#FF6B35">AI</div><div><div class="bub">Vanakkam! I am Tamil AI Coding Assistant. Ask me anything in Tamil or English — I will write code, fix bugs, and deploy apps. World's first Tamil coding AI!</div></div></div>
+      </div>
+      <div class="pills" style="padding:0 14px 6px">
+        <div class="pill" style="border-color:#FF6B35;color:#FF6B35" onclick="tamilAsk('Login page code write pannunga')">Login page</div>
+        <div class="pill" style="border-color:#FF6B35;color:#FF6B35" onclick="tamilAsk('Bug fix pannunga')">Bug fix</div>
+        <div class="pill" style="border-color:#FF6B35;color:#FF6B35" onclick="tamilAsk('API endpoint create pannunga')">API create</div>
+        <div class="pill" style="border-color:#FF6B35;color:#FF6B35" onclick="tamilAsk('Deploy pannunga Vercel-l')">Deploy</div>
+      </div>
+      <div class="cin-area">
+        <div class="cin-row">
+          <textarea class="cin" id="tamil-in" style="border-color:var(--border2)" placeholder="Tamil or English-l kaelungka..." rows="1" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendTamil()}"></textarea>
+          <button class="sbtn" style="background:#FF6B35" onclick="sendTamil()">➤</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- WHATSAPP -->
+    <div class="panel" id="panel-whatsapp">
+      <div class="wa-hd"><div class="wa-hd-av">💬</div><div><div class="wa-hd-title">AI Dev Assistant</div><div class="wa-hd-status">Online — Ready to code!</div></div></div>
+      <div class="wa-body" id="wa-msgs">
+        <div class="wa-msg in"><div class="wa-bub">Vanakkam! I am your AI Dev Assistant on WhatsApp. Code, deploy, fix bugs — all from here! Try the quick commands below.</div><div class="wa-time">10:30 AM</div></div>
+        <div class="wa-msg in"><div class="wa-bub">Quick commands:<br>/build — Build new app<br>/deploy — Deploy to Vercel<br>/fix — Fix a bug<br>/status — Check app status<br>/test — Run tests<br>/cost — Show cloud costs</div><div class="wa-time">10:30 AM</div></div>
+      </div>
+      <div class="wa-cmds">
+        <div class="wa-cmd-title">Quick Commands</div>
+        <div class="wa-cmd-grid">
+          <button class="wa-cmd" onclick="sendWA('/build restaurant app with payments')">Build app</button>
+          <button class="wa-cmd" onclick="sendWA('/deploy my-app to production')">Deploy</button>
+          <button class="wa-cmd" onclick="sendWA('/fix login bug in my app')">Fix bug</button>
+          <button class="wa-cmd" onclick="sendWA('/status check all my apps')">Status</button>
+          <button class="wa-cmd" onclick="sendWA('/test run full suite')">Run tests</button>
+          <button class="wa-cmd" onclick="sendWA('/cost show monthly costs')">Cloud costs</button>
+        </div>
+      </div>
+      <div class="wa-in-area"><input class="wa-in" id="wa-in" placeholder="Message..." onkeydown="if(event.key==='Enter')sendWA()"/><button class="wa-send" onclick="sendWA()">➤</button></div>
+    </div>
+
+    <!-- PRIVACY -->
+    <div class="panel" id="panel-privacy">
+      <div class="scroll">
+        <div class="prv-hero"><div style="font-size:40px">🛡️</div><div class="prv-score" id="prv-score">99.9%</div><div style="font-size:11px;color:var(--success);font-weight:700;margin-bottom:5px">PRIVACY SCORE — EXCELLENT</div><div style="font-size:14px;font-weight:700;margin-bottom:4px">Your data is 100% yours</div><div style="font-size:12px;color:var(--text2)">Zero data sent to our server. AES-256 encrypted on your device.</div></div>
+        <div class="card"><div class="card-hd"><span class="ldot"></span><div class="card-title">Live Network Monitor</div></div><div class="card-bd">
+          <div class="pnet"><span class="pnet-l">Data sent to our server</span><span class="pnet-v safe">0 KB</span></div>
+          <div class="pnet"><span class="pnet-l">User data in API calls</span><span class="pnet-v safe">ZERO</span></div>
+          <div class="pnet"><span class="pnet-l">AI questions sent (no identity)</span><span class="pnet-v warn" id="api-cnt">47 calls</span></div>
+          <div class="pnet"><span class="pnet-l">Encryption status</span><span class="pnet-v safe">AES-256 Active</span></div>
+          <div class="pnet"><span class="pnet-l">Google Backup</span><span class="pnet-v safe">Blocked</span></div>
+        </div></div>
+        <div class="card"><div class="card-hd"><div class="card-title">Privacy Checklist</div></div><div class="card-bd">
+          <div class="pchk"><div class="pchk-icon pass">✓</div><div style="flex:1"><div class="pchk-label">Local Encrypted Storage</div><div class="pchk-sub">AES-256 — only your PIN can open</div></div><span class="pbadge pass">Active</span></div>
+          <div class="pchk"><div class="pchk-icon pass">✓</div><div style="flex:1"><div class="pchk-label">Google Backup Blocked</div><div class="pchk-sub">allowBackup=false — no Google servers</div></div><span class="pbadge pass">Blocked</span></div>
+          <div class="pchk"><div class="pchk-icon pass">✓</div><div style="flex:1"><div class="pchk-label">Biometric Lock</div><div class="pchk-sub">Fingerprint / Face ID only</div></div><span class="pbadge pass">Active</span></div>
+          <div class="pchk"><div class="pchk-icon pass">✓</div><div style="flex:1"><div class="pchk-label">Screenshot Protection</div><div class="pchk-sub">Sensitive screens cannot be captured</div></div><span class="pbadge pass">Active</span></div>
+          <div class="pchk"><div class="pchk-icon warn">!</div><div style="flex:1"><div class="pchk-label">Offline AI Mode</div><div class="pchk-sub">Local AI = Zero internet needed (Premium)</div></div><span class="pbadge warn">Upgrade</span></div>
+        </div></div>
+        <div class="stat-grid" style="margin-bottom:10px"><div class="stat"><div class="stat-n">1,247</div><div class="stat-l">Chats (device)</div></div><div class="stat"><div class="stat-n">892</div><div class="stat-l">Memories</div></div><div class="stat"><div class="stat-n">0 KB</div><div class="stat-l">Sent to cloud</div></div></div>
+        <button class="prv-btn exp" onclick="notify('Preparing ZIP export...')">📥 Export All My Data</button>
+        <button class="prv-btn aud" onclick="runAudit()">🔍 Run Privacy Audit</button>
+        <button class="prv-btn del" onclick="notify('Are you sure? This cannot be undone!')">🗑 Delete Everything</button>
+      </div>
+    </div>
+
+    <!-- STUDENT -->
+    <div class="panel" id="panel-student">
+      <div class="scroll">
+        <div class="aisum"><div class="aisum-l">Student Assistant — Tamil AI</div><div class="aisum-t">Upload PDF, get Tamil summary. Ask any doubt — Math, Science, History. Exam prep with quiz, notes, study plan all ready!</div></div>
+        <div class="feat-grid">
+          <div class="feat-card" onclick="ask(this.dataset.q)" data-q="Summarize this chapter in Tamil with key points"><div class="feat-icon" style="background:var(--ibg)">📖</div><div class="feat-title">Chapter summary</div><div class="feat-desc">PDF upload — Tamil summary instantly</div></div>
+          <div class="feat-card" onclick="ask(this.dataset.q)" data-q="Generate 10 practice questions on this topic"><div class="feat-icon" style="background:var(--sbg)">❓</div><div class="feat-title">Quiz generator</div><div class="feat-desc">Any topic — MCQ + short answer</div></div>
+          <div class="feat-card" onclick="ask(this.dataset.q)" data-q="Help me write my assignment with research"><div class="feat-icon" style="background:var(--wbg)">✏</div><div class="feat-title">Assignment help</div><div class="feat-desc">Research + draft + grammar check</div></div>
+          <div class="feat-card" onclick="ask(this.dataset.q)" data-q="Solve this math problem step by step"><div class="feat-icon" style="background:var(--dbg)">🔢</div><div class="feat-title">Math solver</div><div class="feat-desc">Step-by-step Tamil explanation</div></div>
+          <div class="feat-card" onclick="ask(this.dataset.q)" data-q="Translate this English text to Tamil"><div class="feat-icon" style="background:var(--sbg)">🌐</div><div class="feat-title">Translate</div><div class="feat-desc">English to Tamil — accurate, fast</div></div>
+          <div class="feat-card" onclick="ask(this.dataset.q)" data-q="Create a 30-day study plan for my exam"><div class="feat-icon" style="background:var(--ibg)">📅</div><div class="feat-title">Study planner</div><div class="feat-desc">Exam schedule + daily study plan</div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- FINANCE -->
+    <div class="panel" id="panel-finance">
+      <div class="scroll">
+        <div class="fin-grid"><div class="fin-card"><div class="fin-l">Monthly income</div><div class="fin-n">Rs.52,000</div><div class="fin-t dn">Stable</div></div><div class="fin-card"><div class="fin-l">Total expenses</div><div class="fin-n">Rs.38,400</div><div class="fin-t up">+12% vs last month</div></div><div class="fin-card"><div class="fin-l">Savings</div><div class="fin-n">Rs.13,600</div><div class="fin-t dn">26% rate</div></div><div class="fin-card"><div class="fin-l">SIP Investment</div><div class="fin-n">Rs.8,000</div><div class="fin-t dn">Active</div></div></div>
+        <div class="card"><div class="card-hd"><div class="card-title">Spending breakdown</div></div><div class="card-bd"><div class="row"><span class="rl">Rent</span><span class="rv">Rs.12,000</span></div><div class="row"><span class="rl">Groceries</span><span class="rv">Rs.6,400</span></div><div class="row"><span class="rl">Transport</span><span class="rv warn">Rs.4,800 (High!)</span></div><div class="row"><span class="rl">Subscriptions</span><span class="rv warn">Rs.3,200 (3 unused!)</span></div></div></div>
+        <div class="alert-box g"><div class="at g">AI Savings Suggestion</div><div class="atxt g">Transport: Carpool/metro = save Rs.1,800/month. Cancel 3 unused subscriptions = Rs.1,200/month. Total potential savings: Rs.3,000/month!</div><div class="btn-row"><button class="btn prim" onclick="ask(this.dataset.q)" data-q="Create budget plan to save Rs.3000 more per month">Create budget plan</button></div></div>
+      </div>
+    </div>
+
+    <!-- SHOPPING -->
+    <div class="panel" id="panel-shop">
+      <div class="scroll">
+        <div class="sbar"><span>🛒</span><input type="text" placeholder="Search any product — best price comparison..." value="iPhone 15 128GB"/><button class="btn prim" style="padding:4px 9px;font-size:11px" onclick="notify('Comparing prices...')">Compare</button></div>
+        <div class="aisum"><div class="aisum-l">Best Deal Today</div><div class="aisum-t">iPhone 15 128GB — Flipkart: Rs.69,999 (lowest). HDFC card 5% cashback = effective Rs.66,499. 3-month low price! Buy now or wait for Dec sale (likely Rs.65,000).</div></div>
+        <div class="card"><div class="card-hd"><div class="card-title">Price comparison</div></div><div class="card-bd"><div class="row"><span class="rl">Flipkart</span><span class="rv ok">Rs.69,999 — Best!</span></div><div class="row"><span class="rl">Amazon</span><span class="rv">Rs.71,490</span></div><div class="row"><span class="rl">Croma</span><span class="rv">Rs.72,000</span></div><div class="row"><span class="rl">Price alert</span><span class="rv lnk" onclick="notify('Price alert set for Rs.65,000!')">Set Rs.65K alert</span></div></div></div>
+        <div class="card"><div class="card-hd"><div class="card-title">EMI options</div></div><div class="card-bd"><div class="row"><span class="rl">6 months (0% interest)</span><span class="rv ok">Rs.11,667/month</span></div><div class="row"><span class="rl">12 months (12% p.a.)</span><span class="rv warn">Rs.6,180/month</span></div><div class="row"><span class="rl">24 months (18% p.a.)</span><span class="rv err">Rs.3,340/month — costly!</span></div></div></div>
+      </div>
+    </div>
+
+    <!-- TRAVEL -->
+    <div class="panel" id="panel-travel">
+      <div class="scroll">
+        <div class="card"><div class="card-hd"><span>✈</span><div class="card-title">Chennai to Ooty — 3 days, Rs.5,000 budget</div></div><div class="card-bd"><div class="row"><span class="rl">Day 1 travel</span><span class="rv">SETC Bus Rs.350 + Toy train Rs.45</span></div><div class="row"><span class="rl">Hotel (2 nights)</span><span class="rv">Rs.800/night x 2 = Rs.1,600</span></div><div class="row"><span class="rl">Food (3 days)</span><span class="rv">Rs.400/day x 3 = Rs.1,200</span></div><div class="row"><span class="rl">Total</span><span class="rv ok">Rs.3,595 — Rs.1,405 under budget!</span></div></div></div>
+        <div class="card"><div class="card-hd"><div class="card-title">Must-visit places</div></div><div class="card-bd"><div class="row"><span class="rl">Botanical Garden</span><span class="rv">Day 1 morning</span></div><div class="row"><span class="rl">Doddabetta Peak</span><span class="rv">Day 1 evening</span></div><div class="row"><span class="rl">Rose Garden</span><span class="rv">Day 2</span></div><div class="row"><span class="rl">Mudumalai Forest</span><span class="rv">Day 3</span></div></div></div>
+        <div class="alert-box a"><div class="at a">Weather Alert</div><div class="atxt a">Rain expected this weekend. Best time: Jan-March. Pack warm clothes — 8°C nights! Book toy train 2 weeks in advance on IRCTC.</div></div>
+        <button class="btn prim" style="width:100%" onclick="ask(this.dataset.q)" data-q="Plan 5-day Coorg trip from Chennai budget Rs.8000">Plan another trip</button>
+      </div>
+    </div>
+
+    <!-- HEALTH -->
+    <div class="panel" id="panel-health">
+      <div class="scroll">
+        <div class="alert-box r"><div class="at r">Medical Disclaimer</div><div class="atxt r">This AI provides general information only — not medical advice. Always consult a qualified doctor for health decisions.</div></div>
+        <div class="feat-grid">
+          <div class="feat-card" onclick="ask(this.dataset.q)" data-q="Read this prescription and explain medicines in Tamil"><div class="feat-icon" style="background:var(--dbg)">💊</div><div class="feat-title">Prescription reader</div><div class="feat-desc">Photo upload — Tamil explanation</div></div>
+          <div class="feat-card" onclick="ask(this.dataset.q)" data-q="Set up daily medicine reminders for me"><div class="feat-icon" style="background:var(--sbg)">⏰</div><div class="feat-title">Medicine reminder</div><div class="feat-desc">Dosage timing — WhatsApp alert</div></div>
+          <div class="feat-card" onclick="ask(this.dataset.q)" data-q="Check if these 2 medicines are safe to take together"><div class="feat-icon" style="background:var(--wbg)">⚡</div><div class="feat-title">Drug interaction</div><div class="feat-desc">Safe combination check</div></div>
+          <div class="feat-card" onclick="ask(this.dataset.q)" data-q="Find nearest hospital and specialist near me"><div class="feat-icon" style="background:var(--ibg)">📍</div><div class="feat-title">Find specialist</div><div class="feat-desc">Nearest hospital + doctor locate</div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- GOVT -->
+    <div class="panel" id="panel-govt">
+      <div class="scroll">
+        <div class="aisum"><div class="aisum-l">Government Services — Tamil Guide</div><div class="aisum-t">Ask about any government service! Tamil Nadu + Central govt services — step-by-step Tamil guide, documents list, nearest office, online apply link all provided.</div></div>
+        <div class="feat-grid">
+          <div class="feat-card" onclick="ask(this.dataset.q)" data-q="How to change Aadhaar address step by step in Tamil"><div class="feat-icon" style="background:var(--ibg)">🪪</div><div class="feat-title">Aadhaar services</div><div class="feat-desc">Update, correct, link — Tamil guide</div></div>
+          <div class="feat-card" onclick="ask(this.dataset.q)" data-q="How to apply for PAN card, what documents needed"><div class="feat-icon" style="background:var(--wbg)">📜</div><div class="feat-title">PAN card</div><div class="feat-desc">Apply, correct, link with Aadhaar</div></div>
+          <div class="feat-card" onclick="ask(this.dataset.q)" data-q="Tamil Nadu ration card new apply process in Tamil"><div class="feat-icon" style="background:var(--sbg)">🏠</div><div class="feat-title">Ration card</div><div class="feat-desc">New apply, member add — TN guide</div></div>
+          <div class="feat-card" onclick="ask(this.dataset.q)" data-q="How to apply for old age pension, eligibility"><div class="feat-icon" style="background:var(--ibg)">💰</div><div class="feat-title">Pension and benefits</div><div class="feat-desc">Apply, status check, claim</div></div>
+          <div class="feat-card" onclick="ask(this.dataset.q)" data-q="How to apply for birth certificate online"><div class="feat-icon" style="background:var(--dbg)">📋</div><div class="feat-title">Birth certificate</div><div class="feat-desc">Online apply + correction</div></div>
+          <div class="feat-card" onclick="ask(this.dataset.q)" data-q="Driving license apply or renew step by step"><div class="feat-icon" style="background:var(--sbg)">🚗</div><div class="feat-title">Driving license</div><div class="feat-desc">Apply, renew, update address</div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- BUSINESS -->
+    <div class="panel" id="panel-business">
+      <div class="scroll">
+        <div class="stat-grid"><div class="stat"><div class="stat-n">Rs.4.2L</div><div class="stat-l">This month</div></div><div class="stat"><div class="stat-n">23</div><div class="stat-l">Pending invoices</div></div><div class="stat"><div class="stat-n">Rs.87K</div><div class="stat-l">Overdue</div></div></div>
+        <div class="card"><div class="card-hd"><div class="card-title">Recent invoices</div><button class="btn prim" style="padding:3px 9px;font-size:11px" onclick="ask(this.dataset.q)" data-q="Create new invoice for client">+ New</button></div><div class="card-bd"><div class="row"><span class="rl" style="flex:1">INV-2847 — Ramesh Stores</span><span class="rv ok">Paid Rs.28,000</span></div><div class="row"><span class="rl" style="flex:1">INV-2848 — Priya Textiles</span><span class="rv warn">Due Rs.45,000</span></div><div class="row"><span class="rl" style="flex:1">INV-2849 — Kumar Agencies</span><span class="rv err">Overdue Rs.32,000!</span></div></div></div>
+        <div class="alert-box a"><div class="at a">Rs.87,000 Overdue</div><div class="atxt a">2 clients overdue. Send WhatsApp + Email reminders with payment links automatically!</div><div class="btn-row"><button class="btn prim" onclick="ask(this.dataset.q)" data-q="Send payment reminder to overdue clients via WhatsApp">Send reminders</button><button class="btn ghost" onclick="ask(this.dataset.q)" data-q="Generate monthly P&L report">P&L Report</button></div></div>
+      </div>
+    </div>
+
+    <!-- PROJECTS -->
+    <div class="panel" id="panel-projects">
+      <div style="padding:12px 14px;border-bottom:1px solid var(--border);flex-shrink:0;display:flex;align-items:center;gap:8px">
+        <span style="font-size:18px">📁</span>
+        <div id="proj-panel-title" style="font-size:14px;font-weight:700;color:var(--text);flex:1">Projects</div>
+        <button onclick="prjNew()" style="font-size:11px;padding:4px 10px;border:1px solid var(--accent);border-radius:var(--r);background:transparent;color:var(--accent);cursor:pointer;font-weight:600;font-family:inherit">+ New</button>
+      </div>
+      <div class="scroll" id="proj-panel-content" style="flex:1">
+        <div style="padding:28px 14px;text-align:center;color:var(--text3);font-size:12px">Click a project in the sidebar to view its contents.</div>
+      </div>
+    </div>
+
+    <!-- PREVIEW PANEL -->
+    <div id="preview-panel">
+      <div id="pvh">
+        <span style="font-size:12px;font-weight:700;color:var(--text);flex-shrink:0;margin-right:6px">Preview</span>
+        <div class="pv-tabs">
+          <button class="pv-tab active" id="pv-tab-live" onclick="pvTab('live')">▶ Live</button>
+          <button class="pv-tab" id="pv-tab-code" onclick="pvTab('code')">{ } Code</button>
+        </div>
+        <div style="flex:1"></div>
+        <button class="pv-ib" onclick="pvRefresh()" title="Refresh preview">↺</button>
+        <button class="pv-ib" onclick="pvClose()" title="Close preview">✕</button>
+      </div>
+      <div id="pv-live" style="flex:1;display:flex;overflow:hidden">
+        <iframe id="pv-iframe" sandbox="allow-scripts" style="width:100%;height:100%;border:none;background:#fff"></iframe>
+      </div>
+      <div id="pv-code" style="display:none;flex:1;overflow:auto;background:#1e1e1e">
+        <pre id="pv-code-pre" style="margin:0;padding:14px;font-family:monospace;font-size:11px;color:#d4d4d4;white-space:pre-wrap;word-break:break-word;line-height:1.6"></pre>
+      </div>
+    </div>
+    </div><!-- /panels-wrap -->
+
+  </div>
+</div>
+<div id="proj-picker" class="proj-picker"></div>
+
+<script>
+var panels=['chat','search','deploy','test','memory','api','database','monitor','oneprompt','tamil','whatsapp','privacy','student','finance','shop','travel','health','govt','business','projects'];
+var titles={chat:'AI Chat',search:'Private Search',deploy:'Deploy Manager',test:'AI Testing',memory:'Company Memory',api:'API Studio',database:'Database Manager',monitor:'App Monitor',oneprompt:'One Prompt - Full App',tamil:'Tamil AI Coding',whatsapp:'WhatsApp Dev',privacy:'Privacy & Security',student:'Student Assistant',finance:'Personal Finance',shop:'Smart Shopping',travel:'Travel Planner',health:'Health Assistant',govt:'Govt Services',business:'Business Tools',projects:'Projects'};
+var badges={chat:'Private',search:'No tracking',deploy:'3 apps',test:'Live checks',memory:'15,847 items',api:'5 endpoints',database:'1.2M rows',monitor:'3 alerts',oneprompt:'New Feature!',tamil:'World First!',whatsapp:'India First!',privacy:'99.9% secure',student:'Tamil AI',finance:'Secure',shop:'No ads',travel:'Best deals',health:'Private',govt:'Tamil guide',business:'3 pending',projects:'My Work'};
+
+function enterMode(mode){
+  var ws=document.getElementById('welcome');
+  document.getElementById('wc-'+mode).style.borderColor='var(--accent)';
+  setTimeout(function(){
+    ws.style.opacity='0';
+    ws.style.transition='opacity .4s';
+    setTimeout(function(){
+      ws.style.display='none';
+      document.getElementById('app').classList.add('show');
+      switchMode(mode);
+    },400);
+  },200);
+}
+
+function toggleAiTools(g){g.classList.toggle('open');}
+function go(name,el){
+  if(name!=='chat')pvClose();
+  panels.forEach(function(p){
+    var x=document.getElementById('panel-'+p);
+    if(x) x.classList.remove('active');
+  });
+  document.querySelectorAll('.ni').forEach(function(n){n.classList.remove('active')});
+  var pan=document.getElementById('panel-'+name);
+  if(pan) pan.classList.add('active');
+  if(el) el.classList.add('active');
+  // Auto-expand the relevant group when navigating to a grouped sub-panel
+  if(name==='chat'||name==='search'||name==='oneprompt'){
+    document.querySelectorAll('.ai-group').forEach(function(g){g.classList.add('open');});
+  }
+  if(name==='student'||name==='finance'||name==='shop'||name==='travel'||name==='health'||name==='govt'||name==='business'){
+    var mt=document.getElementById('my-tools-simple');if(mt)mt.classList.add('open');
+  }
+  var m=titles[name]||name;
+  var b=badges[name]||'Active';
+  document.getElementById('tb-title').textContent=m;
+  document.getElementById('tb-badge').textContent=b;
+  if(name==='test') tpLoad();
+}
+
+function switchMode(mode){
+  pvClose(); pvFiles={html:'',css:'',js:''};
+  var isPro=mode==='pro';
+  document.getElementById('pro-btn').classList.toggle('active',isPro);
+  document.getElementById('simple-btn').classList.toggle('active',!isPro);
+  document.getElementById('pro-nav').style.display=isPro?'block':'none';
+  document.getElementById('simple-nav').style.display=isPro?'none':'block';
+  document.getElementById('plan-lbl').textContent=isPro?'Enterprise Plan':'Free Plan';
+  document.querySelectorAll('.ni').forEach(function(n){n.classList.remove('active')});
+  var first=document.querySelector((isPro?'#pro-nav':'#simple-nav')+' .ni');
+  go('chat',first);
+  var wb=document.getElementById('welcome-bub');
+  if(wb)wb.textContent=isPro?'Welcome to Forge AI! I can help you code, deploy, test, search, and more. Your data stays private on your server. What shall we build today?':'Welcome to Forge AI! How can I help you?';
+  var chatIn=document.getElementById('chat-in');
+  if(chatIn)chatIn.placeholder=isPro?'Type in Tamil or English...':'How can I help you? Ask anything...';
+  var pills=document.getElementById('chat-pills');
+  if(isPro){
+  pills.innerHTML=[
+    {t:'Create project',a:'Create Next.js project'},
+    {t:'Run tests',a:'Run background tests'},
+    {t:'Deploy',a:'Deploy to Vercel'},
+    {t:'Security',a:'Run security scan'}
+  ].map(function(x){return '<div class="pill" onclick="ask(this.getAttribute(\'data-a\'))" data-a="'+x.a+'">'+x.t+'</div>';}).join('');
+  } else {
+  pills.innerHTML=[
+    {t:'Study help',a:'Study help Tamil'},
+    {t:'Finance',a:'Finance analysis'},
+    {t:'Shopping',a:'Best price finder'},
+    {t:'Govt help',a:'Govt services help'}
+  ].map(function(x){return '<div class="pill" onclick="ask(this.getAttribute(\'data-a\'))" data-a="'+x.a+'">'+x.t+'</div>';}).join('');
+  }
+}
+
+var proR=['GitHub repo created! Scaffold ready. Deploy to Vercel?','Background test started! WhatsApp alert coming in ~18 min. Safe to close app!','Vercel deploy started! Building 34%. ETA 3 min.','Security scan done! 1 Critical: SQL injection at /api/search. Auto-patch ready?','API docs generated! 12 endpoints. Swagger UI at /api/docs!','Auto-fix applied! Redeploying now.','Cost +23% vs last month. Redis caching saves Rs.1200/month. Apply?','Indexes added! 4200ms to 89ms. 97% faster!'];
+var simpleR=['Chapter summary done! Photosynthesis = plants convert sunlight to energy. CO2+H2O+Light = Glucose+O2. Quiz ready?','Finance done! Transport 23% high. Cancel 3 subscriptions = Rs.3000/month savings!','iPhone 15 best: Flipkart Rs.69,999. HDFC 5% cashback = Rs.66,499 effective. Set price alert?','Aadhaar change: uidai.gov.in, upload rent agreement + utility bill, OTP verify. 90 days processing.','Ooty 3 days: Rs.3,595 total (Rs.1,405 under budget!). Bus+Toy train+Hotel+Food covered!','Math: x2+5x+6=0. Factors (x+2)(x+3)=0. Answer: x=-2 or x=-3','Medicine reminders set! WhatsApp alerts active!','Payment reminders sent via WhatsApp + Email!'];
+var pi=0,si=0;
+var chatHistory=[];
+var tamilHistory=[];
+var enterpriseMode=localStorage.getItem('forgeai_enterprise')==='true';
+function toggleEnterprise(){enterpriseMode=!enterpriseMode;localStorage.setItem('forgeai_enterprise',enterpriseMode);updateEnterpriseUI();}
+function updateEnterpriseUI(){var t=document.getElementById('ent-toggle');var k=document.getElementById('ent-knob');var l=document.getElementById('ent-label');if(!t)return;if(enterpriseMode){t.style.background='#E8A800';k.style.transform='translateX(14px)';l.style.color='#9A6E00';}else{t.style.background='var(--border2)';k.style.transform='translateX(0)';l.style.color='var(--text2)';}}
+function saveChat(){chatHistory=chatHistory.slice(-50);localStorage.setItem('forgeai_chat_history',JSON.stringify(chatHistory));}
+function saveTamilChat(){tamilHistory=tamilHistory.slice(-50);localStorage.setItem('forgeai_tamil_history',JSON.stringify(tamilHistory));}
+function clearChat(){
+  chatHistory=[];localStorage.removeItem('forgeai_chat_history');
+  var cid=chCurId();
+  if(cid){var a=chAll();for(var i=0;i<a.length;i++){if(a[i].id===cid){a[i].messages=[];a[i].title='New Chat';break;}}chStore(a);chDraw();}
+  document.getElementById('chat-msgs').innerHTML=welcomeHTML();
+}
+function clearTamil(){
+  tamilHistory=[];localStorage.removeItem('forgeai_tamil_history');
+  document.getElementById('tamil-msgs').innerHTML='<div class="msg"><div class="mav ai" style="background:#FF6B35">AI</div><div><div class="bub">Vanakkam! I am Tamil AI Coding Assistant. Ask me anything in Tamil or English — I will write code, fix bugs, and deploy apps. World\'s first Tamil coding AI!</div></div></div>';
+}
+// ── Chat history – multi-session ───────────────────────────────────────────
+function chAll(){try{return JSON.parse(localStorage.getItem('forgeai_chats')||'[]');}catch(e){return[];}}
+function chCurId(){return localStorage.getItem('forgeai_active_chat')||'';}
+function chStore(a){try{localStorage.setItem('forgeai_chats',JSON.stringify(a));}catch(e){console.error('[ch] store failed',e);}}
+function chMakeTitle(txt){var s=String(txt||'').trim().split(/\s+/).slice(0,6).join(' ');return s?(s.length>44?s.slice(0,44)+'…':s):'New Chat';}
+function chDraw(){
+  var el=document.getElementById('ch-list');
+  if(!el){console.warn('[chDraw] #ch-list missing');return;}
+  var all=chAll(),cur=chCurId();
+  console.log('[chDraw] sessions='+all.length+' active='+cur);
+  if(!all.length){
+    el.innerHTML='<div style="padding:5px 14px;font-size:11px;color:var(--text3);font-style:italic">No saved chats</div>';
+    return;
+  }
+  var html='';
+  for(var i=0;i<all.length;i++){
+    var s=all[i],isAct=(s.id===cur);
+    var bg=isAct?'background:var(--accent);color:#fff;':'background:#e9e8e4;color:var(--text2);';
+    var tx=String(s.title||'New Chat').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    html+='<div class="ch-item'+(isAct?' active':'')+'" data-id="'+s.id+'" style="display:flex;align-items:center;padding:8px 12px;cursor:pointer;font-size:12px;border-radius:6px;margin:2px 6px;gap:4px;'+bg+'">'
+      +'<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+tx+'</span>'
+      +'<button data-del="'+s.id+'" style="background:none;border:none;cursor:pointer;font-size:16px;padding:0 2px;flex-shrink:0;line-height:1;'+(isAct?'color:rgba(255,255,255,.7)':'color:var(--text3);opacity:0.45')+'" title="Delete">×</button>'
+      +'</div>';
+  }
+  el.innerHTML=html;
+}
+function chSync(){
+  var id=chCurId(),all=chAll(),idx=-1;
+  for(var i=0;i<all.length;i++){if(all[i].id===id){idx=i;break;}}
+  if(idx===-1){
+    id='ch_'+Date.now();
+    all.unshift({id:id,title:'New Chat',messages:[],updatedAt:Date.now()});
+    localStorage.setItem('forgeai_active_chat',id);
+    idx=0;
+  }
+  if(all[idx].title==='New Chat'){
+    for(var j=0;j<chatHistory.length;j++){
+      if(chatHistory[j].role==='user'){all[idx].title=chMakeTitle(chatHistory[j].content);break;}
+    }
+  }
+  all[idx].messages=chatHistory.slice(-50);
+  all[idx].updatedAt=Date.now();
+  chStore(all);
+  console.log('[chSync] id='+id+' title="'+all[idx].title+'" msgs='+chatHistory.length);
+  chDraw();
+}
+function chNewChat(){
+  pvClose(); pvFiles={html:'',css:'',js:''};
+  chatHistory=[];localStorage.removeItem('forgeai_chat_history');
+  localStorage.removeItem('forgeai_active_chat');
+  document.getElementById('chat-msgs').innerHTML=welcomeHTML();
+  chDraw();
+  var ni=document.querySelector((isSimple()?'#simple-nav':'#pro-nav')+' .ni');if(ni)go('chat',ni);
+}
+function chOpen(id){
+  pvClose(); pvFiles={html:'',css:'',js:''};
+  var all=chAll(),sess=null;
+  for(var i=0;i<all.length;i++){if(all[i].id===id){sess=all[i];break;}}
+  if(!sess){console.warn('[chOpen] not found:',id);return;}
+  localStorage.setItem('forgeai_active_chat',id);
+  chatHistory=(Array.isArray(sess.messages)?sess.messages:[]).slice();
+  var cm=document.getElementById('chat-msgs');
+  if(!chatHistory.length){
+    cm.innerHTML=welcomeHTML();
+  }else{
+    cm.innerHTML='';
+    for(var i=0;i<chatHistory.length;i++){
+      var m=chatHistory[i],div=document.createElement('div');
+      if(m.role==='user'){div.className='msg u';div.innerHTML='<div class="mav u">VK</div><div><div class="bub">'+esc(m.content)+'</div>'+uActBar()+'</div>';}
+      else{div.className='msg';div.innerHTML='<div class="mav ai">F</div><div><div class="bub">'+formatMarkdown(m.content)+'</div>'+aiActBar()+'</div>';}
+      cm.appendChild(div);
+    }
+    cm.scrollTop=cm.scrollHeight;
+    scanChatFiles();
+  }
+  chDraw();
+  var ni=document.querySelector((isSimple()?'#simple-nav':'#pro-nav')+' .ni');if(ni)go('chat',ni);
+}
+function chRemove(id){
+  if(!confirm('Delete this chat?'))return;
+  var all=chAll().filter(function(s){return s.id!==id;});
+  chStore(all);
+  if(chCurId()===id){
+    localStorage.removeItem('forgeai_active_chat');chatHistory=[];localStorage.removeItem('forgeai_chat_history');
+    if(all.length){chOpen(all[0].id);}
+    else{document.getElementById('chat-msgs').innerHTML=welcomeHTML();chDraw();}
+  }else{chDraw();}
+}
+function isSimple(){return document.getElementById('simple-btn').classList.contains('active')}
+function welcomeHTML(){var t=isSimple()?'Welcome to Forge AI! How can I help you?':'Welcome to Forge AI! I can help you code, deploy, test, search, and more. Your data stays private on your server. What shall we build today?';return '<div class="msg"><div class="mav ai">F</div><div><div class="bub" id="welcome-bub">'+t+'</div></div></div>';}
+function ask(t){document.getElementById('chat-in').value=t;send();}
+function esc(s){var d=document.createElement('div');d.textContent=String(s||'');return d.innerHTML;}
+function formatMarkdown(text){
+  // 1. Escape HTML first (security — always before adding any markup)
+  var s=String(text||'')
+    .replace(/&/g,'&amp;')
+    .replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;');
+  // 2. Code blocks: ```lang\ncode``` — replace with dark box + copy button
+  var blocks=[];
+  s=s.replace(/```(\w*)\n?([\s\S]*?)```/g,function(m,lang,code){
+    var id='cb'+Math.random().toString(36).slice(2,10);
+    var label=lang?'<div style="font-size:10px;color:#888;padding:6px 12px 2px;font-family:monospace">'+lang+'</div>':'';
+    // Detect previewable: html/css/js lang tags OR structural HTML tags in code
+    var isHtml=(lang&&/^html$/i.test(lang))||/&lt;(!DOCTYPE\b|html\b|head\b|body\b)/i.test(code);
+    var isCss=!!(lang&&/^css$/i.test(lang));
+    var isJs=!!(lang&&/^(javascript|js)$/i.test(lang));
+    var fileKey=isHtml?'html':isCss?'css':isJs?'js':'';
+    if(fileKey)pvStore(fileKey,code.trim());
+    var pvBtn=fileKey?'<button onclick="pvOpen(\''+id+'\',\''+fileKey+'\')" style="position:absolute;top:6px;right:60px;font-size:10px;padding:2px 8px;border-radius:4px;border:1px solid #6366f1;background:rgba(99,102,241,.15);color:#a5b4fc;cursor:pointer;font-family:inherit">▶ Preview</button>':'';
+    var html='<div style="background:#1e1e1e;border-radius:8px;margin:8px 0;overflow:hidden;position:relative">'
+      +label
+      +'<button onclick="copyCode(\''+id+'\')" style="position:absolute;top:6px;right:8px;font-size:10px;padding:2px 8px;border-radius:4px;border:1px solid #555;background:#2d2d2d;color:#aaa;cursor:pointer;font-family:inherit">Copy</button>'
+      +pvBtn
+      +'<pre id="'+id+'" style="margin:0;padding:12px;overflow-x:auto;font-family:monospace;font-size:12px;color:#d4d4d4;white-space:pre">'+code.trim()+'</pre>'
+      +'</div>';
+    blocks.push(html);
+    return '\x00BLK'+(blocks.length-1)+'\x00';
+  });
+  // 3. Inline code: `code` → styled span
+  s=s.replace(/`([^`\n]+)`/g,'<code style="background:#f0f0f0;color:#c7254e;padding:1px 5px;border-radius:3px;font-family:monospace;font-size:11px">$1</code>');
+  // 4. Bold: **text** → <strong>
+  s=s.replace(/\*\*([^*\n]+)\*\*/g,'<strong>$1</strong>');
+  // 5. Line breaks → <br>
+  s=s.replace(/\n/g,'<br>');
+  // 6. Restore code blocks
+  s=s.replace(/\x00BLK(\d+)\x00/g,function(m,i){return blocks[+i];});
+  return s;
+}
+function copyCode(id){
+  var el=document.getElementById(id);if(!el)return;
+  navigator.clipboard.writeText(el.textContent).then(function(){notify('Code copied!');}).catch(function(){
+    var r=document.createRange();r.selectNode(el);
+    window.getSelection().removeAllRanges();window.getSelection().addRange(r);
+    document.execCommand('copy');window.getSelection().removeAllRanges();
+    notify('Code copied!');
+  });
+}
+var ICO_EDIT='<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>';
+var ICO_REGEN='<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>';
+var ICO_COPY='<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
+var ICO_CHECK='<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>';
+function uActBar(){return '<div class="msg-acts"><button class="mac" onclick="copyUserMsg(this)" title="Copy">'+ICO_COPY+'</button><button class="mac" onclick="resendMsg(this)" title="Resend">'+ICO_REGEN+'</button><button class="mac" onclick="editMsg(this)" title="Edit &amp; Resend">'+ICO_EDIT+'</button></div>';}
+function aiActBar(){return '<div class="msg-acts"><button class="mac" onclick="regenMsg(this)" title="Regenerate">'+ICO_REGEN+'</button><button class="mac" onclick="copyMsgNew(this)" title="Copy">'+ICO_COPY+'</button></div>';}
+function editMsg(btn){
+  var msgDiv=btn.closest('.msg');
+  var bub=msgDiv.querySelector('.bub');
+  var orig=(bub.innerText||bub.textContent).trim();
+  bub.dataset.orig=orig;
+  bub.style.cssText='padding:0;background:none;border:none;border-radius:0';
+  bub.innerHTML='<textarea style="width:100%;min-height:56px;border:1.5px solid var(--accent);border-radius:7px;padding:7px 10px;font-size:12px;font-family:inherit;resize:vertical;outline:none;color:var(--text);background:var(--bg);line-height:1.5;box-sizing:border-box">'+esc(orig)+'</textarea>'+
+    '<div style="display:flex;gap:6px;margin-top:5px;justify-content:flex-end">'+
+    '<button onclick="cancelEdit(this)" style="padding:4px 11px;border:1px solid var(--border);border-radius:5px;font-size:11px;font-family:inherit;cursor:pointer;background:none;color:var(--text2)">Cancel</button>'+
+    '<button onclick="saveEdit(this)" style="padding:4px 11px;border:none;border-radius:5px;font-size:11px;font-weight:600;font-family:inherit;cursor:pointer;background:var(--accent);color:white">Save &amp; Resend</button>'+
+    '</div>';
+  var ta=bub.querySelector('textarea');
+  if(ta){ta.focus();ta.setSelectionRange(ta.value.length,ta.value.length);}
+}
+function cancelEdit(btn){
+  var bub=btn.closest('.bub');
+  var orig=bub.dataset.orig||'';
+  bub.style.cssText='';
+  bub.innerHTML=esc(orig);
+}
+function saveEdit(btn){
+  var bub=btn.closest('.bub');
+  var ta=bub.querySelector('textarea');
+  var newText=(ta?ta.value:'').trim();
+  if(!newText)return;
+  var msgs=document.getElementById('chat-msgs');
+  var msgDiv=bub.closest('.msg');
+  var msgIdx=Array.from(msgs.children).indexOf(msgDiv);
+  while(msgs.children.length>msgIdx){msgs.removeChild(msgs.children[msgIdx]);}
+  var hasWelcome=!!document.getElementById('welcome-bub');
+  var histIdx=msgIdx-(hasWelcome?1:0);
+  chatHistory=chatHistory.slice(0,histIdx);
+  saveChat();
+  document.getElementById('chat-in').value=newText;
+  send();
+}
+function regenMsg(btn){
+  var msgDiv=btn.closest('.msg');
+  var msgs=document.getElementById('chat-msgs');
+  var msgIdx=Array.from(msgs.children).indexOf(msgDiv);
+  var hasWelcome=!!document.getElementById('welcome-bub');
+  var histIdx=msgIdx-(hasWelcome?1:0);
+  if(histIdx<1)return;
+  var userText=chatHistory[histIdx-1]&&chatHistory[histIdx-1].content;
+  if(!userText)return;
+  while(msgs.children.length>msgIdx){msgs.removeChild(msgs.children[msgIdx]);}
+  var histForApi=chatHistory.slice(0,histIdx-1).slice(-10);
+  chatHistory=chatHistory.slice(0,histIdx);
+  saveChat();
+  var typ=document.createElement('div');typ.id='typ';typ.className='msg';
+  typ.innerHTML='<div class="mav ai">F</div><div class="bub"><div class="typing"><div class="dot"></div><div class="dot"></div><div class="dot"></div></div></div>';
+  msgs.appendChild(typ);msgs.scrollTop=msgs.scrollHeight;
+  fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt:userText,history:histForApi,enterpriseMode:enterpriseMode,simpleMode:isSimple()})})
+    .then(function(r){return r.json();})
+    .then(function(d){
+      var ty=document.getElementById('typ');if(ty)ty.remove();
+      chatHistory.push({role:'assistant',content:d.reply||d.error||''});
+      saveChat();chSync();
+      var ai=document.createElement('div');ai.className='msg';
+      var searchBadge=d.searched?'<span style="font-size:10px;padding:2px 7px;border-radius:8px;font-weight:700;background:var(--ibg);color:var(--info);margin-right:4px">🔍 Web search</span>':'';
+      var entBadge=d.enterprise?'<span style="font-size:10px;padding:2px 7px;border-radius:8px;font-weight:700;background:#FFF3CD;color:#9A6E00;margin-right:4px">⚡ Enterprise</span>':'';
+      var badge='<div style="margin-top:5px;display:flex;align-items:center;flex-wrap:wrap;gap:2px">'+searchBadge+entBadge+'<span style="font-size:10px;padding:2px 7px;border-radius:8px;font-weight:700;background:var(--sbg);color:var(--success);margin-right:4px">'+esc(d.model||'AI')+'</span><span style="font-size:10px;color:var(--text3)">'+esc(d.time||'')+'</span></div>';
+      ai.innerHTML='<div class="mav ai">F</div><div><div class="bub">'+formatMarkdown(d.reply||d.error||'Error')+'</div>'+badge+aiActBar()+'</div>';
+      msgs.appendChild(ai);msgs.scrollTop=msgs.scrollHeight;
+      pvAutoUpdate();
+    })
+    .catch(function(){
+      var ty=document.getElementById('typ');if(ty)ty.remove();
+      var ai=document.createElement('div');ai.className='msg';
+      ai.innerHTML='<div class="mav ai">F</div><div><div class="bub" style="color:var(--danger)">Connection error — is the server running?</div>'+aiActBar()+'</div>';
+      msgs.appendChild(ai);msgs.scrollTop=msgs.scrollHeight;
+    });
+}
+function copyMsgNew(btn){
+  var bub=btn.closest('.msg').querySelector('.bub');
+  var clone=bub.cloneNode(true);
+  clone.querySelectorAll('button,textarea').forEach(function(b){b.remove();});
+  var text=(clone.innerText||clone.textContent).trim();
+  function done(){btn.innerHTML=ICO_CHECK;btn.style.color='var(--success)';setTimeout(function(){btn.innerHTML=ICO_COPY;btn.style.color='';},2000);}
+  if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(text).then(done).catch(function(){var ta=document.createElement('textarea');ta.value=text;document.body.appendChild(ta);ta.select();document.execCommand('copy');document.body.removeChild(ta);done();});}
+  else{var ta=document.createElement('textarea');ta.value=text;document.body.appendChild(ta);ta.select();document.execCommand('copy');document.body.removeChild(ta);done();}
+}
+function copyUserMsg(btn){
+  var bub=btn.closest('.msg').querySelector('.bub');
+  var ta=bub.querySelector('textarea');
+  var text=ta?ta.value.trim():(bub.innerText||bub.textContent).trim();
+  function done(){btn.innerHTML=ICO_CHECK;btn.style.color='var(--success)';setTimeout(function(){btn.innerHTML=ICO_COPY;btn.style.color='';},2000);}
+  if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(text).then(done).catch(function(){var t2=document.createElement('textarea');t2.value=text;document.body.appendChild(t2);t2.select();document.execCommand('copy');document.body.removeChild(t2);done();});}
+  else{var t2=document.createElement('textarea');t2.value=text;document.body.appendChild(t2);t2.select();document.execCommand('copy');document.body.removeChild(t2);done();}
+}
+function resendMsg(btn){
+  var msgDiv=btn.closest('.msg');
+  var msgs=document.getElementById('chat-msgs');
+  var bub=msgDiv.querySelector('.bub');
+  var ta=bub.querySelector('textarea');
+  var text=ta?ta.value.trim():(bub.innerText||bub.textContent).trim();
+  if(!text)return;
+  var msgIdx=Array.from(msgs.children).indexOf(msgDiv);
+  while(msgs.children.length>msgIdx){msgs.removeChild(msgs.children[msgIdx]);}
+  var hasWelcome=!!document.getElementById('welcome-bub');
+  var histIdx=msgIdx-(hasWelcome?1:0);
+  chatHistory=chatHistory.slice(0,histIdx);
+  saveChat();
+  document.getElementById('chat-in').value=text;
+  send();
+}
+function copyMsg(btn){
+  var bub=btn.closest('.msg').querySelector('.bub');
+  var clone=bub.cloneNode(true);
+  clone.querySelectorAll('button').forEach(function(b){b.remove();});
+  var text=(clone.innerText||clone.textContent).trim();
+  function done(){btn.textContent='Copied!';setTimeout(function(){btn.textContent='📋';},2000);}
+  if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(text).then(done).catch(function(){var ta=document.createElement('textarea');ta.value=text;document.body.appendChild(ta);ta.select();document.execCommand('copy');document.body.removeChild(ta);done();});}
+  else{var ta=document.createElement('textarea');ta.value=text;document.body.appendChild(ta);ta.select();document.execCommand('copy');document.body.removeChild(ta);done();}
+}
+// ── Live Preview Panel ──────────────────────────────────────────────────────
+var pvCode=''; var pvFiles={html:'',css:'',js:''};
+function pvStore(key,escapedCode){
+  var d=document.createElement('div');d.innerHTML=escapedCode;pvFiles[key]=d.textContent;
+}
+function pvBuild(){
+  var h=pvFiles.html; if(!h) return '';
+  var css=pvFiles.css, js=pvFiles.js;
+  if(css){
+    var st='<style>\n'+css+'\n</style>';
+    if(/(<\/head>)/i.test(h)){h=h.replace(/(<\/head>)/i,function(_,g){return st+g;});}
+    else if(/(<\/body>)/i.test(h)){h=h.replace(/(<\/body>)/i,function(_,g){return st+g;});}
+    else{h+=st;}
+  }
+  if(js){
+    var sc='<script>\n'+js+'\n<\/script>';
+    if(/(<\/body>)/i.test(h)){h=h.replace(/(<\/body>)/i,function(_,g){return sc+g;});}
+    else{h+=sc;}
+  }
+  return h;
+}
+function pvLoadIframe(html){
+  // Remove existing iframe and create a fresh one so srcdoc always renders,
+  // even when the panel is transitioning from display:none
+  var live=document.getElementById('pv-live');
+  if(!live||!html) return;
+  var old=document.getElementById('pv-iframe');
+  if(old) old.remove();
+  var f=document.createElement('iframe');
+  f.id='pv-iframe'; f.setAttribute('sandbox','allow-scripts');
+  f.style.cssText='width:100%;height:100%;border:none;background:#fff';
+  f.srcdoc=html; live.appendChild(f);
+}
+function pvRender(){
+  pvCode=pvBuild(); if(!pvCode) return;
+  pvLoadIframe(pvCode);
+}
+function scanChatFiles(){
+  pvFiles={html:'',css:'',js:''};
+  var re=/```(\w*)\n?([\s\S]*?)```/g, m;
+  for(var i=0;i<chatHistory.length;i++){
+    if(chatHistory[i].role!=='assistant') continue;
+    re.lastIndex=0;
+    while((m=re.exec(chatHistory[i].content))!==null){
+      var lang=(m[1]||'').toLowerCase(), raw=m[2].trim();
+      // raw is unescaped markdown source, so check real < chars for structural HTML
+      var key=lang==='html'||/<(!DOCTYPE|html|head|body)\b/i.test(raw)?'html':
+              lang==='css'?'css':
+              (lang==='javascript'||lang==='js')?'js':'';
+      if(key) pvFiles[key]=raw;
+    }
+  }
+}
+function pvAutoUpdate(){
+  var pw=document.getElementById('panels-wrap');
+  if(pw&&pw.classList.contains('pv-open'))pvRender();
+}
+function pvOpen(preId,fileKey){
+  // Safety net: if pvFiles is empty (edge case after reload), scan chat history now
+  if(!pvFiles.html&&!pvFiles.css&&!pvFiles.js) scanChatFiles();
+  // Show panel first so iframe is appended into a visible container
+  pvTab('live');
+  document.getElementById('panels-wrap').classList.add('pv-open');
+  if(!pvFiles.html&&fileKey!=='html'){
+    // Defer to next frame so display:flex is computed before iframe is appended
+    requestAnimationFrame(function(){
+      pvLoadIframe('<body style="font-family:sans-serif;padding:24px 16px;text-align:center;margin-top:60px;color:#888;font-size:14px;line-height:1.7">HTML file innum illa —<br>first HTML code vaangunga,<br>appo full preview varum</body>');
+    });
+    return;
+  }
+  pvCode=pvBuild();
+  requestAnimationFrame(function(){pvLoadIframe(pvCode);});
+}
+function pvClose(){
+  var pw=document.getElementById('panels-wrap');
+  if(pw)pw.classList.remove('pv-open');
+  pvCode='';
+}
+function pvRefresh(){pvRender();}
+function pvTab(t){
+  var live=document.getElementById('pv-live');
+  var codeDiv=document.getElementById('pv-code');
+  var tl=document.getElementById('pv-tab-live');
+  var tc=document.getElementById('pv-tab-code');
+  if(!live||!codeDiv)return;
+  if(t==='live'){
+    live.style.display='flex';codeDiv.style.display='none';
+    if(tl)tl.classList.add('active');if(tc)tc.classList.remove('active');
+  }else{
+    live.style.display='none';codeDiv.style.display='block';
+    if(tc)tc.classList.add('active');if(tl)tl.classList.remove('active');
+    var pre=document.getElementById('pv-code-pre');if(pre)pre.textContent=pvCode;
+  }
+}
+
+// ── Quote Reply ──────────────────────────────────────────────────────────────
+var qtText='';
+function srHide(){var b=document.getElementById('sel-btn');if(b)b.style.display='none';}
+function srShow(rect){
+  var b=document.getElementById('sel-btn');if(!b)return;
+  var bW=76;
+  var left=Math.max(4,Math.min(window.innerWidth-bW-4,rect.left+rect.width/2-bW/2));
+  var top=rect.top-36; if(top<8)top=rect.bottom+8;
+  b.style.left=left+'px';b.style.top=top+'px';b.style.display='block';
+}
+function srCheck(){
+  var sel=window.getSelection();
+  if(!sel||sel.isCollapsed||!sel.rangeCount){srHide();return;}
+  var txt=sel.toString().trim();if(!txt){srHide();return;}
+  var range=sel.getRangeAt(0);
+  var msgs=document.getElementById('chat-msgs');if(!msgs){srHide();return;}
+  // Both range endpoints must be inside the SAME .bub (no cross-message selections)
+  function nearestBub(n){return n.nodeType===3?n.parentElement&&n.parentElement.closest&&n.parentElement.closest('.bub'):n.closest&&n.closest('.bub');}
+  var sb=nearestBub(range.startContainer);
+  var eb=nearestBub(range.endContainer);
+  if(!sb||!eb||sb!==eb||!msgs.contains(sb)){srHide();return;}
+  srShow(range.getBoundingClientRect());
+}
+function qSet(text){
+  qtText=text;
+  var bar=document.getElementById('qt-bar'),disp=document.getElementById('qt-txt');
+  if(bar&&disp){disp.textContent=text.length>150?text.slice(0,150)+'…':text;bar.classList.add('on');}
+  var inp=document.getElementById('chat-in');if(inp)inp.focus();
+}
+function qCancel(){
+  qtText='';
+  var bar=document.getElementById('qt-bar');if(bar)bar.classList.remove('on');
+}
+
+function send(){
+  var inp=document.getElementById('chat-in');
+  var t=inp.value.trim();if(!t)return;
+  var msgs=document.getElementById('chat-msgs');
+  var qtSnap=qtText; // snapshot before clearing
+  var qtHtml=qtSnap?'<div class="qt-msg">'+esc(qtSnap.length>200?qtSnap.slice(0,200)+'…':qtSnap)+'</div>':'';
+  var u=document.createElement('div');u.className='msg u';
+  u.innerHTML='<div class="mav u">VK</div><div><div class="bub">'+qtHtml+esc(t)+'</div>'+uActBar()+'</div>';
+  msgs.appendChild(u);inp.value='';msgs.scrollTop=msgs.scrollHeight;
+  qCancel();
+  var typ=document.createElement('div');typ.id='typ';typ.className='msg';
+  typ.innerHTML='<div class="mav ai">F</div><div class="bub"><div class="typing"><div class="dot"></div><div class="dot"></div><div class="dot"></div></div></div>';
+  msgs.appendChild(typ);msgs.scrollTop=msgs.scrollHeight;
+  go('chat',document.querySelector((isSimple()?'#simple-nav':'#pro-nav')+' .ni'));
+  // Push user message now so RECENT updates immediately (before API responds)
+  var apiPrompt=qtSnap?'Quoted text: "'+qtSnap+'"\n\nUser question: '+t:t;
+  var histForApi=chatHistory.slice(-10);
+  chatHistory.push({role:'user',content:t});
+  saveChat();chSync();
+  fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt:apiPrompt,history:histForApi,enterpriseMode:enterpriseMode,simpleMode:isSimple()})})
+    .then(function(r){return r.json();})
+    .then(function(d){
+      var ty=document.getElementById('typ');if(ty)ty.remove();
+      chatHistory.push({role:'assistant',content:d.reply||d.error||''});
+      saveChat();chSync();
+      var ai=document.createElement('div');ai.className='msg';
+      var searchBadge=d.searched?'<span style="font-size:10px;padding:2px 7px;border-radius:8px;font-weight:700;background:var(--ibg);color:var(--info);margin-right:4px">🔍 Web search</span>':'';
+      var entBadge=d.enterprise?'<span style="font-size:10px;padding:2px 7px;border-radius:8px;font-weight:700;background:#FFF3CD;color:#9A6E00;margin-right:4px">⚡ Enterprise</span>':'';
+      var badge='<div style="margin-top:5px;display:flex;align-items:center;flex-wrap:wrap;gap:2px">'+searchBadge+entBadge+'<span style="font-size:10px;padding:2px 7px;border-radius:8px;font-weight:700;background:var(--sbg);color:var(--success);margin-right:4px">'+esc(d.model||'AI')+'</span><span style="font-size:10px;color:var(--text3)">'+esc(d.time||'')+'</span></div>';
+      ai.innerHTML='<div class="mav ai">F</div><div><div class="bub">'+formatMarkdown(d.reply||d.error||'Error')+'</div>'+badge+aiActBar()+'</div>';
+      msgs.appendChild(ai);msgs.scrollTop=msgs.scrollHeight;
+      pvAutoUpdate();
+    })
+    .catch(function(){
+      var ty=document.getElementById('typ');if(ty)ty.remove();
+      var ai=document.createElement('div');ai.className='msg';
+      ai.innerHTML='<div class="mav ai">F</div><div><div class="bub" style="color:var(--danger)">Connection error — is the server running?</div>'+aiActBar()+'</div>';
+      msgs.appendChild(ai);msgs.scrollTop=msgs.scrollHeight;
+    });
+}
+function ck(e){if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();send();}}
+function rsz(el){el.style.height='';el.style.height=Math.min(el.scrollHeight,80)+'px';}
+var buildLogs=[['Building architecture...','Analysis'],['Generating React frontend...','Frontend'],['Building Node.js backend...','Backend'],['Database setup...','Database'],['Payment integration...','Payments'],['Running tests...','Testing'],['GitHub push...','GitHub'],['Vercel deploy...','Vercel'],['SSL setup...','SSL'],['App is LIVE!','Done!']];
+function setPrompt(t){document.getElementById('dw-in').value=t;}
+function cleanDwName(el){
+  var v=el.value.toLowerCase().replace(/\s+/g,'-').replace(/[^a-z0-9-]/g,'').replace(/-+/g,'-').replace(/^-|-$/g,'');
+  el.value=v;
+  document.getElementById('dw-name-preview').textContent=v?'File: '+v+'.html':'';
+}
+function startBuild(){
+  var inp=document.getElementById('dw-in').value.trim();
+  if(!inp){notify('Enter your app idea!');return;}
+  document.getElementById('dw-p1').style.display='none';
+  document.getElementById('dw-p2').style.display='block';
+  document.getElementById('dws1').className='dws done';
+  document.getElementById('dws2').className='dws active';
+  var log=document.getElementById('dw-log');
+  var prog=document.getElementById('dw-prog');
+  document.getElementById('dw-title').textContent='AI Builds...';
+  document.getElementById('dw-badge').textContent='In Progress';
+  prog.style.width='0%';
+  log.innerHTML='<div style="text-align:center;padding:28px 14px"><div style="font-size:30px;margin-bottom:10px">🤖</div><div style="font-weight:600;font-size:13px;color:var(--text);margin-bottom:5px">Generating your app...</div><div style="font-size:11px;color:var(--text3)">(30–60 seconds)</div></div>';
+  // Slowly animate progress bar up to 85% while waiting
+  var pct=0;
+  var pTimer=setInterval(function(){pct=Math.min(pct+Math.random()*2.5,85);prog.style.width=pct+'%';},900);
+  var apiPrompt='Generate a COMPLETE, production-quality single-file HTML app (HTML+CSS+JS in one file) for: '+inp+'. Requirements: fully working, input validation, error handling, clean modern UI, localStorage for data persistence where needed, comments explaining key sections. Output ONLY the complete code in one html code block.';
+  fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt:apiPrompt,history:[],enterpriseMode:true})})
+    .then(function(r){return r.json();})
+    .then(function(d){
+      clearInterval(pTimer);prog.style.width='100%';
+      if(d.error){showBuildError(d.error);return;}
+      var code=d.reply||'';
+      // Extract from fenced code block if present
+      var m=code.match(/```(?:html)?\s*\n([\s\S]*?)```\s*$/);
+      if(m){code=m[1];}else{
+        code=code.replace(/^```(?:html)?\s*\n?/,'').replace(/\n?```\s*$/,'');
+      }
+      // Trim anything before <!DOCTYPE html> and after </html>
+      var ds=code.search(/<!DOCTYPE\s+html/i);if(ds>0)code=code.slice(ds);
+      var de=code.search(/<\/html>/i);if(de>-1)code=code.slice(0,de+7);
+      code=code.trim();
+      document.getElementById('dws2').className='dws done';
+      document.getElementById('dws3').className='dws active';
+      setTimeout(function(){showResult(inp,code);},400);
+    })
+    .catch(function(){clearInterval(pTimer);showBuildError('Connection error. Is the server running?');});
+}
+function showResult(inp,code){
+  document.getElementById('dw-p2').style.display='none';
+  document.getElementById('dw-p3').style.display='block';
+  document.getElementById('dws3').className='dws done';
+  document.getElementById('dws4').className='dws active';
+  var customName=(document.getElementById('dw-name')||{value:''}).value.trim();
+  var name=customName||inp.split(' ').slice(0,3).join('-').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'');
+  window._dwCode=code;window._dwName=name;window._dwVersion=1;
+  var incomplete=!/<\/html>/i.test(code);
+  var incWarn=incomplete?'<div style="background:var(--wbg);border:1px solid #f5d080;border-radius:var(--r);padding:10px 12px;margin-bottom:10px;font-size:11px;color:var(--warning)">⚠️ This app is large and may be incomplete. Try a simpler description, or use the \'Request a change\' box to ask for the missing part.</div>':'';
+  document.getElementById('dw-p3').innerHTML=
+    incWarn+
+    '<div style="background:var(--sbg);border:1px solid #c0dd97;border-radius:var(--r);padding:12px 14px;margin-bottom:10px;text-align:center">'+
+      '<div style="font-size:22px;margin-bottom:4px">✅</div>'+
+      '<div style="font-size:14px;font-weight:700;color:var(--success);margin-bottom:3px">Your app is ready!</div>'+
+      '<div style="font-size:11px;color:var(--text2)">Download → double-click → runs in browser!</div>'+
+    '</div>'+
+    '<div style="display:flex;justify-content:flex-end;margin-bottom:8px">'+
+      '<button id="dw-save-proj-btn" onclick="prjSaveApp(window._dwCode,window._dwName,this)" style="font-size:11px;padding:5px 12px;border:1px solid var(--border2);border-radius:var(--r);background:var(--bg2);cursor:pointer;color:var(--text2);font-family:inherit;font-weight:600">📁 Save to Project</button>'+
+    '</div>'+
+    '<div style="background:var(--bg3);border:1px solid var(--border);border-radius:var(--r);overflow:hidden;margin-bottom:10px">'+
+      '<div style="display:flex;align-items:center;justify-content:space-between;padding:7px 11px;background:var(--bg2);border-bottom:1px solid var(--border)">'+
+        '<span style="font-size:11px;font-weight:700;color:var(--text2)">📄 '+esc(name)+'.html</span>'+
+        '<div style="display:flex;gap:6px">'+
+          '<button onclick="copyDwCode()" style="font-size:11px;padding:3px 10px;border:1px solid var(--border);border-radius:5px;background:var(--bg);cursor:pointer;color:var(--text2)">📋 Copy</button>'+
+          '<button id="dw-dl-btn" onclick="downloadDwCode()" style="font-size:11px;padding:3px 10px;border:1px solid var(--accent);border-radius:5px;background:var(--accent);color:white;cursor:pointer;font-weight:700;transition:background .25s,border-color .25s">⬇ Download .html</button>'+
+        '</div>'+
+      '</div>'+
+      '<pre id="dw-generated-code" style="margin:0;padding:11px;font-size:10px;line-height:1.5;overflow-x:auto;max-height:260px;overflow-y:auto;color:var(--text);font-family:monospace;white-space:pre-wrap;word-break:break-word"></pre>'+
+    '</div>'+
+    '<div style="margin-bottom:10px">'+
+      '<div id="dw-update-msg"></div>'+
+      '<div style="display:flex;gap:7px;align-items:center">'+
+        '<input id="dw-change" type="text" placeholder="Request a change (e.g. make the button blue, add a phone field)" style="flex:1;border:1px solid var(--border2);border-radius:var(--r);padding:7px 10px;font-size:12px;font-family:inherit;outline:none;color:var(--text);background:var(--bg)" onkeydown="if(event.key===\'Enter\')updateApp()">'+
+        '<button onclick="updateApp()" style="white-space:nowrap;padding:7px 13px;border-radius:var(--r);font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;background:var(--accent);color:white;border:none;transition:all .2s">Update App</button>'+
+      '</div>'+
+    '</div>'+
+    '<div style="background:var(--ibg);border:1px solid #b5d4f4;border-radius:var(--r);padding:10px 12px;margin-bottom:10px;font-size:11px;color:var(--info)">'+
+      '🔜 <strong>One-click deploy to live URL</strong> — coming soon'+
+    '</div>'+
+    '<button class="btn ghost" style="width:100%;border-style:dashed" onclick="resetBuild()">Build Another App</button>';
+  document.getElementById('dw-generated-code').textContent=code;
+}
+function updateApp(){
+  var req=document.getElementById('dw-change');
+  if(!req||!window._dwCode)return;
+  var change=req.value.trim();
+  if(!change){notify('Describe the change you want!');return;}
+  var msgEl=document.getElementById('dw-update-msg');
+  var codeEl=document.getElementById('dw-generated-code');
+  if(msgEl)msgEl.innerHTML='<div style="font-size:11px;color:var(--text3);margin-bottom:6px">⏳ Updating your app...</div>';
+  req.disabled=true;
+  var apiPrompt='Here is the current app code:\n'+window._dwCode+'\n\nApply this change: '+change+'\n\nOutput the COMPLETE updated single-file HTML app in one html code block. Keep everything else the same, only apply the requested change.';
+  fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt:apiPrompt,history:[],enterpriseMode:true})})
+    .then(function(r){return r.json();})
+    .then(function(d){
+      req.disabled=false;
+      if(d.error){if(msgEl)msgEl.innerHTML='<div style="font-size:11px;color:var(--danger);margin-bottom:6px">⚠️ '+esc(d.error)+'</div>';return;}
+      var code=d.reply||'';
+      var m=code.match(/```(?:html)?\s*\n([\s\S]*?)```\s*$/);
+      if(m){code=m[1];}else{code=code.replace(/^```(?:html)?\s*\n?/,'').replace(/\n?```\s*$/,'');}
+      var ds=code.search(/<!DOCTYPE\s+html/i);if(ds>0)code=code.slice(ds);
+      var de=code.search(/<\/html>/i);if(de>-1)code=code.slice(0,de+7);
+      code=code.trim();
+      window._dwCode=code;
+      window._dwVersion=(window._dwVersion||1)+1;
+      if(codeEl)codeEl.textContent=code;
+      req.value='';
+      // Flash download button with "Re-download" label for 3 s
+      var dlBtn=document.getElementById('dw-dl-btn');
+      if(dlBtn){
+        dlBtn.textContent='⬇ Re-download v'+window._dwVersion+'.html';
+        dlBtn.style.background='#b45309';dlBtn.style.borderColor='#b45309';
+        setTimeout(function(){if(dlBtn){dlBtn.textContent='⬇ Download .html';dlBtn.style.background='';dlBtn.style.borderColor='';}},3000);
+      }
+      // Persistent note (clears on next update or reset)
+      if(msgEl)msgEl.innerHTML='<div style="font-size:11px;color:var(--success);margin-bottom:6px">✅ App updated! Click Download again to save the new version.</div>';
+    })
+    .catch(function(){
+      req.disabled=false;
+      if(msgEl)msgEl.innerHTML='<div style="font-size:11px;color:var(--danger);margin-bottom:6px">⚠️ Connection error. Previous version kept.</div>';
+    });
+}
+function copyDwCode(){
+  if(!window._dwCode)return;
+  navigator.clipboard.writeText(window._dwCode).then(function(){notify('Code copied!');}).catch(function(){var ta=document.createElement('textarea');ta.value=window._dwCode;document.body.appendChild(ta);ta.select();document.execCommand('copy');document.body.removeChild(ta);notify('Code copied!');});
+}
+function downloadDwCode(){
+  if(!window._dwCode)return;
+  var blob=new Blob([window._dwCode],{type:'text/html'});
+  var a=document.createElement('a');a.href=URL.createObjectURL(blob);
+  var v=window._dwVersion||1;
+  a.download=(window._dwName||'app')+(v>1?'-v'+v:'')+'.html';
+  document.body.appendChild(a);a.click();document.body.removeChild(a);URL.revokeObjectURL(a.href);
+  notify('Downloaded!');
+}
+function showBuildError(msg){
+  document.getElementById('dw-p2').style.display='none';
+  document.getElementById('dw-p1').style.display='block';
+  ['dws1','dws2','dws3','dws4'].forEach(function(id,i){document.getElementById(id).className='dws'+(i===0?' active':'');});
+  var old=document.getElementById('dw-err');if(old)old.remove();
+  var err=document.createElement('div');err.id='dw-err';
+  err.style='background:var(--dbg);border:1px solid #f0c0c0;border-radius:var(--r);padding:10px 12px;margin-bottom:10px;font-size:12px;color:var(--danger);display:flex;align-items:center;justify-content:space-between';
+  err.innerHTML='⚠️ '+esc(msg)+'<button onclick="document.getElementById(\'dw-err\').remove()" style="background:none;border:none;cursor:pointer;color:var(--text3);font-size:16px;padding:0 0 0 8px">✕</button>';
+  document.getElementById('dw-p1').insertBefore(err,document.getElementById('dw-p1').firstChild);
+}
+function resetBuild(){
+  document.getElementById('dw-p1').style.display='block';
+  document.getElementById('dw-p2').style.display='none';
+  document.getElementById('dw-p3').style.display='none';
+  document.getElementById('dw-p3').innerHTML='';
+  document.getElementById('dw-in').value='';
+  var nm=document.getElementById('dw-name');if(nm)nm.value='';
+  var prev=document.getElementById('dw-name-preview');if(prev)prev.textContent='';
+  window._dwCode='';window._dwName='';
+  var old=document.getElementById('dw-err');if(old)old.remove();
+  ['dws1','dws2','dws3','dws4'].forEach(function(id,i){document.getElementById(id).className='dws'+(i===0?' active':'');});
+}
+var tamilR=['Login page ready!\n\nfunction LoginPage(){\n  const [email,setEmail]=useState("");\n  const handleLogin=async()=>{\n    const{error}=await supabase.auth\n      .signInWithPassword({email});\n    if(error)alert("Login failed!");\n  };\n  return(<div><input onChange={e=>setEmail(e.target.value)}/><button onClick={handleLogin}>Login</button></div>);\n}','Bug fix done!\n\nuseEffect(()=>{fetchData();},[]);\n// Empty array = run once!\nFixed!','Razorpay ready!\n\nconst order=await razorpay.orders.create({\n  amount:50000,currency:"INR"\n});','DB optimized!\n\nCREATE INDEX idx_orders\nON orders(user_id,created_at DESC);\n97% faster!','Deploy: vercel.com > New Project > GitHub > Deploy! Live at your-app.vercel.app'];
+var ti=0;
+function tamilAsk(t){document.getElementById('tamil-in').value=t;sendTamil();}
+function sendTamil(){
+  var inp=document.getElementById('tamil-in');
+  var t=inp.value.trim();if(!t)return;
+  var msgs=document.getElementById('tamil-msgs');
+  var u=document.createElement('div');u.className='msg u';
+  u.innerHTML='<div class="mav u">VK</div><div><div class="bub">'+esc(t)+'</div></div>';
+  msgs.appendChild(u);inp.value='';msgs.scrollTop=msgs.scrollHeight;
+  var typ=document.createElement('div');typ.id='ttyp';typ.className='msg';
+  typ.innerHTML='<div class="mav ai" style="background:#FF6B35">AI</div><div class="bub"><div class="typing"><div class="dot"></div><div class="dot"></div><div class="dot"></div></div></div>';
+  msgs.appendChild(typ);msgs.scrollTop=msgs.scrollHeight;
+  fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt:t,history:tamilHistory.slice(-10)})})
+    .then(function(r){return r.json();})
+    .then(function(d){
+      var ty=document.getElementById('ttyp');if(ty)ty.remove();
+      tamilHistory.push({role:'user',content:t});
+      tamilHistory.push({role:'assistant',content:d.reply||''});
+      saveTamilChat();
+      var ai=document.createElement('div');ai.className='msg';
+      var searchBadge=d.searched?'<span style="font-size:10px;padding:2px 7px;border-radius:8px;font-weight:700;background:var(--ibg);color:var(--info);margin-right:4px">🔍 Web search</span>':'';
+      var badge='<div style="margin-top:5px;display:flex;align-items:center;flex-wrap:wrap;gap:2px">'+searchBadge+'<span style="font-size:10px;padding:2px 7px;border-radius:8px;font-weight:700;background:#fff0ec;color:#FF6B35;margin-right:4px">'+esc(d.model||'AI')+'</span><span style="font-size:10px;color:var(--text3)">'+esc(d.time||'')+'</span><button onclick="copyMsg(this)" style="background:none;border:none;cursor:pointer;font-size:11px;color:var(--text3);padding:1px 5px;border-radius:4px;line-height:1.4;margin-left:6px" title="Copy message">📋</button></div>';
+      ai.innerHTML='<div class="mav ai" style="background:#FF6B35">AI</div><div><div class="bub" style="font-size:12px">'+formatMarkdown(d.reply||d.error||'Error')+'</div>'+badge+'</div>';
+      msgs.appendChild(ai);msgs.scrollTop=msgs.scrollHeight;
+    })
+    .catch(function(){
+      var ty=document.getElementById('ttyp');if(ty)ty.remove();
+      var ai=document.createElement('div');ai.className='msg';
+      ai.innerHTML='<div class="mav ai" style="background:#FF6B35">AI</div><div><div class="bub" style="color:var(--danger)">Connection error — is the server running?</div></div>';
+      msgs.appendChild(ai);msgs.scrollTop=msgs.scrollHeight;
+    });
+}
+var waR={'/build':'Building now!\nStack: React+Next.js, Node.js, Supabase, Razorpay\nETA: 8 min. Will send URL when live!','/deploy':'Deploying!\nVercel: Building 34%...\nRailway: Queued\nLive URL coming soon!','/fix':'Bug found!\nFile: /api/auth/login.js Line 47\nMissing await keyword. Fixed + deployed!','/status':'Apps:\nmy-ecommerce: Online (1247 users)\napi-service: Building 67%\nadmin-panel: Error (ENV missing)','/test':'Running tests! ETA 18 min.\nResults on WhatsApp when done!','/cost':'Nov costs:\nVercel Rs.2400\nRailway Rs.1800\nSupabase Rs.600\nTotal Rs.4800 (+23%)'};
+var waTyping=false;
+function sendWA(preset){
+  var inp=document.getElementById('wa-in');
+  var t=preset||inp.value.trim();
+  if(!t||waTyping)return;
+  waTyping=true;
+  var msgs=document.getElementById('wa-msgs');
+  var u=document.createElement('div');u.className='wa-msg out';
+  u.innerHTML='<div class="wa-bub">'+t+'</div><div class="wa-time">Just now</div>';
+  msgs.appendChild(u);inp.value='';msgs.scrollTop=msgs.scrollHeight;
+  var typ=document.createElement('div');typ.className='wa-msg in';typ.id='watyp';
+  typ.innerHTML='<div class="wa-bub"><div class="typing"><div class="dot" style="background:#999"></div><div class="dot" style="background:#999"></div><div class="dot" style="background:#999"></div></div></div>';
+  msgs.appendChild(typ);msgs.scrollTop=msgs.scrollHeight;
+  setTimeout(function(){
+    var ty=document.getElementById('watyp');if(ty)ty.remove();
+    var resp='Got it! Processing. Will update on WhatsApp!';
+    for(var cmd in waR){if(t.toLowerCase().indexOf(cmd)>-1){resp=waR[cmd];break;}}
+    var ai=document.createElement('div');ai.className='wa-msg in';
+    ai.innerHTML='<div class="wa-bub" style="white-space:pre-wrap;font-size:12px">'+resp+'</div><div class="wa-time">Just now</div>';
+    msgs.appendChild(ai);msgs.scrollTop=msgs.scrollHeight;
+    waTyping=false;
+  },900);
+}
+function runSearch(){
+  var q=document.getElementById('search-in').value.trim();
+  if(!q){notify('Enter a search query!');return;}
+  var area=document.getElementById('search-results-area');
+  area.innerHTML='<div style="text-align:center;padding:28px;color:var(--text3);font-size:12px">🔍 Searching...</div>';
+  fetch('/api/search',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({query:q})})
+    .then(function(r){return r.json();})
+    .then(function(d){
+      if(d.error){area.innerHTML='<div style="color:var(--danger);font-size:12px;padding:12px;background:var(--dbg);border-radius:var(--r)">⚠️ '+esc(d.error)+'</div>';return;}
+      var html='';
+      if(d.answer){html+='<div class="aisum"><div class="aisum-l">✨ ForgeAI Summary</div><div class="aisum-t">'+esc(d.answer)+'</div></div>';}
+      if(d.results&&d.results.length){
+        html+=d.results.map(function(r){
+          return '<div class="sres">'+
+            '<div class="srt"><a href="'+esc(r.url)+'" target="_blank" rel="noopener noreferrer" style="color:var(--info);text-decoration:none;cursor:pointer">'+esc(r.title)+'</a></div>'+
+            '<div class="sru"><a href="'+esc(r.url)+'" target="_blank" rel="noopener noreferrer" style="color:var(--success);text-decoration:none;cursor:pointer">🌐 '+esc(r.url)+'</a></div>'+
+            '<div class="srn">'+esc(r.content)+'</div>'+
+          '</div>';
+        }).join('');
+      }else if(!d.answer){html='<div style="color:var(--text3);font-size:12px;padding:16px;text-align:center">No results found.</div>';}
+      area.innerHTML=html;
+    })
+    .catch(function(){area.innerHTML='<div style="color:var(--danger);font-size:12px;padding:12px;background:var(--dbg);border-radius:var(--r)">⚠️ Connection error. Is the server running?</div>';});
+}
+function notify(msg){
+  var n=document.getElementById('notif');
+  n.textContent=msg;n.classList.add('show');
+  clearTimeout(n._t);
+  n._t=setTimeout(function(){n.classList.remove('show');},3000);
+}
+// ── Testing panel (live data from ForgeAI server on port 3000) ──────────────
+var TP_API='http://127.0.0.1:3000';
+
+function tpFmt(ms){return ms<1000?ms+'ms':(ms/1000).toFixed(1)+'s';}
+function tpUptime(s){if(s<60)return s+'s';if(s<3600)return Math.floor(s/60)+'m '+s%60+'s';return Math.floor(s/3600)+'h '+Math.floor(s%3600/60)+'m';}
+
+function tpLoad(){
+  var el=document.getElementById('tp-health');
+  if(!el)return;
+  el.innerHTML='<div style="text-align:center;padding:24px 16px;color:var(--text2);font-size:12px">Checking server…</div>';
+  fetch(TP_API+'/api/health-check')
+    .then(function(r){return r.json();})
+    .then(function(d){
+      if(!d.ok)throw new Error(d.error||'Server returned error');
+      var h='<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px">';
+      h+='<div class="stat"><div class="stat-n" style="color:var(--success);font-size:20px">●</div><div class="stat-l">Server online</div></div>';
+      h+='<div class="stat"><div class="stat-n">'+tpUptime(d.uptime)+'</div><div class="stat-l">Uptime</div></div>';
+      h+='<div class="stat"><div class="stat-n">'+d.memory.heapUsedMb+' MB</div><div class="stat-l">Heap used</div></div>';
+      h+='<div class="stat"><div class="stat-n">'+d.memory.rssMb+' MB</div><div class="stat-l">RSS</div></div>';
+      h+='</div>';
+      h+='<div class="card"><div class="card-hd"><div class="card-title">API Keys</div>';
+      var allKeys=d.keys&&d.keys.groq&&d.keys.gemini;
+      h+='<span class="nbadge '+(allKeys?'g':'r')+'">'+(allKeys?'All loaded':'Missing')+'</span></div><div class="card-bd">';
+      h+='<div class="trow"><span>'+(d.keys&&d.keys.groq?'✅':'❌')+'</span><span style="flex:1;font-size:12px">Groq</span></div>';
+      h+='<div class="trow"><span>'+(d.keys&&d.keys.gemini?'✅':'❌')+'</span><span style="flex:1;font-size:12px">Gemini</span></div>';
+      h+='<div class="trow"><span>'+(d.keys&&d.keys.tavily?'✅':'⚠')+'</span><span style="flex:1;font-size:12px">Tavily (search)</span></div>';
+      h+='</div></div>';
+      if(d.lastLoadTest){
+        var lt=d.lastLoadTest,s=lt.summary;
+        var ok=s.totalFailed===0&&s.crashes500s===0;
+        h+='<div class="alert-box '+(ok?'g':'r')+'" style="margin-top:4px">';
+        h+='<div class="at '+(ok?'g':'r')+'">Last load test — '+new Date(lt.timestamp).toLocaleString()+'</div>';
+        h+='<div class="atxt '+(ok?'g':'r')+'">'+s.totalPassed+'/'+s.totalRequests+' passed';
+        if(s.crashes500s>0)h+=' · <b>'+s.crashes500s+' server errors</b>';
+        if(lt.tests&&lt.tests.health)h+=' · p50 '+tpFmt(lt.tests.health.p50)+' p99 '+tpFmt(lt.tests.health.p99);
+        h+='</div></div>';
+      }
+      el.innerHTML=h;
+    })
+    .catch(function(err){
+      el.innerHTML='<div class="alert-box r"><div class="at r">ForgeAI server unreachable</div>'
+        +'<div class="atxt r">'+err.message+'<br><br>Start it: <code>node server.js</code> in <code>C:\\My chatbot</code></div></div>';
+    });
+}
+
+function tpRunLoadTest(){
+  var btn=document.getElementById('tp-run-btn');
+  var res=document.getElementById('tp-lt-result');
+  if(!btn||!res||btn.disabled)return;
+  btn.disabled=true; btn.textContent='Running…';
+  res.innerHTML='<div style="color:var(--text2);font-size:12px">Firing 50 concurrent GET /api/health requests…<br>Should complete in 2–5s.</div>';
+  fetch(TP_API+'/api/health-check/load-test',{method:'POST'})
+    .then(function(r){
+      if(!r.ok)return r.json().then(function(e){throw new Error(e.error||'HTTP '+r.status);});
+      return r.json();
+    })
+    .then(function(d){
+      btn.disabled=false; btn.textContent='Run (50 req)';
+      if(d.error){res.innerHTML='<span style="color:var(--danger);font-size:12px">'+d.error+'</span>';return;}
+      var s=d.summary,ok=s.totalFailed===0&&s.crashes500s===0;
+      var h='<div style="font-size:12px;line-height:1.8">';
+      h+='<span style="color:'+(ok?'var(--success)':'var(--danger)')+';font-weight:700">'+(ok?'✅ All passed':'❌ Server errors detected')+'</span>';
+      h+=' — '+s.totalPassed+'/'+s.totalRequests+' requests';
+      if(s.crashes500s>0)h+='<br><span style="color:var(--danger)">'+s.crashes500s+' crash(es) (500 errors)</span>';
+      if(d.tests&&d.tests.health){var ht=d.tests.health;
+        h+='<br>p50 '+tpFmt(ht.p50)+' · p99 '+tpFmt(ht.p99)+' ('+ht.total+' concurrent)';}
+      h+='<br><span style="color:var(--text3);font-size:11px">'+new Date(d.timestamp).toLocaleString()+'</span></div>';
+      res.innerHTML=h;
+      tpLoad();
+    })
+    .catch(function(err){
+      btn.disabled=false; btn.textContent='Run (50 req)';
+      res.innerHTML='<span style="color:var(--danger);font-size:12px">Error: '+err.message+'</span>';
+    });
+}
+function testApi(){
+  var s=document.getElementById('api-status');s.textContent='...';
+  setTimeout(function(){var ms=Math.floor(Math.random()*300+80);s.textContent='200 OK - '+ms+'ms';s.className='nbadge '+(ms<500?'g':'a');},700);
+}
+function runAudit(){
+  ['Checking encryption...','Verifying no server uploads...','Google backup check...','Audit complete! Score: 99.9%'].forEach(function(s,i){setTimeout(function(){notify(s);},i*800);});
+}
+
+// ── Projects ────────────────────────────────────────────────────────────────
+function prjAll(){try{return JSON.parse(localStorage.getItem('forgeai_projects')||'[]');}catch(e){return[];}}
+function prjStore(a){try{localStorage.setItem('forgeai_projects',JSON.stringify(a));}catch(e){console.error('[prj] store failed',e);}}
+function appsAll(){try{return JSON.parse(localStorage.getItem('forgeai_apps')||'[]');}catch(e){return[];}}
+function appsStore(a){try{localStorage.setItem('forgeai_apps',JSON.stringify(a));}catch(e){}}
+
+function prjDraw(){
+  var el=document.getElementById('proj-list');
+  if(!el)return;
+  var all=prjAll();
+  if(!all.length){
+    el.innerHTML='<div style="padding:4px 14px 6px;font-size:11px;color:var(--text3);font-style:italic">No projects yet</div>';
+    return;
+  }
+  el.innerHTML=all.map(function(p){
+    var tx=String(p.name||'Project').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    var cnt=(p.chatIds||[]).length+(p.appIds||[]).length;
+    return '<div class="proj-item" onclick="prjOpen(\''+p.id+'\')">'+
+      '<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+tx+'</span>'+
+      (cnt?'<span style="font-size:10px;background:var(--ibg);color:var(--info);border-radius:10px;padding:1px 6px;flex-shrink:0">'+cnt+'</span>':'')+
+      '<button onclick="event.stopPropagation();prjDelete(\''+p.id+'\')" style="background:none;border:none;cursor:pointer;font-size:14px;padding:0 2px;flex-shrink:0;line-height:1;color:var(--text3);opacity:0.45" title="Delete project">×</button>'+
+    '</div>';
+  }).join('');
+}
+
+function prjNew(){
+  var name=(prompt('Project name:')||'').trim();
+  if(!name)return;
+  var all=prjAll();
+  all.unshift({id:'prj_'+Date.now(),name:name,createdAt:Date.now(),chatIds:[],appIds:[]});
+  prjStore(all);prjDraw();
+  notify('Project "'+name+'" created!');
+}
+
+function prjDelete(id){
+  if(!confirm('Delete this project? (Chats and apps are kept — only the grouping is removed)'))return;
+  prjStore(prjAll().filter(function(p){return p.id!==id;}));
+  prjDraw();
+}
+
+function prjOpen(id){
+  var all=prjAll(),proj=null;
+  for(var i=0;i<all.length;i++){if(all[i].id===id){proj=all[i];break;}}
+  if(!proj)return;
+  window._curProjId=id;
+  var chats=chAll(),apps=appsAll();
+  var chatItems=(proj.chatIds||[]).map(function(cid){
+    var c=null;for(var j=0;j<chats.length;j++){if(chats[j].id===cid){c=chats[j];break;}}
+    if(!c)return '';
+    var tx=esc(c.title||'New Chat');
+    return '<div onclick="prjLoadChat(\''+cid+'\')" style="display:flex;align-items:center;padding:9px 12px;background:var(--bg3);border-radius:var(--r);margin-bottom:6px;cursor:pointer;gap:8px;font-size:12px;border:1px solid var(--border)">'+
+      '<span style="font-size:15px">💬</span><span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+tx+'</span>'+
+      '<button onclick="event.stopPropagation();prjUnlinkChat(\''+id+'\',\''+cid+'\')" title="Remove from project" style="background:none;border:none;cursor:pointer;color:var(--text3);font-size:14px;padding:0;line-height:1;opacity:.5;flex-shrink:0">×</button>'+
+    '</div>';
+  }).filter(Boolean).join('');
+  var appItems=(proj.appIds||[]).map(function(aid){
+    var a=null;for(var j=0;j<apps.length;j++){if(apps[j].id===aid){a=apps[j];break;}}
+    if(!a)return '';
+    var tx=esc(a.name||'App');
+    return '<div style="display:flex;align-items:center;padding:9px 12px;background:var(--bg3);border-radius:var(--r);margin-bottom:6px;gap:8px;font-size:12px;border:1px solid var(--border)">'+
+      '<span style="font-size:15px">⚡</span><span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+tx+'</span>'+
+      '<button onclick="prjDownloadApp(\''+aid+'\')" style="font-size:11px;padding:3px 8px;border:1px solid var(--border);border-radius:5px;background:var(--bg);cursor:pointer;color:var(--text2);white-space:nowrap;flex-shrink:0">⬇</button>'+
+      '<button onclick="event.stopPropagation();prjUnlinkApp(\''+id+'\',\''+aid+'\')" title="Remove from project" style="background:none;border:none;cursor:pointer;color:var(--text3);font-size:14px;padding:0;line-height:1;opacity:.5;flex-shrink:0">×</button>'+
+    '</div>';
+  }).filter(Boolean).join('');
+  var content=
+    (chatItems?'<div style="font-size:10px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">Chats</div>'+chatItems:'')+
+    (appItems?'<div style="font-size:10px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;margin:'+(chatItems?'14':'0')+'px 0 8px">Generated Apps</div>'+appItems:'');
+  document.getElementById('proj-panel-content').innerHTML=
+    content||'<div style="text-align:center;padding:28px 14px;color:var(--text3);font-size:12px">No items yet.<br><br>Click 📁 on a chat in RECENT to add it,<br>or use "Save to Project" after generating an app.</div>';
+  document.getElementById('proj-panel-title').textContent=proj.name;
+  panels.forEach(function(p){var el=document.getElementById('panel-'+p);if(el)el.classList.remove('active');});
+  var pp=document.getElementById('panel-projects');if(pp)pp.classList.add('active');
+  document.querySelectorAll('.ni').forEach(function(n){n.classList.remove('active');});
+  document.getElementById('tb-title').textContent=proj.name;
+  document.getElementById('tb-badge').textContent='Project';
+}
+
+function prjLoadChat(chatId){chOpen(chatId);}
+
+function prjUnlinkChat(projId,chatId){
+  var all=prjAll();
+  for(var i=0;i<all.length;i++){if(all[i].id===projId){all[i].chatIds=(all[i].chatIds||[]).filter(function(c){return c!==chatId;});break;}}
+  prjStore(all);prjDraw();prjOpen(projId);
+}
+
+function prjUnlinkApp(projId,appId){
+  var all=prjAll();
+  for(var i=0;i<all.length;i++){if(all[i].id===projId){all[i].appIds=(all[i].appIds||[]).filter(function(a){return a!==appId;});break;}}
+  prjStore(all);prjDraw();prjOpen(projId);
+}
+
+function prjDownloadApp(appId){
+  var apps=appsAll(),a=null;
+  for(var i=0;i<apps.length;i++){if(apps[i].id===appId){a=apps[i];break;}}
+  if(!a||!a.code)return;
+  var blob=new Blob([a.code],{type:'text/html'});
+  var link=document.createElement('a');link.href=URL.createObjectURL(blob);link.download=(a.name||'app')+'.html';
+  document.body.appendChild(link);link.click();document.body.removeChild(link);URL.revokeObjectURL(link.href);
+  notify('Downloaded '+esc(a.name)+'!');
+}
+
+var _pickerCb=null;
+function showProjPicker(anchorEl,cb){
+  var pk=document.getElementById('proj-picker');
+  var all=prjAll();
+  if(!all.length){if(confirm('No projects yet. Create one now?')){prjNew();}return;}
+  _pickerCb=cb;
+  pk.innerHTML='<div class="proj-picker-hd">Add to project</div>'+
+    all.map(function(p){return '<div class="proj-picker-item" onclick="prjPickerSelect(\''+p.id+'\')">'+esc(p.name)+'</div>';}).join('');
+  var rect=anchorEl.getBoundingClientRect();
+  pk.style.display='block';
+  var pkH=Math.min(pk.scrollHeight,220);
+  var top=rect.bottom+4;
+  if(top+pkH>window.innerHeight-8){top=rect.top-pkH-4;}
+  pk.style.top=top+'px';
+  pk.style.left=Math.min(rect.left,window.innerWidth-170)+'px';
+}
+
+function prjPickerSelect(projId){
+  document.getElementById('proj-picker').style.display='none';
+  if(_pickerCb){_pickerCb(projId);_pickerCb=null;}
+}
+
+function prjAssignChat(chatId,anchorEl){
+  showProjPicker(anchorEl,function(projId){
+    var all=prjAll();
+    for(var i=0;i<all.length;i++){
+      if(all[i].id===projId){
+        all[i].chatIds=all[i].chatIds||[];
+        if(all[i].chatIds.indexOf(chatId)===-1)all[i].chatIds.push(chatId);
+        break;
+      }
+    }
+    prjStore(all);prjDraw();
+    notify('Chat added to project!');
+  });
+}
+
+function prjSaveApp(code,name,anchorEl){
+  if(!code){notify('No app to save yet!');return;}
+  showProjPicker(anchorEl,function(projId){
+    var appId='app_'+Date.now();
+    var apps=appsAll();
+    apps.push({id:appId,name:name||'App',code:code,createdAt:Date.now()});
+    appsStore(apps);
+    var projs=prjAll();
+    for(var i=0;i<projs.length;i++){
+      if(projs[i].id===projId){
+        projs[i].appIds=projs[i].appIds||[];
+        projs[i].appIds.push(appId);
+        break;
+      }
+    }
+    prjStore(projs);prjDraw();
+    var btn=document.getElementById('dw-save-proj-btn');
+    if(btn){btn.textContent='✅ Saved!';btn.style.color='var(--success)';btn.disabled=true;}
+    notify('App saved to project!');
+  });
+}
+
+(function(){var fill=document.getElementById('dp');if(!fill)return;var p=67;setInterval(function(){p+=Math.random()*2;if(p>=100){p=100;notify('api-service deployed!');}fill.style.width=Math.min(p,100)+'%';},3000);})();
+updateEnterpriseUI();
+// Page-load restore + event wiring
+(function(){
+  var cpyBtn='<div style="margin-top:5px"><button onclick="copyMsg(this)" style="background:none;border:none;cursor:pointer;font-size:11px;color:var(--text3);padding:1px 5px;border-radius:4px;line-height:1.4" title="Copy message">📋</button></div>';
+
+  // One-time migration: old flat key → sessions
+  var oldFlat=localStorage.getItem('forgeai_chat_history');
+  if(oldFlat&&!localStorage.getItem('forgeai_chats')){
+    try{
+      var oldMsgs=JSON.parse(oldFlat);
+      if(Array.isArray(oldMsgs)&&oldMsgs.length>0){
+        var migId='ch_'+Date.now(),fu=null;
+        for(var k=0;k<oldMsgs.length;k++){if(oldMsgs[k].role==='user'){fu=oldMsgs[k];break;}}
+        chStore([{id:migId,title:fu?chMakeTitle(fu.content):'Restored Chat',messages:oldMsgs,updatedAt:Date.now()}]);
+        localStorage.setItem('forgeai_active_chat',migId);
+        console.log('[init] migrated old chat history to session',migId);
+      }
+    }catch(e){}
+  }
+
+  // Remove sessions with no user messages (empty chats)
+  (function(){var a=chAll(),c=a.filter(function(s){return Array.isArray(s.messages)&&s.messages.some(function(m){return m.role==='user';});});if(c.length<a.length)chStore(c);})();
+
+  // Restore last active session into chat area
+  var all=chAll(),activeId=chCurId(),sess=null;
+  console.log('[init] sessions on load:',all.length,'activeId:',activeId);
+  if(all.length>0){
+    if(!activeId||!all.filter(function(s){return s.id===activeId;}).length){
+      activeId=all[0].id;localStorage.setItem('forgeai_active_chat',activeId);
+    }
+    for(var i=0;i<all.length;i++){if(all[i].id===activeId){sess=all[i];break;}}
+    if(sess&&Array.isArray(sess.messages)&&sess.messages.length>0){
+      chatHistory=sess.messages.slice();
+      var cm=document.getElementById('chat-msgs');cm.innerHTML='';
+      for(var i=0;i<chatHistory.length;i++){
+        var m=chatHistory[i],div=document.createElement('div');
+        if(m.role==='user'){div.className='msg u';div.innerHTML='<div class="mav u">VK</div><div><div class="bub">'+esc(m.content)+'</div>'+uActBar()+'</div>';}
+        else{div.className='msg';div.innerHTML='<div class="mav ai">F</div><div><div class="bub">'+formatMarkdown(m.content)+'</div>'+aiActBar()+'</div>';}
+        cm.appendChild(div);
+      }
+      cm.scrollTop=cm.scrollHeight;
+      scanChatFiles();
+    }
+  }
+  chDraw();
+  prjDraw();
+
+  // Close project picker when clicking outside
+  document.addEventListener('mousedown',function(e){
+    var pk=document.getElementById('proj-picker');
+    if(pk&&pk.style.display!=='none'&&!pk.contains(e.target)){
+      pk.style.display='none';_pickerCb=null;
+    }
+  });
+
+  // Wire RECENT list click delegation (runs here, after DOM + functions ready)
+  var chEl=document.getElementById('ch-list');
+  if(chEl){
+    chEl.addEventListener('click',function(e){
+      // Walk up from click target to find data-del or data-id
+      var node=e.target;
+      while(node&&node!==chEl){
+        if(node.getAttribute&&node.getAttribute('data-del')){
+          e.stopPropagation();chRemove(node.getAttribute('data-del'));return;
+        }
+        if(node.getAttribute&&node.getAttribute('data-id')){
+          chOpen(node.getAttribute('data-id'));return;
+        }
+        node=node.parentElement;
+      }
+    });
+    console.log('[init] RECENT list click handler attached');
+  }
+
+  // Quote-reply: wire selection detection on the chat messages area
+  var _cm=document.getElementById('chat-msgs');
+  if(_cm){
+    _cm.addEventListener('mouseup',function(){setTimeout(srCheck,10);});
+    _cm.addEventListener('touchend',function(){setTimeout(srCheck,60);});
+    _cm.addEventListener('scroll',srHide);
+  }
+  var _sb=document.getElementById('sel-btn');
+  if(_sb){
+    // mousedown (not click) so we can e.preventDefault() before the selection collapses
+    _sb.addEventListener('mousedown',function(e){
+      e.preventDefault();
+      var sel=window.getSelection(),text=sel?sel.toString().trim():'';
+      srHide(); if(sel)sel.removeAllRanges();
+      if(text)qSet(text);
+    });
+    _sb.addEventListener('touchstart',function(e){
+      e.preventDefault();
+      var sel=window.getSelection(),text=sel?sel.toString().trim():'';
+      srHide(); if(sel)sel.removeAllRanges();
+      if(text)qSet(text);
+    },{passive:false});
+  }
+  // Hide sel-btn on any click outside it
+  document.addEventListener('mousedown',function(e){
+    var b=document.getElementById('sel-btn');
+    if(b&&b.style.display!=='none'&&e.target!==b)srHide();
+  });
+
+  // Tamil history (unchanged)
+  var st=localStorage.getItem('forgeai_tamil_history');
+  if(st){try{tamilHistory=JSON.parse(st);var tm=document.getElementById('tamil-msgs');tamilHistory.forEach(function(m){var div=document.createElement('div');if(m.role==='user'){div.className='msg u';div.innerHTML='<div class="mav u">VK</div><div><div class="bub">'+esc(m.content)+'</div></div>';}else{div.className='msg';div.innerHTML='<div class="mav ai" style="background:#FF6B35">AI</div><div><div class="bub" style="font-size:12px">'+formatMarkdown(m.content)+'</div>'+cpyBtn+'</div>';}tm.appendChild(div);});tm.scrollTop=tm.scrollHeight;}catch(e){localStorage.removeItem('forgeai_tamil_history');}}
+})();
+</script>
+</body>
+</html>

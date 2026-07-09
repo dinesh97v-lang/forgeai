@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>My AI — Multi-Model Router</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f0efeb;height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+.app{width:100%;max-width:800px;height:90vh;background:#fff;border:1px solid #e5e5e0;border-radius:14px;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,.08)}
+.header{padding:14px 18px;border-bottom:1px solid #e5e5e0;display:flex;align-items:center;gap:10px}
+.logo{font-size:19px;font-weight:800;letter-spacing:-0.5px}
+.logo span{color:#E24B4A}
+.badge{font-size:10px;background:#EAF3DE;color:#3B6D11;padding:3px 9px;border-radius:10px;font-weight:700}
+.status{margin-left:auto;font-size:11px;color:#9b9b9b}
+.msgs{flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:12px}
+.msg{display:flex;gap:9px;max-width:85%}
+.msg.u{align-self:flex-end;flex-direction:row-reverse}
+.av{width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0;margin-top:2px}
+.av.ai{background:#E24B4A;color:#fff}
+.av.u{background:#E6F1FB;color:#185FA5}
+.bub{padding:10px 13px;border-radius:12px;font-size:13px;line-height:1.65;background:#fff;border:1px solid #e5e5e0;white-space:pre-wrap;word-break:break-word}
+.msg.u .bub{background:#E6F1FB;border-color:transparent;color:#185FA5}
+.meta{font-size:10px;color:#9b9b9b;margin-top:4px;display:flex;gap:8px;align-items:center}
+.model-tag{font-size:9px;padding:2px 7px;border-radius:8px;font-weight:700}
+.model-tag.groq{background:#FAEEDA;color:#854F0B}
+.model-tag.claude{background:#F3E8FD;color:#7C3AED}
+.speed{font-weight:700;color:#3B6D11}
+.bub pre{background:#1e1e1e;color:#d4d4d4;padding:11px;border-radius:8px;overflow-x:auto;font-size:12px;margin:7px 0;font-family:'Consolas',monospace}
+.bub code{background:#f0efeb;padding:1px 5px;border-radius:4px;font-family:monospace;font-size:12px}
+.bub pre code{background:transparent;padding:0}
+.input-area{padding:12px 16px;border-top:1px solid #e5e5e0}
+.input-row{display:flex;gap:8px;align-items:flex-end}
+.input{flex:1;border:1.5px solid #d0d0c8;border-radius:10px;padding:10px 13px;font-size:13px;font-family:inherit;resize:none;min-height:42px;max-height:110px;outline:none;transition:border .2s}
+.input:focus{border-color:#E24B4A}
+.send{width:42px;height:42px;border-radius:10px;background:#E24B4A;border:none;color:#fff;font-size:16px;cursor:pointer;flex-shrink:0;transition:background .2s}
+.send:hover{background:#A32D2D}
+.send:disabled{background:#d0d0c8;cursor:not-allowed}
+.pills{display:flex;gap:6px;flex-wrap:wrap;padding:0 16px 10px}
+.pill{font-size:11px;padding:5px 11px;border:1px solid #e5e5e0;border-radius:16px;color:#6b6b6b;cursor:pointer;background:#fff;transition:all .15s}
+.pill:hover{background:#E24B4A;color:#fff;border-color:#E24B4A}
+.typing{display:flex;gap:4px;align-items:center}
+.dot{width:6px;height:6px;border-radius:50%;background:#9b9b9b;animation:bounce 1.2s infinite}
+.dot:nth-child(2){animation-delay:.2s}
+.dot:nth-child(3){animation-delay:.4s}
+@keyframes bounce{0%,60%,100%{transform:translateY(0)}30%{transform:translateY(-6px)}}
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="header">
+    <div class="logo">My<span>AI</span></div>
+    <span class="badge">🔒 Private Router</span>
+    <span class="status" id="status">Checking server...</span>
+  </div>
+  <div class="msgs" id="msgs">
+    <div class="msg">
+      <div class="av ai">AI</div>
+      <div>
+        <div class="bub">Vanakkam! நான் உன் Multi-Model AI!
+
+⚡ Simple questions → Groq (super fast!)
+🧠 Complex questions → Claude (super smart!)
+🇮🇳 Tamil questions → Claude (best Tamil!)
+
+Try பண்ணு — எந்த model answer பண்ணுது, எவ்வளவு speed-ன்னு கீழ காட்டும்!</div>
+      </div>
+    </div>
+  </div>
+  <div class="pills">
+    <div class="pill" onclick="ask('Write a for loop in Python')">Simple: Python loop</div>
+    <div class="pill" onclick="ask('Design a secure authentication architecture for a banking app')">Complex: Bank auth</div>
+    <div class="pill" onclick="ask('Login page code எழுது')">Tamil: Login code</div>
+    <div class="pill" onclick="ask('What is an API?')">Simple: What is API</div>
+  </div>
+  <div class="input-area">
+    <div class="input-row">
+      <textarea class="input" id="input" placeholder="Tamil or English-ல கேளு..." rows="1"
+        onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();send();}"
+        oninput="this.style.height='';this.style.height=Math.min(this.scrollHeight,110)+'px'"></textarea>
+      <button class="send" id="sendBtn" onclick="send()">➤</button>
+    </div>
+  </div>
+</div>
+
+<script>
+var msgs = document.getElementById('msgs');
+var busy = false;
+
+// Check server health on load
+fetch('/api/health')
+  .then(function(r){ return r.json(); })
+  .then(function(d){
+    document.getElementById('status').textContent = 
+      'Groq: ' + d.groqKey + ' | Claude: ' + d.claudeKey;
+  })
+  .catch(function(){
+    document.getElementById('status').textContent = 'Server not running!';
+  });
+
+function ask(text) {
+  document.getElementById('input').value = text;
+  send();
+}
+
+function escapeHtml(t) {
+  return t.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function formatReply(text) {
+  var safe = escapeHtml(text);
+  // Code blocks
+  safe = safe.replace(/```(\w*)\n([\s\S]+?)```/g, '<pre><code>$2</code></pre>');
+  // Inline code
+  safe = safe.replace(/`([^`]+)`/g, '<code>$1</code>');
+  return safe;
+}
+
+function send() {
+  if (busy) return;
+  var input = document.getElementById('input');
+  var text = input.value.trim();
+  if (!text) return;
+
+  busy = true;
+  document.getElementById('sendBtn').disabled = true;
+
+  // User message
+  var um = document.createElement('div');
+  um.className = 'msg u';
+  um.innerHTML = '<div class="av u">Me</div><div><div class="bub">' + escapeHtml(text) + '</div></div>';
+  msgs.appendChild(um);
+  input.value = '';
+  input.style.height = '';
+  msgs.scrollTop = msgs.scrollHeight;
+
+  // Typing indicator
+  var typ = document.createElement('div');
+  typ.className = 'msg';
+  typ.id = 'typ';
+  typ.innerHTML = '<div class="av ai">AI</div><div class="bub"><div class="typing"><div class="dot"></div><div class="dot"></div><div class="dot"></div></div></div>';
+  msgs.appendChild(typ);
+  msgs.scrollTop = msgs.scrollHeight;
+
+  // Call router API!
+  fetch('/api/chat', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ prompt: text })
+  })
+  .then(function(r){ return r.json(); })
+  .then(function(data) {
+    var t = document.getElementById('typ');
+    if (t) t.remove();
+
+    var am = document.createElement('div');
+    am.className = 'msg';
+    
+    if (data.error) {
+      am.innerHTML = '<div class="av ai">AI</div><div><div class="bub" style="color:#A32D2D">Error: ' + data.error + '</div></div>';
+    } else {
+      var modelClass = data.model.indexOf('groq') > -1 ? 'groq' : 'claude';
+      var modelName = data.model.indexOf('groq') > -1 ? '⚡ Groq' : '🧠 Claude';
+      am.innerHTML = '<div class="av ai">AI</div><div>' +
+        '<div class="bub">' + formatReply(data.reply) + '</div>' +
+        '<div class="meta">' +
+          '<span class="model-tag ' + modelClass + '">' + modelName + '</span>' +
+          '<span class="speed">' + data.time + '</span>' +
+          '<span>' + data.reason + '</span>' +
+        '</div></div>';
+    }
+    msgs.appendChild(am);
+    msgs.scrollTop = msgs.scrollHeight;
+    busy = false;
+    document.getElementById('sendBtn').disabled = false;
+  })
+  .catch(function(err) {
+    var t = document.getElementById('typ');
+    if (t) t.remove();
+    var em = document.createElement('div');
+    em.className = 'msg';
+    em.innerHTML = '<div class="av ai">AI</div><div><div class="bub" style="color:#A32D2D">Server connect ஆகல! Terminal-ல "npm start" run ஆகுதான்னு பாரு!</div></div>';
+    msgs.appendChild(em);
+    busy = false;
+    document.getElementById('sendBtn').disabled = false;
+  });
+}
+</script>
+</body>
+</html>
