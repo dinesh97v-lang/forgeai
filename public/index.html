@@ -541,6 +541,16 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
             <div id="tp-lt-result" style="font-size:12px;color:var(--text2);line-height:1.6">No test run yet. Fires 50 concurrent GET /api/health requests and verifies zero server crashes.</div>
           </div>
         </div>
+        <!-- API Quota -->
+        <div class="card">
+          <div class="card-hd">
+            <div class="card-title">API Quota</div>
+            <button onclick="tpLoadQuota()" title="Refresh" style="background:none;border:none;color:var(--text2);cursor:pointer;font-size:15px;padding:2px 6px;line-height:1;border-radius:4px" onmouseover="this.style.color='var(--text1)'" onmouseout="this.style.color='var(--text2)'">↻</button>
+          </div>
+          <div class="card-bd" id="tp-quota">
+            <div style="text-align:center;color:var(--text2);font-size:12px;padding:8px 0">Loading…</div>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -863,7 +873,7 @@ function go(name,el){
 }
 
 function switchMode(mode){
-  pvClose(); pvFiles={html:'',css:'',js:''};
+  pvClose(); pvFiles={html:'',css:'',js:'',reactNative:{}};
   var isPro=mode==='pro';
   document.getElementById('pro-btn').classList.toggle('active',isPro);
   document.getElementById('simple-btn').classList.toggle('active',!isPro);
@@ -962,7 +972,7 @@ function chSync(){
   chDraw();
 }
 function chNewChat(){
-  pvClose(); pvFiles={html:'',css:'',js:''};
+  pvClose(); pvFiles={html:'',css:'',js:'',reactNative:{}};
   chatHistory=[];localStorage.removeItem('forgeai_chat_history');
   localStorage.removeItem('forgeai_active_chat');
   document.getElementById('chat-msgs').innerHTML=welcomeHTML();
@@ -970,7 +980,7 @@ function chNewChat(){
   var ni=document.querySelector((isSimple()?'#simple-nav':'#pro-nav')+' .ni');if(ni)go('chat',ni);
 }
 function chOpen(id){
-  pvClose(); pvFiles={html:'',css:'',js:''};
+  pvClose(); pvFiles={html:'',css:'',js:'',reactNative:{}};
   var all=chAll(),sess=null;
   for(var i=0;i<all.length;i++){if(all[i].id===id){sess=all[i];break;}}
   if(!sess){console.warn('[chOpen] not found:',id);return;}
@@ -983,7 +993,7 @@ function chOpen(id){
     cm.innerHTML='';
     for(var i=0;i<chatHistory.length;i++){
       var m=chatHistory[i],div=document.createElement('div');
-      if(m.role==='user'){div.className='msg u';div.innerHTML='<div class="mav u">VK</div><div><div class="bub">'+esc(m.content)+'</div>'+uActBar()+'</div>';}
+      if(m.role==='user'){div.className='msg u';div.innerHTML=renderUserBub(m);}
       else{div.className='msg';div.innerHTML='<div class="mav ai">F</div><div><div class="bub">'+formatMarkdown(m.content)+'</div>'+aiActBar()+'</div>';}
       cm.appendChild(div);
     }
@@ -1015,15 +1025,13 @@ function formatMarkdown(text){
     .replace(/>/g,'&gt;');
   // 2. Code blocks: ```lang\ncode``` — replace with dark box + copy button
   var blocks=[];
-  s=s.replace(/```(\w*)\n?([\s\S]*?)```/g,function(m,lang,code){
+  s=s.replace(/```([^\n`]*)\n?([\s\S]*?)```/g,function(m,lang,code){
     var id='cb'+Math.random().toString(36).slice(2,10);
     var label=lang?'<div style="font-size:10px;color:#888;padding:6px 12px 2px;font-family:monospace">'+lang+'</div>':'';
-    // Detect previewable: html/css/js lang tags OR structural HTML tags in code
-    var isHtml=(lang&&/^html$/i.test(lang))||/&lt;(!DOCTYPE\b|html\b|head\b|body\b)/i.test(code);
-    var isCss=!!(lang&&/^css$/i.test(lang));
-    var isJs=!!(lang&&/^(javascript|js)$/i.test(lang));
-    var fileKey=isHtml?'html':isCss?'css':isJs?'js':'';
-    if(fileKey)pvStore(fileKey,code.trim());
+    // Detect previewable file type — delegates to shared pvDetectLang()
+    var fileKey=pvDetectLang(lang,code);
+    if(fileKey==='rn'){pvStoreRn(lang,code.trim());}
+    else if(fileKey){pvStore(fileKey,code.trim());}
     var pvBtn=fileKey?'<button onclick="pvOpen(\''+id+'\',\''+fileKey+'\')" style="position:absolute;top:6px;right:60px;font-size:10px;padding:2px 8px;border-radius:4px;border:1px solid #6366f1;background:rgba(99,102,241,.15);color:#a5b4fc;cursor:pointer;font-family:inherit">▶ Preview</button>':'';
     var html='<div style="background:#1e1e1e;border-radius:8px;margin:8px 0;overflow:hidden;position:relative">'
       +label
@@ -1175,12 +1183,50 @@ function copyMsg(btn){
   else{var ta=document.createElement('textarea');ta.value=text;document.body.appendChild(ta);ta.select();document.execCommand('copy');document.body.removeChild(ta);done();}
 }
 // ── Live Preview Panel ──────────────────────────────────────────────────────
-var pvCode=''; var pvFiles={html:'',css:'',js:''};
+var pvCode=''; var pvFiles={html:'',css:'',js:'',reactNative:{}};
 function pvStore(key,escapedCode){
   var d=document.createElement('div');d.innerHTML=escapedCode;pvFiles[key]=d.textContent;
 }
+function pvRnName(rawLang){
+  var l=(rawLang||'').trim();
+  // Label is already a JS/JSX/TS/TSX filename — use it as-is
+  if(/\.[jt]sx?$/i.test(l)) return l;
+  // Generic label (jsx, javascript, etc.) — slot into App.js, then Screen2.js, Screen3.js ...
+  var keys=Object.keys(pvFiles.reactNative);
+  if(keys.length===0) return 'App.js';
+  return 'Screen'+(keys.length+1)+'.js';
+}
+function pvStoreRn(rawLang,escapedCode){
+  var d=document.createElement('div');d.innerHTML=escapedCode;
+  pvFiles.reactNative[pvRnName(rawLang)]=d.textContent;
+}
+// Single source of truth for code-block language detection.
+// Works with BOTH the live render path (code is HTML-escaped: &lt; etc.)
+// and the scanChatFiles path (code is raw markdown text: < etc.).
+function pvDetectLang(rawLang, code){
+  var l=(rawLang||'').toLowerCase().trim();
+  var key='';
+  // React Native: content-based detection (strongest signal — before any label check)
+  // Works on both HTML-escaped (&lt;) and raw code since quotes/letters aren't escaped
+  var isRN=/from\s+['"]react-native['"]|require\s*\(\s*['"]react-native['"]\s*\)/i.test(code);
+  if(isRN) key='rn';
+  // Web HTML
+  else if(/^html?$/.test(l)||/\.html?$/.test(l)) key='html';
+  // CSS
+  else if(/^css$/.test(l)||/\.css$/.test(l)) key='css';
+  // Web JS / JSX / TS / TSX (non-RN)
+  else if(/^(javascript|js|jsx|typescript|ts|tsx)$/.test(l)||/\.[jt]sx?$/.test(l)) key='js';
+  // Structural HTML fallback (handles escaped &lt; and raw <)
+  else if(/(?:&lt;|<)\s*!doctype\b/i.test(code)||/(?:&lt;|<)\s*(?:html|head|body)\b/i.test(code)) key='html';
+  console.log('[pvDetect] label="'+rawLang+'" → "'+key+'" ('+code.length+'ch)');
+  return key;
+}
 function pvBuild(){
   var h=pvFiles.html; if(!h) return '';
+  console.log('[pvBuild] html='+h.length+'ch css='+pvFiles.css.length+'ch js='+pvFiles.js.length+'ch');
+  // External refs fail silently in srcdoc — strip them; we inject inline below
+  h=h.replace(/<link\b[^>]*>/gi,'');
+  h=h.replace(/<script\b[^>]*\bsrc\s*=\s*["'][^"']*["'][^>]*>\s*<\/script>/gi,'');
   var css=pvFiles.css, js=pvFiles.js;
   if(css){
     var st='<style>\n'+css+'\n</style>';
@@ -1188,42 +1234,173 @@ function pvBuild(){
     else if(/(<\/body>)/i.test(h)){h=h.replace(/(<\/body>)/i,function(_,g){return st+g;});}
     else{h+=st;}
   }
+  // Debug bar: shows CSS/JS injection status inside the preview
+  var dbBar='<div id="pv-dbg" style="position:fixed;bottom:0;right:0;font-size:10px;padding:2px 6px;background:rgba(0,0,0,.55);color:#fff;font-family:monospace;z-index:99999;border-radius:4px 0 0 0">CSS:'+(css?'✓':'✗')+' JS:'+(js?'✓':'✗')+'</div>';
   if(js){
-    var sc='<script>\n'+js+'\n<\/script>';
-    if(/(<\/body>)/i.test(h)){h=h.replace(/(<\/body>)/i,function(_,g){return sc+g;});}
-    else{h+=sc;}
+    var dbg=
+      'window.onerror=function(m,s,l){'+
+        'var b=document.body;if(!b)return true;'+
+        'var e=document.getElementById("__pverr")||document.createElement("div");'+
+        'e.id="__pverr";'+
+        'e.style.cssText="position:fixed;top:0;left:0;right:0;background:#dc2626;color:#fff;font-size:11px;padding:5px 8px;font-family:monospace;z-index:999999;white-space:pre-wrap";'+
+        'e.textContent="[JS Error] "+m+" (line "+l+")";'+
+        'b.appendChild(e);return true;'+
+      '};'+
+      'document.addEventListener("click",function(ev){'+
+        'var t=ev.target;'+
+        'console.log("[pv click]",t.tagName,JSON.stringify((t.textContent||t.value||"").trim().slice(0,20)),t.className||"",t.getAttribute("onclick")||"");'+
+      '});';
+    // After user JS runs, promote any named functions to window so onclick attrs can find them
+    // even if the AI wrapped them in an IIFE or block scope
+    var expose=
+      '(function(){'+ // expose helpers wrapped in IIFE
+        'var d=document,fns=[];'+
+        'd.querySelectorAll("[onclick]").forEach(function(el){'+
+          'var m=el.getAttribute("onclick").match(/^(\\w+)\\s*\\(/);'+
+          'if(m&&m[1])fns.push(m[1]);'+
+        '});'+
+        'fns.forEach(function(n){'+
+          'if(typeof window[n]!=="function"){'+
+            'try{var f=eval(n);if(typeof f==="function")window[n]=f;}catch(e){}'+
+          '}'+
+        '});'+
+      '})();';
+    var sc='<script>\n'+dbg+'\n'+js+'\n'+expose+'\n<\/script>';
+    if(/(<\/body>)/i.test(h)){h=h.replace(/(<\/body>)/i,function(_,g){return dbBar+sc+g;});}
+    else{h+=dbBar+sc;}
+  }else{
+    if(/(<\/body>)/i.test(h)){h=h.replace(/(<\/body>)/i,function(_,g){return dbBar+g;});}
+    else{h+=dbBar;}
   }
   return h;
 }
+// Build the processed files object: auto-generates App.js if missing.
+function pvBuildRNFiles(){
+  var files={};
+  for(var k in pvFiles.reactNative) files[k]=pvFiles.reactNative[k];
+  if(!files['App.js']&&Object.keys(files).length>0){
+    var firstKey=Object.keys(files)[0];
+    var comp=firstKey.replace(/\.[jt]sx?$/i,'').replace(/[^a-zA-Z0-9_$]/g,'_');
+    files['App.js']=
+      "import React from 'react';\n"+
+      "import "+comp+" from './"+firstKey+"';\n\n"+
+      "export default function App(){\n"+
+      "  return <"+comp+" />;\n"+
+      "}";
+  }
+  return files;
+}
+// Renders the Expo Snack embed using the official div + embed.js pattern.
+// Receives the processed files object from pvBuildRNFiles().
+// Direct iframe to snack.expo.dev is blocked by their X-Frame-Options;
+// the embed.js script scans for .snack-player divs and injects its own iframe.
+function pvLoadSnack(files){
+  var live=document.getElementById('pv-live');
+  if(!live) return;
+  // Remove previous web srcdoc iframe or snack wrap
+  var old=document.getElementById('pv-iframe'); if(old) old.remove();
+  var oldW=document.getElementById('pv-snack-wrap'); if(oldW) oldW.remove();
+  // Remove previous embed.js so it re-runs and rescans on this preview open
+  var oldSc=document.getElementById('snack-embed-js'); if(oldSc) oldSc.remove();
+
+  // ── Wrapper ──────────────────────────────────────────────────────
+  var wrap=document.createElement('div');
+  wrap.id='pv-snack-wrap';
+  wrap.style.cssText='display:flex;flex-direction:column;width:100%;height:100%;';
+
+  // Note bar
+  var note=document.createElement('div');
+  note.style.cssText='font-size:10px;padding:5px 8px;background:rgba(99,102,241,.12);color:#a5b4fc;border-bottom:1px solid rgba(99,102,241,.2);flex-shrink:0;line-height:1.4';
+  note.textContent='📱 Live preview via Expo Snack — phone la paakka QR scan pannunga (Snack player la irukku)';
+
+  // Snack player div — embed.js converts this into the interactive player
+  var snackDiv=document.createElement('div');
+  snackDiv.className='snack-player';
+  snackDiv.setAttribute('data-snack-platform','web');
+  snackDiv.setAttribute('data-snack-preview','true');
+  snackDiv.setAttribute('data-snack-theme','dark');
+  snackDiv.setAttribute('data-snack-name','ForgeAI Preview');
+  snackDiv.style.cssText='flex:1;overflow:hidden;min-height:0;';
+  // Single file → data-snack-code; multi-file → data-snack-files (JSON)
+  var fkeys=Object.keys(files);
+  if(fkeys.length===1){
+    snackDiv.setAttribute('data-snack-code',files[fkeys[0]]);
+  }else{
+    var sf={};
+    for(var k in files) sf[k]={type:'CODE',contents:files[k]};
+    snackDiv.setAttribute('data-snack-files',JSON.stringify(sf));
+  }
+
+  // Fallback shown if embed.js fails / network offline
+  var fb=document.createElement('div');
+  fb.id='pv-snack-fb';
+  fb.style.cssText='display:none;flex:1;padding:28px 16px;text-align:center;color:var(--text2);font-size:13px;line-height:1.9;flex-direction:column;align-items:center;justify-content:center';
+  fb.innerHTML=
+    'Preview load aagala — Expo Snack reach aagala (network blocked?).<br><br>'+
+    'Expo Go app la manually run pannunga:<br>'+
+    '<code style="background:var(--bg3);padding:3px 10px;border-radius:4px;font-size:11px;font-family:monospace">npx expo start</code><br>'+
+    '→ QR scan pannu';
+
+  wrap.appendChild(note);
+  wrap.appendChild(snackDiv);
+  wrap.appendChild(fb);
+  live.appendChild(wrap);
+
+  // ── Fallback timer ────────────────────────────────────────────────
+  // embed.js injects an <iframe> inside snackDiv when it initialises.
+  // If no iframe appears after 12 s, assume failure and show fallback.
+  var fbTimer=setTimeout(function(){
+    if(!snackDiv.querySelector('iframe')){
+      snackDiv.style.display='none'; fb.style.display='flex';
+    }
+  },12000);
+
+  // ── Load embed.js ─────────────────────────────────────────────────
+  // Appended to <body> AFTER the div is in the DOM so embed.js finds it on load.
+  // ?t= cache-bust forces re-execution every time (embed.js only scans on load).
+  var sc=document.createElement('script');
+  sc.id='snack-embed-js';
+  sc.async=true;
+  sc.src='https://snack.expo.dev/embed.js?t='+Date.now();
+  sc.onerror=function(){
+    clearTimeout(fbTimer);
+    snackDiv.style.display='none'; fb.style.display='flex';
+  };
+  sc.onload=function(){
+    // Give embed.js 4 s to inject its iframe, then clear the timer
+    setTimeout(function(){
+      if(snackDiv.querySelector('iframe')) clearTimeout(fbTimer);
+    },4000);
+  };
+  document.body.appendChild(sc);
+}
 function pvLoadIframe(html){
-  // Remove existing iframe and create a fresh one so srcdoc always renders,
-  // even when the panel is transitioning from display:none
+  // Remove existing iframe/snack wrap and create a fresh srcdoc iframe
   var live=document.getElementById('pv-live');
   if(!live||!html) return;
-  var old=document.getElementById('pv-iframe');
-  if(old) old.remove();
+  var old=document.getElementById('pv-iframe'); if(old) old.remove();
+  var oldW=document.getElementById('pv-snack-wrap'); if(oldW) oldW.remove();
   var f=document.createElement('iframe');
   f.id='pv-iframe'; f.setAttribute('sandbox','allow-scripts');
   f.style.cssText='width:100%;height:100%;border:none;background:#fff';
   f.srcdoc=html; live.appendChild(f);
 }
 function pvRender(){
+  if(Object.keys(pvFiles.reactNative).length>0){pvLoadSnack(pvBuildRNFiles());return;}
   pvCode=pvBuild(); if(!pvCode) return;
   pvLoadIframe(pvCode);
 }
 function scanChatFiles(){
-  pvFiles={html:'',css:'',js:''};
-  var re=/```(\w*)\n?([\s\S]*?)```/g, m;
+  pvFiles={html:'',css:'',js:'',reactNative:{}};
+  var re=/```([^\n`]*)\n?([\s\S]*?)```/g, m;
   for(var i=0;i<chatHistory.length;i++){
     if(chatHistory[i].role!=='assistant') continue;
     re.lastIndex=0;
     while((m=re.exec(chatHistory[i].content))!==null){
-      var lang=(m[1]||'').toLowerCase(), raw=m[2].trim();
-      // raw is unescaped markdown source, so check real < chars for structural HTML
-      var key=lang==='html'||/<(!DOCTYPE|html|head|body)\b/i.test(raw)?'html':
-              lang==='css'?'css':
-              (lang==='javascript'||lang==='js')?'js':'';
-      if(key) pvFiles[key]=raw;
+      var lang=(m[1]||'').trim(), raw=m[2].trim();
+      var key=pvDetectLang(lang,raw);
+      if(key==='rn'){ pvFiles.reactNative[pvRnName(lang)]=raw; }
+      else if(key){ pvFiles[key]=raw; }
     }
   }
 }
@@ -1232,13 +1409,20 @@ function pvAutoUpdate(){
   if(pw&&pw.classList.contains('pv-open'))pvRender();
 }
 function pvOpen(preId,fileKey){
-  // Safety net: if pvFiles is empty (edge case after reload), scan chat history now
-  if(!pvFiles.html&&!pvFiles.css&&!pvFiles.js) scanChatFiles();
-  // Show panel first so iframe is appended into a visible container
+  // Safety net: if all pvFiles are empty, scan chat history now
+  var hasWeb=pvFiles.html||pvFiles.css||pvFiles.js;
+  var hasRN=Object.keys(pvFiles.reactNative).length>0;
+  if(!hasWeb&&!hasRN) scanChatFiles();
+  // Show panel
   pvTab('live');
   document.getElementById('panels-wrap').classList.add('pv-open');
+  // React Native → Expo Snack embed
+  if(Object.keys(pvFiles.reactNative).length>0){
+    requestAnimationFrame(function(){pvLoadSnack(pvBuildRNFiles());});
+    return;
+  }
+  // Web: no HTML yet
   if(!pvFiles.html&&fileKey!=='html'){
-    // Defer to next frame so display:flex is computed before iframe is appended
     requestAnimationFrame(function(){
       pvLoadIframe('<body style="font-family:sans-serif;padding:24px 16px;text-align:center;margin-top:60px;color:#888;font-size:14px;line-height:1.7">HTML file innum illa —<br>first HTML code vaangunga,<br>appo full preview varum</body>');
     });
@@ -1251,6 +1435,7 @@ function pvClose(){
   var pw=document.getElementById('panels-wrap');
   if(pw)pw.classList.remove('pv-open');
   pvCode='';
+  var oldW=document.getElementById('pv-snack-wrap'); if(oldW) oldW.remove();
 }
 function pvRefresh(){pvRender();}
 function pvTab(t){
@@ -1270,6 +1455,13 @@ function pvTab(t){
 }
 
 // ── Quote Reply ──────────────────────────────────────────────────────────────
+// Shared render for user bubbles — used by live send AND history restore.
+// m = {content, quotedText?}
+function renderUserBub(m){
+  var q=m.quotedText;
+  var qtHtml=q?'<div class="qt-msg">'+esc(q.length>200?q.slice(0,200)+'…':q)+'</div>':'';
+  return '<div class="mav u">VK</div><div><div class="bub">'+qtHtml+esc(m.content)+'</div>'+uActBar()+'</div>';
+}
 var qtText='';
 function srHide(){var b=document.getElementById('sel-btn');if(b)b.style.display='none';}
 function srShow(rect){
@@ -1308,9 +1500,8 @@ function send(){
   var t=inp.value.trim();if(!t)return;
   var msgs=document.getElementById('chat-msgs');
   var qtSnap=qtText; // snapshot before clearing
-  var qtHtml=qtSnap?'<div class="qt-msg">'+esc(qtSnap.length>200?qtSnap.slice(0,200)+'…':qtSnap)+'</div>':'';
   var u=document.createElement('div');u.className='msg u';
-  u.innerHTML='<div class="mav u">VK</div><div><div class="bub">'+qtHtml+esc(t)+'</div>'+uActBar()+'</div>';
+  u.innerHTML=renderUserBub({content:t,quotedText:qtSnap});
   msgs.appendChild(u);inp.value='';msgs.scrollTop=msgs.scrollHeight;
   qCancel();
   var typ=document.createElement('div');typ.id='typ';typ.className='msg';
@@ -1319,8 +1510,13 @@ function send(){
   go('chat',document.querySelector((isSimple()?'#simple-nav':'#pro-nav')+' .ni'));
   // Push user message now so RECENT updates immediately (before API responds)
   var apiPrompt=qtSnap?'Quoted text: "'+qtSnap+'"\n\nUser question: '+t:t;
-  var histForApi=chatHistory.slice(-10);
-  chatHistory.push({role:'user',content:t});
+  var histForApi=chatHistory.slice(-10).map(function(m){
+    if(m.role==='user'&&m.quotedText){return {role:'user',content:'Quoted text: "'+m.quotedText+'"\n\nUser question: '+m.content};}
+    return m;
+  });
+  var msgObj={role:'user',content:t};
+  if(qtSnap)msgObj.quotedText=qtSnap;
+  chatHistory.push(msgObj);
   saveChat();chSync();
   fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt:apiPrompt,history:histForApi,enterpriseMode:enterpriseMode,simpleMode:isSimple()})})
     .then(function(r){return r.json();})
@@ -1602,6 +1798,7 @@ function tpFmt(ms){return ms<1000?ms+'ms':(ms/1000).toFixed(1)+'s';}
 function tpUptime(s){if(s<60)return s+'s';if(s<3600)return Math.floor(s/60)+'m '+s%60+'s';return Math.floor(s/3600)+'h '+Math.floor(s%3600/60)+'m';}
 
 function tpLoad(){
+  tpLoadQuota();
   var el=document.getElementById('tp-health');
   if(!el)return;
   el.innerHTML='<div style="text-align:center;padding:24px 16px;color:var(--text2);font-size:12px">Checking server…</div>';
@@ -1668,6 +1865,57 @@ function tpRunLoadTest(){
     .catch(function(err){
       btn.disabled=false; btn.textContent='Run (50 req)';
       res.innerHTML='<span style="color:var(--danger);font-size:12px">Error: '+err.message+'</span>';
+    });
+}
+function tpLoadQuota(){
+  var el=document.getElementById('tp-quota');
+  if(!el)return;
+  el.innerHTML='<div style="text-align:center;color:var(--text2);font-size:12px;padding:8px 0">Loading…</div>';
+  fetch(TP_API+'/api/quota')
+    .then(function(r){return r.json();})
+    .then(function(d){
+      var labels={
+        'llama-3.1-8b-instant':   '8b-instant',
+        'llama-3.3-70b-versatile':'70b-versatile',
+        'qwen/qwen3-32b':         'Qwen3-32b',
+        'gpt-oss-20b':            'gpt-oss-20b',
+        'gemini-flash-lite-latest':'Flash-Lite (3.1)',
+        'gemini-flash-latest':    'Flash (3.5)'
+      };
+      var providers={
+        'llama-3.1-8b-instant':'Groq','llama-3.3-70b-versatile':'Groq',
+        'qwen/qwen3-32b':'Groq','gpt-oss-20b':'Groq',
+        'gemini-flash-lite-latest':'Gemini','gemini-flash-latest':'Gemini'
+      };
+      var order=['llama-3.1-8b-instant','llama-3.3-70b-versatile','qwen/qwen3-32b','gpt-oss-20b','gemini-flash-lite-latest','gemini-flash-latest'];
+      var h='<div style="display:flex;flex-direction:column;gap:10px">';
+      order.forEach(function(m){
+        var info=d[m]; if(!info) return;
+        var lbl=(labels[m]||m)+' <span style="font-size:10px;color:var(--text3);font-weight:400">('+providers[m]+')</span>';
+        h+='<div>';
+        h+='<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:3px">';
+        h+='<span style="font-size:12px;font-weight:600">'+lbl+'</span>';
+        if(info.remaining===null){
+          h+='<span style="font-size:11px;color:var(--text3)">No requests yet today</span>';
+          h+='</div></div>';return;
+        }
+        var pct=info.limit>0?Math.max(0,Math.min(100,info.remaining/info.limit*100)):0;
+        var barCol=pct>50?'#22c55e':pct>10?'#f59e0b':'#ef4444';
+        h+='<span style="font-size:11px;color:var(--text2)">'+info.remaining.toLocaleString()+' / '+info.limit.toLocaleString()+'</span>';
+        h+='</div>';
+        h+='<div style="background:var(--bg3);border-radius:3px;height:5px;overflow:hidden">';
+        h+='<div style="background:'+barCol+';height:100%;width:'+Math.max(1,pct.toFixed(1))+'%;transition:width .3s"></div>';
+        h+='</div>';
+        if(info.updatedAt){
+          h+='<div style="font-size:10px;color:var(--text3);margin-top:2px">Updated '+new Date(info.updatedAt).toLocaleTimeString()+'</div>';
+        }
+        h+='</div>';
+      });
+      h+='</div>';
+      el.innerHTML=h;
+    })
+    .catch(function(err){
+      el.innerHTML='<div style="color:var(--danger);font-size:12px">'+err.message+'</div>';
     });
 }
 function testApi(){
@@ -1876,7 +2124,7 @@ updateEnterpriseUI();
       var cm=document.getElementById('chat-msgs');cm.innerHTML='';
       for(var i=0;i<chatHistory.length;i++){
         var m=chatHistory[i],div=document.createElement('div');
-        if(m.role==='user'){div.className='msg u';div.innerHTML='<div class="mav u">VK</div><div><div class="bub">'+esc(m.content)+'</div>'+uActBar()+'</div>';}
+        if(m.role==='user'){div.className='msg u';div.innerHTML=renderUserBub(m);}
         else{div.className='msg';div.innerHTML='<div class="mav ai">F</div><div><div class="bub">'+formatMarkdown(m.content)+'</div>'+aiActBar()+'</div>';}
         cm.appendChild(div);
       }

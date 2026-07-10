@@ -5,6 +5,7 @@
 // Tamil prompt   -> Gemini (best multilingual!)
 // ============================================
 
+console.log('SERVER BUILD: v-DEBUG-1');
 require('dotenv').config();
 const express = require('express');
 const axios = require('axios');
@@ -20,44 +21,134 @@ const GROQ_KEY = process.env.GROQ_API_KEY;
 const GEMINI_KEY = process.env.GEMINI_API_KEY;
 const TAVILY_KEY = process.env.TAVILY_API_KEY;
 
-// ============================================
-// ROUTER LOGIC — The Brain!
-// ============================================
-function decideModel(prompt) {
-  // 1. Tamil detection (Tamil unicode range)
-  const hasTamil = /[\u0B80-\u0BFF]/.test(prompt);
-  if (hasTamil) {
-    return { model: 'gemini', reason: 'Tamil detected — Gemini handles Tamil well' };
+// ── Model IDs & daily quota reference ────────────────────────────────
+const MODELS = {
+  GROQ_8B:    'llama-3.1-8b-instant',                   // 14,400 req/day · 6K TPM
+  GROQ_70B:   'llama-3.3-70b-versatile',                 // 1,000 req/day · 12K TPM
+  GROQ_SCOUT: 'meta-llama/llama-4-scout-17b-16e-instruct', // 1,000 req/day · 30K TPM — large-input fallback
+  GEM_LITE:   'gemini-flash-lite-latest',                // alias -> 2.0-flash-lite — Tamil simple
+  GEM_FLASH:  'gemini-flash-latest',                     // alias -> 2.0-flash     — Tamil complex
+};
+
+// Safe input token budgets per model (TPM − max_output).
+// Keeps total request (input+output) within Groq free-tier per-minute limits.
+const MODEL_INPUT_LIMITS = {
+  [MODELS.GROQ_8B]:    3500,  // 6K TPM − 1.5K output cap
+  [MODELS.GROQ_70B]:   7000,  // 12K TPM − 4K output cap (conservative)
+  [MODELS.GROQ_SCOUT]: 20000, // 30K TPM − 8K output cap
+};
+
+// Models confirmed dead at startup — populated by validateModels(); skipped in fallback chain.
+const deadModels = new Set();
+
+// Per-model remaining quota — populated from Groq response headers after each call.
+const quotaState = {};
+Object.values(MODELS).forEach(m => { quotaState[m] = { remaining: Infinity, limit: Infinity, updatedAt: null }; });
+
+function updateGroqQuota(model, headers) {
+  const rem = parseInt(headers['x-ratelimit-remaining-requests'], 10);
+  const lim = parseInt(headers['x-ratelimit-limit-requests'], 10);
+  if (!isNaN(rem) && !isNaN(lim)) {
+    quotaState[model] = { remaining: rem, limit: lim, updatedAt: Date.now() };
+    const pct = ((rem / lim) * 100).toFixed(1);
+    console.log(`[quota] ${model}: ${rem}/${lim} remaining (${pct}%)`);
+    if (rem < lim * 0.05) console.warn(`[quota] ⚠️  ${model} < 5% — will route around it`);
+  }
+}
+
+function isLowQuota(model) {
+  const s = quotaState[model];
+  return s.limit !== Infinity && s.remaining < s.limit * 0.05;
+}
+
+// Gemini has no quota response headers — track daily usage ourselves.
+// Resets at midnight PT (America/Los_Angeles) to match Google's quota window.
+const GEMINI_DAILY_LIMITS = { [MODELS.GEM_LITE]: 1000, [MODELS.GEM_FLASH]: 250 };
+const geminiCounters = {};
+[MODELS.GEM_LITE, MODELS.GEM_FLASH].forEach(m => {
+  geminiCounters[m] = { count: 0, date: new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' }), updatedAt: null };
+});
+
+function trackGeminiUsage(model) {
+  const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
+  const c = geminiCounters[model];
+  if (c.date !== today) { c.count = 0; c.date = today; } // reset on new day
+  c.count++;
+  c.updatedAt = Date.now();
+}
+
+// Rough token estimate: 1 token ≈ 4 chars
+function estimateTokens(prompt, sysPrompt, history) {
+  const chars = (prompt || '').length
+    + (sysPrompt || '').length
+    + (history || []).reduce((acc, m) => acc + (m.content || '').length, 0);
+  return Math.ceil(chars / 4);
+}
+
+// Truncate history so total input tokens fit within a model's safe budget.
+// 1. Per-message cap: any message content > 1500 chars gets cut (catches code dumps / file listings).
+// 2. Drop oldest messages (oldest first) until the history fits the remaining budget.
+//    Always preserves the last 4 messages (2 exchanges) as minimum context.
+function fitHistory(history, sysPrompt, newPrompt, maxInputTokens) {
+  const MSG_CHAR_CAP = 1500;
+
+  // Step 1 — hard cap each message
+  const capped = (history || []).map(m => {
+    const c = m.content || '';
+    return c.length > MSG_CHAR_CAP
+      ? { ...m, content: c.slice(0, MSG_CHAR_CAP) + '...[truncated]' }
+      : m;
+  });
+
+  // Tokens consumed by the fixed parts (sysPrompt + new user message + small buffer)
+  const fixedTok = Math.ceil(((sysPrompt || '').length + (newPrompt || '').length) / 4) + 100;
+  const histBudget = Math.max(0, maxInputTokens - fixedTok);
+
+  // Step 2 — drop oldest messages until history fits the budget
+  let trimmed = [...capped];
+  while (trimmed.length > 4) {
+    const histTok = trimmed.reduce((acc, m) => acc + Math.ceil((m.content || '').length / 4), 0);
+    if (histTok <= histBudget) break;
+    trimmed = trimmed.slice(1); // remove oldest message
+  }
+  // Emergency: if still over budget with only 4 messages left, keep just the last 2
+  if (trimmed.length >= 2) {
+    const histTok = trimmed.reduce((acc, m) => acc + Math.ceil((m.content || '').length / 4), 0);
+    if (histTok > histBudget) trimmed = trimmed.slice(-2);
   }
 
-  // 2. Thanglish detection (Tamil written in English letters)
-  const thanglishWords = ['enna','ethna','epdi','panu','pannu','irukku','venum',
-                          'sollu','kudu','seri','illa','aagum','mudiyum','vanakkam',
-                          'nandri','romba','konjam','theriyum','puriyuthu','solla',
-                          'panunga','kuduga','sollunga','parunga','pakalam','mattum',
-                          'ungaluku','enaku','avanga','inga','anga','yenna'];
-  const words = prompt.toLowerCase().split(/\s+/);
-  const hasThanglish = thanglishWords.some(w => words.includes(w));
-  if (hasThanglish) {
-    return { model: 'gemini', reason: 'Thanglish detected — Gemini understands better' };
-  }
+  const dropped = (history || []).length - trimmed.length;
+  if (dropped > 0) console.log(`[fit-history] Dropped ${dropped} old messages to fit ${maxInputTokens}-token budget`);
+  return trimmed;
+}
 
-  // 3. Complexity detection
+// ============================================
+// ROUTER — picks optimal model per request
+// Tamil simple   => gemini-2.5-flash-lite   (1K/day)
+// Tamil complex  => gemini-2.5-flash         (250/day, reserved)
+// Eng simple     => llama-3.1-8b-instant    (14.4K/day, 6K TPM)
+// Eng complex    => llama-3.3-70b-versatile  (1K/day, 12K TPM)
+// ============================================
+function decideModel(prompt, lang, intent, estimatedTokens) {
+  const p = prompt.toLowerCase();
   const complexWords = [
-    'architecture', 'design', 'security', 'optimize', 'refactor',
-    'database schema', 'system design', 'authentication', 'deploy',
-    'microservice', 'scale', 'performance', 'review', 'analyze',
-    'explain why', 'compare', 'best practice', 'vulnerability'
+    'architecture','design','security','optimize','refactor','database schema',
+    'system design','authentication','deploy','microservice','scale','performance',
+    'review','analyze','explain why','compare','best practice','vulnerability'
   ];
-  const isComplex = complexWords.some(w => prompt.toLowerCase().includes(w));
-  const isLong = prompt.length > 300;
+  const isCode    = intent === 'app_dev';
+  const isLong    = prompt.length > 300;
+  // estimatedTokens > 4000: 8b-instant (6K TPM) would exhaust its per-minute
+  // budget on a single request — route to 70b (12K TPM) instead.
+  const isComplex = isCode || isLong || estimatedTokens > 4000
+    || complexWords.some(w => p.includes(w));
 
-  if (isComplex || isLong) {
-    return { model: 'gemini', reason: 'Complex task — Gemini is smarter' };
+  if (lang === 'tamil' || lang === 'thanglish') {
+    if (isComplex) return { model: MODELS.GEM_FLASH, reason: 'Tamil/complex => Gemini 2.5 Flash (250/day)' };
+    return { model: MODELS.GEM_LITE, reason: 'Tamil/simple => Gemini 2.5 Flash-Lite (1K/day)' };
   }
-
-  // 4. Default: simple = fast Groq!
-  return { model: 'groq', reason: 'Simple task — Groq is fastest!' };
+  if (isComplex) return { model: MODELS.GROQ_70B, reason: 'Complex/code => Llama 3.3 70B (12K TPM, 1K/day)' };
+  return { model: MODELS.GROQ_8B, reason: 'Simple English => Llama 3.1 8B (6K TPM, 14.4K/day)' };
 }
 
 // ============================================
@@ -337,7 +428,7 @@ async function rewriteSearchQuery(userPrompt, history) {
     const response = await axios.post(
       'https://api.groq.com/openai/v1/chat/completions',
       {
-        model: 'llama-3.3-70b-versatile',
+        model: MODELS.GROQ_8B,
         messages: [
           { role: 'system', content: 'You rewrite follow-up questions into standalone English web search queries. Output ONLY the search query — no explanation, no quotes.' },
           { role: 'user', content: instruction }
@@ -358,36 +449,36 @@ async function rewriteSearchQuery(userPrompt, history) {
 }
 
 // ============================================
-// GROQ API CALL (Lightning fast!)
 // ============================================
-async function callGroq(prompt, systemPrompt, history = []) {
+// GROQ API — parameterized model
+// ============================================
+async function callGroqModel(model, prompt, sysPrompt, history = []) {
+  const MAX_OUT = { [MODELS.GROQ_8B]: 1500, [MODELS.GROQ_70B]: 4096, [MODELS.GROQ_SCOUT]: 8192 };
+  const maxTok = MAX_OUT[model] ?? 2048;
   const response = await axios.post(
     'https://api.groq.com/openai/v1/chat/completions',
     {
-      model: 'llama-3.3-70b-versatile',
+      model,
       messages: [
-        { role: 'system', content: systemPrompt },
+        { role: 'system', content: sysPrompt },
         ...history,
         { role: 'user', content: prompt }
       ],
-      max_tokens: 2048
+      max_tokens: maxTok
     },
     {
-      headers: {
-        'Authorization': `Bearer ${GROQ_KEY}`,
-        'Content-Type': 'application/json'
-      },
+      headers: { 'Authorization': `Bearer ${GROQ_KEY}`, 'Content-Type': 'application/json' },
       timeout: 30000
     }
   );
+  try { updateGroqQuota(model, response.headers); } catch (e) { console.warn('[quota-track]', e.message); }
   return response.data.choices[0].message.content;
 }
 
 // ============================================
-// GEMINI API CALL (Smart + Multilingual!)
+// GEMINI API — parameterized model
 // ============================================
-async function callGemini(prompt, systemPrompt, history = []) {
-  // Convert history: 'assistant' → 'model' (Gemini format)
+async function callGeminiModel(model, prompt, sysPrompt, history = []) {
   const contents = history.map(msg => ({
     role: msg.role === 'assistant' ? 'model' : 'user',
     parts: [{ text: msg.content }]
@@ -395,21 +486,98 @@ async function callGemini(prompt, systemPrompt, history = []) {
   contents.push({ role: 'user', parts: [{ text: prompt }] });
 
   const response = await axios.post(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_KEY}`,
+    `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_KEY}`,
     {
-      system_instruction: { parts: [{ text: systemPrompt }] },
+      system_instruction: { parts: [{ text: sysPrompt }] },
       contents,
       generationConfig: { maxOutputTokens: 8192 }
     },
     { timeout: 60000 }
   );
-  return response.data.candidates[0].content.parts[0].text;
+  try { trackGeminiUsage(model); } catch (e) { console.warn('[gemini-track]', e.message); }
+  const candidate = response.data.candidates?.[0];
+  if (!candidate?.content?.parts?.[0]?.text) {
+    const reason = candidate?.finishReason || 'unknown';
+    throw new Error(`Gemini returned no text — finishReason: ${reason}, response: ${JSON.stringify(response.data).slice(0, 300)}`);
+  }
+  return candidate.content.parts[0].text;
 }
+
+// ============================================
+// FALLBACK CHAIN
+// Groq primary=70b:  70b -> 8b -> scout
+// Groq primary=8b:   8b  -> 70b -> scout
+// Gemini: flash <-> lite, then full Groq chain
+// Skips models below 5% quota OR confirmed dead at startup.
+// Applies per-model history truncation before each attempt.
+// Throws only when entire chain is exhausted.
+// ============================================
+const _GROQ_CHAIN = [MODELS.GROQ_70B, MODELS.GROQ_8B, MODELS.GROQ_SCOUT];
+
+async function callWithFallback(primaryModel, prompt, sysPrompt, history) {
+  const isGemini = m => m.startsWith('gemini');
+
+  let chain;
+  if (isGemini(primaryModel)) {
+    const alt = primaryModel === MODELS.GEM_FLASH ? MODELS.GEM_LITE : MODELS.GEM_FLASH;
+    chain = [primaryModel, alt, ..._GROQ_CHAIN];
+  } else {
+    // Primary first, then all other Groq models in priority order.
+    const others = _GROQ_CHAIN.filter(m => m !== primaryModel);
+    chain = [primaryModel, ...others];
+  }
+
+  let lastError;
+  for (const model of chain) {
+    if (deadModels.has(model)) {
+      console.log(`[fallback] Skip ${model} — decommissioned (detected at startup)`);
+      continue;
+    }
+    if (isLowQuota(model)) {
+      console.log(`[fallback] Skip ${model} — < 5% quota`);
+      continue;
+    }
+    try {
+      // Fit history to this model's safe input budget before calling
+      const safeHistory = isGemini(model)
+        ? history
+        : fitHistory(history, sysPrompt, prompt, MODEL_INPUT_LIMITS[model] ?? 4000);
+
+      const reply = isGemini(model)
+        ? await callGeminiModel(model, prompt, sysPrompt, safeHistory)
+        : await callGroqModel(model, prompt, sysPrompt, safeHistory);
+      return { reply, model };
+    } catch (err) {
+      const status = err.response?.status;
+      console.log(`[fallback] ${model} -> HTTP ${status ?? err.code}: ${JSON.stringify(err.response?.data || err.message).slice(0, 120)}`);
+      if (status === 401) throw err; // bad API key — stop immediately
+      lastError = err;               // 429 / 413 / 400 / 5xx -> try next in chain
+    }
+  }
+  throw lastError || new Error('All models in fallback chain exhausted');
+}
+
+// RATE LIMITER — 60 req/min per IP (no extra packages)
+// ============================================
+const _rl = new Map();
+function rlCheck(ip) {
+  const now = Date.now(), win = 60_000, max = 60;
+  let e = _rl.get(ip);
+  if (!e || now > e.r) { e = { n: 1, r: now + win }; _rl.set(ip, e); return false; }
+  return ++e.n > max;
+}
+// Prune stale entries every 5 min to prevent unbounded growth
+setInterval(() => { const now = Date.now(); for (const [k, v] of _rl) if (now > v.r) _rl.delete(k); }, 5 * 60_000).unref();
 
 // ============================================
 // MAIN CHAT ENDPOINT — With Router!
 // ============================================
 app.post('/api/chat', async (req, res) => {
+  const ip = req.ip || req.socket?.remoteAddress || 'local';
+  if (rlCheck(ip)) {
+    return res.status(429).json({ error: 'Konjam fast ah messages anuppitinga 😄 oru nimisham wait pannunga' });
+  }
+
   const { prompt, history, enterpriseMode, simpleMode } = req.body;
   if (!prompt || !prompt.trim()) {
     return res.status(400).json({ error: 'Prompt is empty!' });
@@ -417,11 +585,10 @@ app.post('/api/chat', async (req, res) => {
 
   const recentHistory = (Array.isArray(history) ? history : []).slice(-10);
 
-  const startTime = Date.now();
-  const decision = decideModel(prompt);
-  const intent = detectIntent(prompt);
-  const lang = detectLanguage(prompt);
-  const isStudent = isStudentRequest(prompt);
+  const startTime  = Date.now();
+  const intent     = detectIntent(prompt);
+  const lang       = detectLanguage(prompt);
+  const isStudent  = isStudentRequest(prompt);
   let sysPrompt;
   let isEnterprise = false;
   if (simpleMode) {
@@ -437,20 +604,15 @@ app.post('/api/chat', async (req, res) => {
     }
   }
 
-
-
   // Web search — enrich prompt with live results if needed
   let finalPrompt = prompt;
-  let searched = false;
+  let searched    = false;
   if (needsSearch(prompt) && TAVILY_KEY) {
     try {
-      // Rewrite follow-up questions into standalone English queries before searching
       const searchQuery = recentHistory.length > 0
         ? await rewriteSearchQuery(prompt, recentHistory)
         : prompt;
-      if (searchQuery !== prompt) {
-        console.log(`Search query rewritten: "${searchQuery}" (original: "${prompt}")`);
-      }
+      if (searchQuery !== prompt) console.log(`Search query rewritten: "${searchQuery}" (original: "${prompt}")`);
       const results = await callTavily(searchQuery);
       if (results.length > 0) {
         const today = new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' });
@@ -463,74 +625,45 @@ app.post('/api/chat', async (req, res) => {
     }
   }
 
-  console.log(`Lang: ${lang} | Intent: ${intent} | Model: ${decision.model} | Search: ${searched}`);
+  // Pick primary model AFTER finalPrompt is built — token count includes search context
+  const estimatedTokens = estimateTokens(finalPrompt, sysPrompt, recentHistory);
+  const decision   = decideModel(prompt, lang, intent, estimatedTokens);
+  let primaryModel = decision.model;
+  // Search context adds tokens — upgrade 8b to 70b for better synthesis
+  if (searched && primaryModel === MODELS.GROQ_8B) primaryModel = MODELS.GROQ_70B;
+
+  console.log(`Lang: ${lang} | Intent: ${intent} | Tokens~${estimatedTokens} | Primary: ${primaryModel} | Search: ${searched}`);
+  console.log(`[router] ${decision.reason}`);
 
   try {
-    let reply;
-    // Force Gemini when search context is present — better at synthesis
-    const useModel = searched ? 'gemini' : decision.model;
-    let usedModel = useModel;
-
-    if (useModel === 'groq') {
-      try {
-        reply = await callGroq(finalPrompt, sysPrompt, recentHistory);
-      } catch (groqError) {
-        const groqStatus = groqError.response?.status;
-        console.log(`Groq failed [HTTP ${groqStatus}]: ${groqError.message}`);
-        reply = await callGemini(finalPrompt, sysPrompt, recentHistory);
-        usedModel = 'gemini (fallback)';
-      }
-    } else {
-      try {
-        reply = await callGemini(finalPrompt, sysPrompt, recentHistory);
-      } catch (geminiError) {
-        const geminiStatus = geminiError.response?.status;
-        const geminiBody = JSON.stringify(geminiError.response?.data || geminiError.message);
-        console.log(`Gemini failed [HTTP ${geminiStatus}]: ${geminiBody}`);
-        // Retry once on 503 (transient overload) before falling back
-        if (geminiStatus === 503) {
-          try {
-            console.log('Retrying Gemini once after 503...');
-            reply = await callGemini(finalPrompt, sysPrompt, recentHistory);
-            usedModel = 'gemini';
-          } catch (retryError) {
-            console.log('Gemini retry also failed, falling back to Groq:', retryError.message);
-            reply = await callGroq(finalPrompt, sysPrompt, recentHistory);
-            usedModel = 'groq (fallback)';
-          }
-        } else {
-          reply = await callGroq(finalPrompt, sysPrompt, recentHistory);
-          usedModel = 'groq (fallback)';
-        }
-      }
-    }
-
+    const { reply, model: usedModel } = await callWithFallback(primaryModel, finalPrompt, sysPrompt, recentHistory);
     const timeTaken = ((Date.now() - startTime) / 1000).toFixed(2);
+    if (usedModel !== primaryModel) console.log(`[fallback] Served by ${usedModel} (primary ${primaryModel} unavailable)`);
 
     res.json({
       reply,
-      model: usedModel,
-      reason: decision.reason,
-      time: timeTaken + 's',
+      model:      usedModel,
+      reason:     decision.reason,
+      time:       timeTaken + 's',
       searched,
       enterprise: isEnterprise
     });
 
   } catch (error) {
-    console.error('Error:', error.response?.data || error.message);
-
+    console.error('[chat-error] stack:', error.stack || error);
+    console.error('[chat-error] response:', JSON.stringify(error.response?.data ?? null));
     let errorMsg = 'Something went wrong. Please try again.';
     if (error.response?.status === 401) {
       errorMsg = 'API key wrong! Check your .env file.';
     } else if (error.response?.status === 429) {
-      errorMsg = 'High traffic right now! Please try again in a minute.';
+      errorMsg = 'AI service quota mudinjuchu — konjam neram kalichu try pannunga';
     } else if (error.code === 'ECONNABORTED' || error.message?.includes('timeout')) {
       errorMsg = 'Connection issue. Please try again.';
     }
-
     res.status(500).json({ error: errorMsg });
   }
 });
+
 
 // ============================================
 // SEARCH ENDPOINT — Tavily
@@ -593,6 +726,7 @@ app.get('/api/health-check', (req, res) => {
   try { lastLoadTest = JSON.parse(fs.readFileSync(LT_RESULT_FILE, 'utf8')); } catch {}
   res.json({
     ok: true,
+    build: 'v-DEBUG-1',
     uptime: Math.floor(process.uptime()),
     memory: {
       heapUsedMb:  Math.round(mem.heapUsed  / 1024 / 1024),
@@ -627,6 +761,36 @@ app.post('/api/health-check/load-test', (req, res) => {
 });
 
 // ============================================
+// QUOTA DASHBOARD — read-only snapshot
+// ============================================
+app.get('/api/quota', (req, res) => {
+  const out = {};
+  // Groq models — populated from x-ratelimit-* response headers
+  [MODELS.GROQ_8B, MODELS.GROQ_70B, MODELS.GROQ_SCOUT].forEach(m => {
+    const s = quotaState[m];
+    out[m] = {
+      type:      'groq',
+      remaining: s.limit === Infinity ? null : s.remaining,
+      limit:     s.limit === Infinity ? null : s.limit,
+      updatedAt: s.updatedAt
+    };
+  });
+  // Gemini models — tracked via our own daily counter (resets midnight PT)
+  [MODELS.GEM_LITE, MODELS.GEM_FLASH].forEach(m => {
+    const c = geminiCounters[m];
+    const lim = GEMINI_DAILY_LIMITS[m];
+    out[m] = {
+      type:      'gemini',
+      used:      c.count,
+      remaining: lim - c.count,
+      limit:     lim,
+      updatedAt: c.updatedAt
+    };
+  });
+  res.json(out);
+});
+
+// ============================================
 // START SERVER
 // ============================================
 const PORT = 3000;
@@ -641,4 +805,35 @@ app.listen(PORT, () => {
   console.log('  Gemini key: ' + (GEMINI_KEY ? 'Loaded ✓' : 'MISSING! Check .env'));
   console.log('  Tavily key: ' + (TAVILY_KEY ? 'Loaded ✓ (search ON)' : 'MISSING (search OFF)'));
   console.log('==========================================');
+
+  // Validate every Groq model in the chain at startup — catch decommissioned/missing models
+  // immediately so they're never tried at request time. Runs async; server is live while it probes.
+  if (GROQ_KEY) {
+    (async () => {
+      console.log('[startup] Probing Groq models...');
+      for (const model of _GROQ_CHAIN) {
+        await new Promise(r => setTimeout(r, 400)); // avoid burst on startup
+        try {
+          await callGroqModel(model, 'OK', 'Reply with OK', []);
+          console.log(`[startup] ✓ ${model} — alive`);
+        } catch (err) {
+          const status = err.response?.status;
+          const msg    = err.response?.data?.error?.message || err.message || '';
+          if (status === 400 && msg.includes('decommissioned')) {
+            deadModels.add(model);
+            console.warn(`[startup] ✗ ${model} — DECOMMISSIONED, auto-skipping in fallback chain`);
+          } else if (status === 429) {
+            console.warn(`[startup] ~ ${model} — rate-limited at startup (model is alive, will retry at request time)`);
+          } else {
+            console.warn(`[startup] ? ${model} — HTTP ${status ?? 'ERR'}: ${msg.slice(0, 100)}`);
+          }
+        }
+      }
+      if (deadModels.size) {
+        console.warn(`[startup] Dead models auto-excluded: ${[...deadModels].join(', ')}`);
+      } else {
+        console.log('[startup] All Groq models alive ✓');
+      }
+    })();
+  }
 });
