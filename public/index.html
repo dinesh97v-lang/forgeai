@@ -1143,10 +1143,12 @@ function chOpen(id){
   }else{
     cm.innerHTML='';
     for(var i=0;i<chatHistory.length;i++){
-      var m=chatHistory[i],div=document.createElement('div');
-      if(m.role==='user'){div.className='msg u';div.innerHTML=renderUserBub(m);}
-      else{div.className='msg';div.innerHTML='<div class="mav ai">F</div><div><div class="bub">'+formatMarkdown(m.content)+'</div>'+aiActBar()+'</div>';}
-      cm.appendChild(div);
+      try{
+        var m=chatHistory[i],div=document.createElement('div');
+        if(m.role==='user'){div.className='msg u';div.innerHTML=renderUserBub(m);}
+        else{div.className='msg';div.innerHTML='<div class="mav ai">F</div><div><div class="bub">'+formatMarkdown(m.content)+'</div>'+aiActBar()+'</div>';}
+        cm.appendChild(div);
+      }catch(e){console.warn('[chat] skipped bad message at index',i,e.message);}
     }
     cm.scrollTop=cm.scrollHeight;
     scanChatFiles();
@@ -2487,7 +2489,8 @@ function onAuthSuccess(user){
     if(oldC&&!localStorage.getItem(_chKey())){localStorage.setItem(_chKey(),oldC);if(oldA&&!localStorage.getItem(_acKey()))localStorage.setItem(_acKey(),oldA);}
     localStorage.setItem(migKey,'1');
   }
-  document.getElementById('welcome').style.display='flex';
+  var _wel=document.getElementById('welcome');
+  _wel.style.opacity='';_wel.style.transition='';_wel.style.display='flex';
   initPageAll();
 }
 // 401 session-expiry interceptor
@@ -2540,10 +2543,12 @@ function initPageAll(){
       chatHistory=sess.messages.slice();
       var cm=document.getElementById('chat-msgs');cm.innerHTML='';
       for(var i=0;i<chatHistory.length;i++){
-        var m=chatHistory[i],div=document.createElement('div');
-        if(m.role==='user'){div.className='msg u';div.innerHTML=renderUserBub(m);}
-        else{div.className='msg';div.innerHTML='<div class="mav ai">F</div><div><div class="bub">'+formatMarkdown(m.content)+'</div>'+aiActBar()+'</div>';}
-        cm.appendChild(div);
+        try{
+          var m=chatHistory[i],div=document.createElement('div');
+          if(m.role==='user'){div.className='msg u';div.innerHTML=renderUserBub(m);}
+          else{div.className='msg';div.innerHTML='<div class="mav ai">F</div><div><div class="bub">'+formatMarkdown(m.content)+'</div>'+aiActBar()+'</div>';}
+          cm.appendChild(div);
+        }catch(e){console.warn('[chat] skipped bad message at index',i,e.message);}
       }
       cm.scrollTop=cm.scrollHeight;
       scanChatFiles();
