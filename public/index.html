@@ -328,6 +328,10 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .attach-btn:hover{background:var(--bg2);color:var(--text);border-color:var(--accent)}
 .attach-bar{display:none;align-items:center;gap:7px;padding:5px 14px;background:var(--bg2);border-bottom:1px solid var(--border);margin:-10px -14px 10px;flex-shrink:0}
 .attach-bar.on{display:flex}
+.field-learn-bar{display:none;flex-direction:column;gap:6px;padding:8px 14px;background:var(--bg2);border-bottom:1px solid var(--border);margin:-10px -14px 10px;flex-shrink:0}
+.field-learn-bar.on{display:flex}
+.fl-chip{font-size:11px;padding:3px 9px;border:1px solid var(--border);border-radius:12px;color:var(--text2);cursor:pointer;background:var(--bg);font-family:inherit;transition:all .15s;white-space:nowrap}
+.fl-chip:hover{background:var(--accent);color:white;border-color:var(--accent)}
 .attach-thumb{width:36px;height:36px;object-fit:cover;border-radius:5px;border:1px solid var(--border);flex-shrink:0}
 .attach-name{flex:1;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;font-size:11px;color:var(--text)}
 .attach-x{background:none;border:none;cursor:pointer;font-size:16px;color:var(--text3);padding:0 2px;line-height:1;flex-shrink:0}
@@ -607,7 +611,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 
     <!-- CHAT -->
     <div class="panel active" id="panel-chat">
-      <div style="display:flex;align-items:center;justify-content:flex-end;padding:5px 12px 4px;border-bottom:1px solid var(--border);flex-shrink:0"><button class="ib" onclick="clearChat()" title="Clear chat">🗑</button></div>
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:5px 12px 4px;border-bottom:1px solid var(--border);flex-shrink:0"><span id="field-mode-badge" style="display:none;font-size:10px;padding:2px 8px;border-radius:8px;background:var(--ibg);color:var(--info);font-weight:700"></span><button class="ib" onclick="clearChat()" title="Clear chat">🗑</button></div>
       <div class="msgs" id="chat-msgs">
         <div class="msg"><div class="mav ai">F</div><div><div class="bub" id="welcome-bub">Welcome to Forge AI! I can help you code, deploy, test, search, and more. Your data stays private on your server. What shall we build today?</div></div></div>
       </div>
@@ -630,12 +634,27 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
           <span id="attach-preview-inner" style="display:flex;align-items:center;gap:6px;flex:1;overflow:hidden;min-width:0"></span>
           <button class="attach-x" onclick="attachClear()" title="Remove attachment">×</button>
         </div>
+        <div class="field-learn-bar" id="field-learn-bar" style="display:none">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:6px">
+            <span style="font-size:11px;font-weight:600;color:var(--text2)">Enna kathukanum? Entha field um type pannunga!</span>
+            <button class="attach-x" onclick="fieldLearnClose()" title="Cancel">×</button>
+          </div>
+          <div style="display:flex;gap:5px;flex-wrap:wrap">
+            <button class="fl-chip" onclick="fieldLearnChip('Fashion Design')">Fashion Design</button>
+            <button class="fl-chip" onclick="fieldLearnChip('Farming')">Farming</button>
+            <button class="fl-chip" onclick="fieldLearnChip('Catering')">Catering</button>
+            <button class="fl-chip" onclick="fieldLearnChip('Beauty &amp; Salon')">Beauty &amp; Salon</button>
+            <button class="fl-chip" onclick="fieldLearnChip('Photography')">Photography</button>
+          </div>
+          <input id="field-learn-input" type="text" class="cin" style="min-height:0;padding:6px 10px;font-size:12px" placeholder="e.g., fashion design, farming, catering, tailoring..." onkeydown="if(event.key==='Enter')fieldLearnStart();if(event.key==='Escape')fieldLearnClose()">
+        </div>
         <div class="cin-row">
           <div class="attach-wrap" id="attach-menu-wrap">
             <button class="attach-btn" onclick="attachPick()" title="Attach image or file">📎</button>
             <div class="attach-menu" id="attach-menu">
               <button class="attach-menu-item" onclick="attachPickImg()">📷 Photo</button>
               <button class="attach-menu-item" onclick="attachPickFile()">📁 Add Files</button>
+              <button class="attach-menu-item" onclick="fieldLearnOpen()">📚 Learn a Field</button>
             </div>
           </div>
           <textarea class="cin" id="chat-in" placeholder="Type in Tamil or English..." rows="1" onkeydown="ck(event)" oninput="rsz(this)"></textarea>
@@ -1126,6 +1145,7 @@ function chNewChat(){
   pvClose(); pvFiles={html:'',css:'',js:'',reactNative:{}};
   chatHistory=[];localStorage.removeItem('forgeai_chat_history');
   localStorage.removeItem(_acKey());
+  chatFieldMode=null;fieldModeUpdate();
   document.getElementById('chat-msgs').innerHTML=welcomeHTML();
   chDraw();
   var ni=document.querySelector((isSimple()?'#simple-nav':'#pro-nav')+' .ni');if(ni)go('chat',ni);
@@ -1137,6 +1157,7 @@ function chOpen(id){
   if(!sess){console.warn('[chOpen] not found:',id);return;}
   localStorage.setItem(_acKey(),id);
   chatHistory=(Array.isArray(sess.messages)?sess.messages:[]).slice();
+  chatFieldMode=sess.fieldMode||null;fieldModeUpdate();
   var cm=document.getElementById('chat-msgs');
   if(!chatHistory.length){
     cm.innerHTML=welcomeHTML();
@@ -1666,6 +1687,41 @@ function attachPick(){var m=document.getElementById('attach-menu');if(m)m.classL
 function attachMenuClose(){var m=document.getElementById('attach-menu');if(m)m.classList.remove('open');}
 function attachPickImg(){attachMenuClose();document.getElementById('attach-img-input').click();}
 function attachPickFile(){attachMenuClose();document.getElementById('attach-file-input').click();}
+var chatFieldMode=null;
+function fieldLearnOpen(){attachMenuClose();var b=document.getElementById('field-learn-bar');if(!b)return;b.style.display='flex';setTimeout(function(){var i=document.getElementById('field-learn-input');if(i)i.focus();},50);}
+function fieldLearnClose(){var b=document.getElementById('field-learn-bar');if(b)b.style.display='none';var i=document.getElementById('field-learn-input');if(i)i.value='';}
+function fieldLearnChip(text){var i=document.getElementById('field-learn-input');if(i){i.value=text;fieldLearnStart();}}
+function fieldModeUpdate(){var b=document.getElementById('field-mode-badge');if(!b)return;if(chatFieldMode){b.textContent='📚 Learning: '+chatFieldMode;b.style.display='';}else{b.style.display='none';}}
+function fieldModeSave(field){var id=chCurId(),all=chAll();for(var i=0;i<all.length;i++){if(all[i].id===id){all[i].fieldMode=field;chStore(all);break;}}}
+function fieldLearnStart(){
+  var inp=document.getElementById('field-learn-input');
+  var field=inp?inp.value.trim():'';
+  if(!field)return;
+  fieldLearnClose();
+  chatFieldMode=field;fieldModeUpdate();
+  var msgs=document.getElementById('chat-msgs');
+  var u=document.createElement('div');u.className='msg u';
+  u.innerHTML=renderUserBub({content:'📚 Learn: '+field,quotedText:null,attachment:null});
+  msgs.appendChild(u);msgs.scrollTop=msgs.scrollHeight;
+  var typ=document.createElement('div');typ.id='typ';typ.className='msg';
+  typ.innerHTML='<div class="mav ai">F</div><div class="bub"><div class="typing"><div class="dot"></div><div class="dot"></div><div class="dot"></div></div></div>';
+  msgs.appendChild(typ);msgs.scrollTop=msgs.scrollHeight;
+  var msgObj={role:'user',content:'📚 Learn: '+field};
+  chatHistory.push(msgObj);
+  saveChat();chSync();
+  fieldModeSave(field);
+  fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt:'📚 Learn: '+field,history:[],fieldMode:field,simpleMode:isSimple()})})
+    .then(function(r){return r.json();})
+    .then(function(d){
+      var ty=document.getElementById('typ');if(ty)ty.remove();
+      chatHistory.push({role:'assistant',content:d.reply||d.error||''});
+      saveChat();chSync();
+      var ai=document.createElement('div');ai.className='msg';
+      ai.innerHTML='<div class="mav ai">F</div><div><div class="bub">'+formatMarkdown(d.reply||d.error||'Error')+'</div>'+aiActBar()+'</div>';
+      msgs.appendChild(ai);msgs.scrollTop=msgs.scrollHeight;
+    })
+    .catch(function(){var ty=document.getElementById('typ');if(ty)ty.remove();});
+}
 function attachClear(){
   attachData=null;
   document.getElementById('attach-bar').classList.remove('on');
@@ -1706,7 +1762,8 @@ function send(){
   var attSnap=attachData; // snapshot before clearing
   var u=document.createElement('div');u.className='msg u';
   // Live display: pass thumb so image shows inline this session
-  u.innerHTML=renderUserBub({content:t,quotedText:qtSnap,attachment:attSnap?{type:attSnap.type,name:attSnap.name,thumb:attSnap.thumb}:null});
+  var _liveThumb=attSnap&&attSnap.type==='image'?(attSnap.thumb||(attSnap.data&&attSnap.mimeType?'data:'+attSnap.mimeType+';base64,'+attSnap.data:null)):attSnap?attSnap.thumb:null;
+  u.innerHTML=renderUserBub({content:t,quotedText:qtSnap,attachment:attSnap?{type:attSnap.type,name:attSnap.name,thumb:_liveThumb}:null});
   msgs.appendChild(u);inp.value='';rsz(inp);msgs.scrollTop=msgs.scrollHeight;
   qCancel();attachClear();
   var typ=document.createElement('div');typ.id='typ';typ.className='msg';
@@ -1730,6 +1787,7 @@ function send(){
   chatHistory.push(msgObj);
   saveChat();chSync();
   var fetchBody={prompt:apiPrompt||'',history:histForApi,enterpriseMode:enterpriseMode,simpleMode:isSimple()};
+  if(chatFieldMode)fetchBody.fieldMode=chatFieldMode;
   if(attSnap)fetchBody.attachment={type:attSnap.type,name:attSnap.name,mimeType:attSnap.mimeType,data:attSnap.data};
   fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(fetchBody)})
     .then(function(r){return r.json();})
@@ -1771,11 +1829,11 @@ document.getElementById('chat-in').addEventListener('paste',function(e){
 // Close attach menu on outside click or Escape
 document.addEventListener('click',function(e){
   var menu=document.getElementById('attach-menu');
-  if(!menu||!menu.classList.contains('open'))return;
-  var wrap=document.getElementById('attach-menu-wrap');
-  if(wrap&&!wrap.contains(e.target))attachMenuClose();
+  if(menu&&menu.classList.contains('open')){var wrap=document.getElementById('attach-menu-wrap');if(wrap&&!wrap.contains(e.target))attachMenuClose();}
+  var flb=document.getElementById('field-learn-bar');
+  if(flb&&flb.style.display!=='none'){var ca=document.querySelector('.cin-area');if(ca&&!ca.contains(e.target))fieldLearnClose();}
 });
-document.addEventListener('keydown',function(e){if(e.key==='Escape'){attachMenuClose();lbClose();}});
+document.addEventListener('keydown',function(e){if(e.key==='Escape'){attachMenuClose();lbClose();fieldLearnClose();}});
 var buildLogs=[['Building architecture...','Analysis'],['Generating React frontend...','Frontend'],['Building Node.js backend...','Backend'],['Database setup...','Database'],['Payment integration...','Payments'],['Running tests...','Testing'],['GitHub push...','GitHub'],['Vercel deploy...','Vercel'],['SSL setup...','SSL'],['App is LIVE!','Done!']];
 function setPrompt(t){document.getElementById('dw-in').value=t;}
 function cleanDwName(el){
@@ -2541,6 +2599,7 @@ function initPageAll(){
     for(var i=0;i<all.length;i++){if(all[i].id===activeId){sess=all[i];break;}}
     if(sess&&Array.isArray(sess.messages)&&sess.messages.length>0){
       chatHistory=sess.messages.slice();
+      chatFieldMode=sess.fieldMode||null;fieldModeUpdate();
       var cm=document.getElementById('chat-msgs');cm.innerHTML='';
       for(var i=0;i<chatHistory.length;i++){
         try{

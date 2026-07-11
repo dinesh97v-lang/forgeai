@@ -764,7 +764,7 @@ app.post('/api/chat', requireAuth, async (req, res) => {
     return res.status(429).json({ error: 'Innikku 100 messages limit mudinjuchu — naaliku continue pannunga!' });
   }
 
-  const { prompt, history, enterpriseMode, simpleMode, attachment } = req.body;
+  const { prompt, history, enterpriseMode, simpleMode, attachment, fieldMode } = req.body;
   if (!attachment && (!prompt || !prompt.trim())) {
     return res.status(400).json({ error: 'Prompt is empty!' });
   }
@@ -778,7 +778,10 @@ app.post('/api/chat', requireAuth, async (req, res) => {
   const tDetect    = Date.now() - startTime;
   let sysPrompt;
   let isEnterprise = false;
-  if (simpleMode) {
+  if (fieldMode && fieldMode.trim()) {
+    const fld = fieldMode.trim().slice(0, 100);
+    sysPrompt = `You are an expert teacher and mentor in "${fld}". The user wants to learn this field from zero knowledge. Teach in Tanglish (mix of Tamil words and English, conversational style like how friends speak in Tamil Nadu). When the user's message starts with "📚 Learn:", give a friendly structured roadmap: (1) Intha field na enna — 2-3 sentence simple explanation, (2) Basic skills — step-by-step in order, (3) Thevaiyana tools/equipment with approximate ₹ costs in India, (4) Income/career possibilities in India with realistic numbers, (5) end with "Enga irunthu start pannalaam?" so they pick the first topic. For all follow-up messages: teach one concept at a time, use simple real-life analogies, match user's Tamil/English style, search web for current prices, trends, or government schemes when relevant.`;
+  } else if (simpleMode) {
     sysPrompt = SIMPLE_MODE_PROMPT + '\n\n' + langInstructions[lang];
   } else {
     const identity = isStudent ? STUDENT_IDENTITY
