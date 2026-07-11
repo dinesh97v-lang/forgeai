@@ -323,15 +323,147 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .qt-txt{flex:1;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;color:var(--text);font-size:11px}
 .qt-x{background:none;border:none;cursor:pointer;font-size:16px;color:var(--text3);padding:0 2px;line-height:1;flex-shrink:0}
 .qt-x:hover{color:var(--danger)}
+/* ── Attachment ── */
+.attach-btn{width:30px;height:30px;border-radius:var(--r);background:none;border:1px solid var(--border2);cursor:pointer;color:var(--text2);font-size:14px;flex-shrink:0;display:flex;align-items:center;justify-content:center;transition:all .2s;line-height:1}
+.attach-btn:hover{background:var(--bg2);color:var(--text);border-color:var(--accent)}
+.attach-bar{display:none;align-items:center;gap:7px;padding:5px 14px;background:var(--bg2);border-bottom:1px solid var(--border);margin:-10px -14px 10px;flex-shrink:0}
+.attach-bar.on{display:flex}
+.attach-thumb{width:36px;height:36px;object-fit:cover;border-radius:5px;border:1px solid var(--border);flex-shrink:0}
+.attach-name{flex:1;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;font-size:11px;color:var(--text)}
+.attach-x{background:none;border:none;cursor:pointer;font-size:16px;color:var(--text3);padding:0 2px;line-height:1;flex-shrink:0}
+.attach-x:hover{color:var(--danger)}
+.msg-attach-img{max-width:220px;max-height:160px;object-fit:cover;border-radius:8px;cursor:pointer;display:block;margin-bottom:6px;border:1px solid rgba(255,255,255,.15)}
+.msg-attach-file{display:inline-flex;align-items:center;gap:5px;background:rgba(0,0,0,.12);border-radius:5px;padding:4px 8px;font-size:11px;margin-bottom:5px;word-break:break-all}
+.panel.drag-over{outline:2px dashed var(--accent);outline-offset:-3px;border-radius:var(--rlg)}
+.attach-wrap{position:relative;flex-shrink:0}
+.attach-menu{position:absolute;bottom:calc(100% + 6px);left:0;background:var(--bg);border:1px solid var(--border);border-radius:var(--r);box-shadow:0 4px 16px rgba(0,0,0,.12);min-width:140px;overflow:hidden;display:none;flex-direction:column;z-index:200}
+.attach-menu.open{display:flex;animation:attMenuIn .15s ease}
+@keyframes attMenuIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+.attach-menu-item{display:flex;align-items:center;gap:8px;padding:8px 12px;font-size:12px;font-weight:500;background:none;border:none;cursor:pointer;color:var(--text);font-family:inherit;text-align:left;white-space:nowrap;transition:background .15s;width:100%}
+.attach-menu-item:hover{background:var(--bg2)}
+/* ── Image lightbox ── */
+.img-lb{position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:3000;display:none;align-items:center;justify-content:center;cursor:pointer}
+.img-lb.show{display:flex;animation:lbIn .18s ease}
+.img-lb img{max-width:90vw;max-height:90vh;border-radius:10px;object-fit:contain;cursor:default;box-shadow:0 8px 40px rgba(0,0,0,.5)}
+.img-lb-x{position:absolute;top:16px;right:20px;background:rgba(255,255,255,.15);border:none;color:white;font-size:18px;cursor:pointer;border-radius:50%;width:34px;height:34px;display:flex;align-items:center;justify-content:center;line-height:1;backdrop-filter:blur(4px)}
+.img-lb-x:hover{background:rgba(255,255,255,.3)}
+@keyframes lbIn{from{opacity:0}to{opacity:1}}
 .qt-msg{background:rgba(0,0,0,.1);border-left:3px solid rgba(255,255,255,.6);border-radius:0 4px 4px 0;padding:4px 8px;margin-bottom:5px;font-size:10.5px;color:inherit;line-height:1.4;white-space:pre-wrap;word-break:break-word;max-height:52px;overflow:hidden}
+/* ── Auth Screen ── */
+.auth-screen{position:fixed;inset:0;background:var(--bg3);display:none;align-items:center;justify-content:center;z-index:2000;padding:20px}
+.auth-box{background:var(--bg);border:1px solid var(--border);border-radius:var(--rlg);padding:36px 32px;width:100%;max-width:380px;box-shadow:0 4px 24px rgba(0,0,0,.08)}
+.auth-logo{font-size:30px;font-weight:800;letter-spacing:-1.5px;color:var(--text);text-align:center;margin-bottom:4px}
+.auth-logo span{color:var(--accent)}
+.auth-tagline{font-size:12px;color:var(--text3);text-align:center;margin-bottom:24px}
+.auth-tabs{display:flex;background:var(--bg2);border-radius:var(--r);padding:3px;gap:3px;margin-bottom:22px}
+.auth-tab{flex:1;padding:7px;font-size:12px;font-weight:600;border:none;background:transparent;color:var(--text2);cursor:pointer;border-radius:6px;font-family:inherit;transition:all .2s}
+.auth-tab.active{background:var(--bg);color:var(--text);box-shadow:0 1px 4px rgba(0,0,0,.1)}
+.auth-inp{width:100%;padding:10px 12px;font-size:13px;border:1px solid var(--border2);border-radius:var(--r);background:var(--bg);color:var(--text);font-family:inherit;outline:none;transition:border .2s;margin-bottom:10px;display:block}
+.auth-inp:focus{border-color:var(--accent)}
+.auth-err{font-size:12px;color:var(--danger);margin-bottom:10px;min-height:16px;line-height:1.4}
+.auth-btn{width:100%;padding:11px;border-radius:var(--r);border:none;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;transition:all .2s;background:var(--accent);color:white;margin-top:2px}
+.auth-btn:hover:not(:disabled){background:var(--accent2)}
+.auth-btn:disabled{opacity:.6;cursor:not-allowed}
 </style>
 </head>
 <body>
 <div class="notif" id="notif"></div>
 <button id="sel-btn" title="Quote reply">↩ Reply</button>
 
+<!-- AUTH SCREEN -->
+<div class="auth-screen" id="auth-screen">
+  <div class="auth-box">
+    <div class="auth-logo">Forge<span>AI</span></div>
+    <div class="auth-tagline">Private AI Platform — Sign in to continue</div>
+    <div class="auth-tabs">
+      <button class="auth-tab active" id="auth-tab-login" onclick="authTab('login')">Login</button>
+      <button class="auth-tab" id="auth-tab-signup" onclick="authTab('signup')">Sign Up</button>
+    </div>
+    <div id="auth-form-login">
+      <div id="auth-success-msg" style="display:none;background:var(--sbg);color:var(--success);border-radius:var(--r);padding:8px 11px;font-size:12px;margin-bottom:12px;line-height:1.5"></div>
+      <input class="auth-inp" id="auth-email-l" type="email" placeholder="Email address" onkeydown="if(event.key==='Enter')authSubmit('login')">
+      <input class="auth-inp" id="auth-pass-l" type="password" placeholder="Password" onkeydown="if(event.key==='Enter')authSubmit('login')">
+      <div style="text-align:right;margin-top:-4px;margin-bottom:8px"><button type="button" style="background:none;border:none;cursor:pointer;font-size:11px;color:var(--accent);padding:0;font-family:inherit;opacity:.85" onclick="forgotStart()">Forgot password?</button></div>
+      <div class="auth-err" id="auth-err-login"></div>
+      <button class="auth-btn" id="auth-submit-login" onclick="authSubmit('login')">Login</button>
+    </div>
+    <div id="auth-form-signup" style="display:none">
+      <input class="auth-inp" id="auth-name-s" type="text" placeholder="Your name" onkeydown="if(event.key==='Enter')authSubmit('signup')">
+      <input class="auth-inp" id="auth-email-s" type="email" placeholder="Email address" onkeydown="if(event.key==='Enter')authSubmit('signup')">
+      <input class="auth-inp" id="auth-pass-s" type="password" placeholder="Password (min 8 characters)" onkeydown="if(event.key==='Enter')authSubmit('signup')">
+      <select class="auth-inp" id="auth-sq-s" style="cursor:pointer">
+        <option value="">-- Select a security question --</option>
+        <option>What was the name of your first school?</option>
+        <option>What is your favourite place?</option>
+        <option>What was the name of your first pet?</option>
+        <option>What is your mother's home town?</option>
+      </select>
+      <input class="auth-inp" id="auth-sa-s" type="text" placeholder="Your answer..." onkeydown="if(event.key==='Enter')authSubmit('signup')">
+      <div style="font-size:11px;color:var(--text3);margin-bottom:10px;margin-top:-4px;line-height:1.4">🔐 You can use this to reset your password — remember your answer!</div>
+      <div class="auth-err" id="auth-err-signup"></div>
+      <button class="auth-btn" id="auth-submit-signup" onclick="authSubmit('signup')">Create Account</button>
+    </div>
+    <!-- FORGOT PASSWORD FLOW (3 steps, same card) -->
+    <div id="forgot-flow" style="display:none">
+      <div id="forgot-step1">
+        <div style="font-size:12px;color:var(--text2);margin-bottom:14px;line-height:1.5">Enter your email address — we'll show your security question</div>
+        <input class="auth-inp" id="forgot-email" type="email" placeholder="Email address" onkeydown="if(event.key==='Enter')forgotStep1Submit()">
+        <div class="auth-err" id="forgot-err1"></div>
+        <div style="display:flex;gap:8px">
+          <button class="auth-btn" style="background:var(--bg2);color:var(--text);flex:0 0 auto;width:auto;padding:11px 16px;font-weight:600" onclick="forgotCancel()">← Back</button>
+          <button class="auth-btn" id="forgot-btn1" onclick="forgotStep1Submit()">Continue →</button>
+        </div>
+      </div>
+      <div id="forgot-step2" style="display:none">
+        <div id="forgot-question-txt" style="font-size:12px;font-weight:700;color:var(--text);margin-bottom:12px;background:var(--bg2);padding:9px 12px;border-radius:var(--r);line-height:1.4"></div>
+        <input class="auth-inp" id="forgot-answer" type="text" placeholder="Your answer..." onkeydown="if(event.key==='Enter')forgotStep2Submit()">
+        <input class="auth-inp" id="forgot-newpass" type="password" placeholder="New password (min 8 characters)" onkeydown="if(event.key==='Enter')forgotStep2Submit()">
+        <div class="auth-err" id="forgot-err2"></div>
+        <div style="display:flex;gap:8px">
+          <button class="auth-btn" style="background:var(--bg2);color:var(--text);flex:0 0 auto;width:auto;padding:11px 16px;font-weight:600" onclick="forgotBack()">← Back</button>
+          <button class="auth-btn" id="forgot-btn2" onclick="forgotStep2Submit()">Reset Password</button>
+        </div>
+      </div>
+      <div id="forgot-step3" style="display:none">
+        <div style="text-align:center;padding:12px 0 16px">
+          <div style="font-size:36px;margin-bottom:10px">✅</div>
+          <div style="font-weight:700;font-size:14px;margin-bottom:6px">Password updated!</div>
+          <div style="font-size:12px;color:var(--text2);margin-bottom:16px">Please log in with your new password</div>
+          <button class="auth-btn" onclick="forgotDone()">Go to login →</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<!-- SECURITY QUESTION PROMPT (for existing users without a question set) -->
+<div id="sq-prompt" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:1500;align-items:center;justify-content:center;padding:20px">
+  <div style="background:var(--bg);border:1px solid var(--border);border-radius:var(--rlg);padding:28px 24px;width:100%;max-width:360px;box-shadow:0 4px 24px rgba(0,0,0,.18)">
+    <div style="font-size:15px;font-weight:800;margin-bottom:6px">🔐 Set Your Security Question</div>
+    <div style="font-size:12px;color:var(--text2);margin-bottom:16px;line-height:1.5">You need a security question to recover your account if you forget your password. It only takes a moment!</div>
+    <select class="auth-inp" id="sq-prompt-q" style="cursor:pointer">
+      <option value="">-- Select a security question --</option>
+      <option>What was the name of your first school?</option>
+      <option>What is your favourite place?</option>
+      <option>What was the name of your first pet?</option>
+      <option>What is your mother's home town?</option>
+    </select>
+    <input class="auth-inp" id="sq-prompt-a" type="text" placeholder="Your answer...">
+    <div class="auth-err" id="sq-prompt-err"></div>
+    <div style="display:flex;gap:8px">
+      <button class="auth-btn" style="background:var(--bg2);color:var(--text);flex:0 0 auto;width:auto;padding:11px 16px;font-weight:600" onclick="sqPromptDismiss()">Later</button>
+      <button class="auth-btn" id="sq-prompt-btn" onclick="sqPromptSubmit()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- IMAGE LIGHTBOX -->
+<div class="img-lb" id="img-lb" onclick="lbClose()">
+  <button class="img-lb-x" onclick="event.stopPropagation();lbClose()">✕</button>
+  <img id="img-lb-img" src="" alt="Preview" onclick="event.stopPropagation()">
+</div>
+
 <!-- WELCOME -->
-<div class="welcome" id="welcome">
+<div class="welcome" id="welcome" style="display:none">
   <div class="wbox">
     <div class="wlogo">
       <div class="wlogo-text">Forge<span>AI</span></div>
@@ -451,8 +583,9 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
     </div>
     <div class="sb-bot">
       <div class="urow">
-        <div class="uav">VK</div>
-        <div><div class="uname">Vignesh K</div><div class="uplan" id="plan-lbl">Enterprise</div></div>
+        <div class="uav" id="user-av">?</div>
+        <div style="flex:1;min-width:0"><div class="uname" id="user-name">...</div><div class="uplan" id="plan-lbl">Enterprise</div></div>
+        <button class="ib" onclick="doLogout()" title="Logout" style="flex-shrink:0;font-size:13px">⏻</button>
       </div>
     </div>
   </div>
@@ -486,12 +619,25 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
         <div class="pill" onclick="ask(this.dataset.q)" data-q="Generate API documentation">📄 Docs</div>
       </div>
       <div class="cin-area">
+        <input type="file" id="attach-img-input" accept="image/jpeg,image/png,image/webp" style="display:none" onchange="attachHandle(this.files[0])">
+        <input type="file" id="attach-file-input" accept=".txt,.md,.csv,.json,.js,.py,.html,.css" style="display:none" onchange="attachHandle(this.files[0])">
         <div class="qt-bar" id="qt-bar">
           <div class="qt-accent"></div>
           <span class="qt-txt" id="qt-txt"></span>
           <button class="qt-x" onclick="qCancel()" title="Cancel quote">×</button>
         </div>
+        <div class="attach-bar" id="attach-bar">
+          <span id="attach-preview-inner" style="display:flex;align-items:center;gap:6px;flex:1;overflow:hidden;min-width:0"></span>
+          <button class="attach-x" onclick="attachClear()" title="Remove attachment">×</button>
+        </div>
         <div class="cin-row">
+          <div class="attach-wrap" id="attach-menu-wrap">
+            <button class="attach-btn" onclick="attachPick()" title="Attach image or file">📎</button>
+            <div class="attach-menu" id="attach-menu">
+              <button class="attach-menu-item" onclick="attachPickImg()">📷 Photo</button>
+              <button class="attach-menu-item" onclick="attachPickFile()">📁 Add Files</button>
+            </div>
+          </div>
           <textarea class="cin" id="chat-in" placeholder="Type in Tamil or English..." rows="1" onkeydown="ck(event)" oninput="rsz(this)"></textarea>
           <button class="sbtn" onclick="send()">➤</button>
         </div>
@@ -908,13 +1054,18 @@ function switchMode(mode){
 var proR=['GitHub repo created! Scaffold ready. Deploy to Vercel?','Background test started! WhatsApp alert coming in ~18 min. Safe to close app!','Vercel deploy started! Building 34%. ETA 3 min.','Security scan done! 1 Critical: SQL injection at /api/search. Auto-patch ready?','API docs generated! 12 endpoints. Swagger UI at /api/docs!','Auto-fix applied! Redeploying now.','Cost +23% vs last month. Redis caching saves Rs.1200/month. Apply?','Indexes added! 4200ms to 89ms. 97% faster!'];
 var simpleR=['Chapter summary done! Photosynthesis = plants convert sunlight to energy. CO2+H2O+Light = Glucose+O2. Quiz ready?','Finance done! Transport 23% high. Cancel 3 subscriptions = Rs.3000/month savings!','iPhone 15 best: Flipkart Rs.69,999. HDFC 5% cashback = Rs.66,499 effective. Set price alert?','Aadhaar change: uidai.gov.in, upload rent agreement + utility bill, OTP verify. 90 days processing.','Ooty 3 days: Rs.3,595 total (Rs.1,405 under budget!). Bus+Toy train+Hotel+Food covered!','Math: x2+5x+6=0. Factors (x+2)(x+3)=0. Answer: x=-2 or x=-3','Medicine reminders set! WhatsApp alerts active!','Payment reminders sent via WhatsApp + Email!'];
 var pi=0,si=0;
+var currentUser=null;
+function _chKey(){return 'forgeai_chats'+(currentUser?'_'+currentUser.id:'');}
+function _acKey(){return 'forgeai_active_chat'+(currentUser?'_'+currentUser.id:'');}
+function _thKey(){return 'forgeai_tamil_history'+(currentUser?'_'+currentUser.id:'');}
+function userInitials(){return currentUser?currentUser.name.trim().split(/\s+/).slice(0,2).map(function(w){return w[0];}).join('').toUpperCase().slice(0,2):'?';}
 var chatHistory=[];
 var tamilHistory=[];
 var enterpriseMode=localStorage.getItem('forgeai_enterprise')==='true';
 function toggleEnterprise(){enterpriseMode=!enterpriseMode;localStorage.setItem('forgeai_enterprise',enterpriseMode);updateEnterpriseUI();}
 function updateEnterpriseUI(){var t=document.getElementById('ent-toggle');var k=document.getElementById('ent-knob');var l=document.getElementById('ent-label');if(!t)return;if(enterpriseMode){t.style.background='#E8A800';k.style.transform='translateX(14px)';l.style.color='#9A6E00';}else{t.style.background='var(--border2)';k.style.transform='translateX(0)';l.style.color='var(--text2)';}}
 function saveChat(){chatHistory=chatHistory.slice(-50);localStorage.setItem('forgeai_chat_history',JSON.stringify(chatHistory));}
-function saveTamilChat(){tamilHistory=tamilHistory.slice(-50);localStorage.setItem('forgeai_tamil_history',JSON.stringify(tamilHistory));}
+function saveTamilChat(){tamilHistory=tamilHistory.slice(-50);localStorage.setItem(_thKey(),JSON.stringify(tamilHistory));}
 function clearChat(){
   chatHistory=[];localStorage.removeItem('forgeai_chat_history');
   var cid=chCurId();
@@ -922,13 +1073,13 @@ function clearChat(){
   document.getElementById('chat-msgs').innerHTML=welcomeHTML();
 }
 function clearTamil(){
-  tamilHistory=[];localStorage.removeItem('forgeai_tamil_history');
+  tamilHistory=[];localStorage.removeItem(_thKey());
   document.getElementById('tamil-msgs').innerHTML='<div class="msg"><div class="mav ai" style="background:#FF6B35">AI</div><div><div class="bub">Vanakkam! I am Tamil AI Coding Assistant. Ask me anything in Tamil or English — I will write code, fix bugs, and deploy apps. World\'s first Tamil coding AI!</div></div></div>';
 }
 // ── Chat history – multi-session ───────────────────────────────────────────
-function chAll(){try{return JSON.parse(localStorage.getItem('forgeai_chats')||'[]');}catch(e){return[];}}
-function chCurId(){return localStorage.getItem('forgeai_active_chat')||'';}
-function chStore(a){try{localStorage.setItem('forgeai_chats',JSON.stringify(a));}catch(e){console.error('[ch] store failed',e);}}
+function chAll(){try{return JSON.parse(localStorage.getItem(_chKey())||'[]');}catch(e){return[];}}
+function chCurId(){return localStorage.getItem(_acKey())||'';}
+function chStore(a){try{localStorage.setItem(_chKey(),JSON.stringify(a));}catch(e){console.error('[ch] store failed',e);}}
 function chMakeTitle(txt){var s=String(txt||'').trim().split(/\s+/).slice(0,6).join(' ');return s?(s.length>44?s.slice(0,44)+'…':s):'New Chat';}
 function chDraw(){
   var el=document.getElementById('ch-list');
@@ -957,7 +1108,7 @@ function chSync(){
   if(idx===-1){
     id='ch_'+Date.now();
     all.unshift({id:id,title:'New Chat',messages:[],updatedAt:Date.now()});
-    localStorage.setItem('forgeai_active_chat',id);
+    localStorage.setItem(_acKey(),id);
     idx=0;
   }
   if(all[idx].title==='New Chat'){
@@ -974,7 +1125,7 @@ function chSync(){
 function chNewChat(){
   pvClose(); pvFiles={html:'',css:'',js:'',reactNative:{}};
   chatHistory=[];localStorage.removeItem('forgeai_chat_history');
-  localStorage.removeItem('forgeai_active_chat');
+  localStorage.removeItem(_acKey());
   document.getElementById('chat-msgs').innerHTML=welcomeHTML();
   chDraw();
   var ni=document.querySelector((isSimple()?'#simple-nav':'#pro-nav')+' .ni');if(ni)go('chat',ni);
@@ -984,7 +1135,7 @@ function chOpen(id){
   var all=chAll(),sess=null;
   for(var i=0;i<all.length;i++){if(all[i].id===id){sess=all[i];break;}}
   if(!sess){console.warn('[chOpen] not found:',id);return;}
-  localStorage.setItem('forgeai_active_chat',id);
+  localStorage.setItem(_acKey(),id);
   chatHistory=(Array.isArray(sess.messages)?sess.messages:[]).slice();
   var cm=document.getElementById('chat-msgs');
   if(!chatHistory.length){
@@ -1008,7 +1159,7 @@ function chRemove(id){
   var all=chAll().filter(function(s){return s.id!==id;});
   chStore(all);
   if(chCurId()===id){
-    localStorage.removeItem('forgeai_active_chat');chatHistory=[];localStorage.removeItem('forgeai_chat_history');
+    localStorage.removeItem(_acKey());chatHistory=[];localStorage.removeItem('forgeai_chat_history');
     if(all.length){chOpen(all[0].id);}
     else{document.getElementById('chat-msgs').innerHTML=welcomeHTML();chDraw();}
   }else{chDraw();}
@@ -1460,7 +1611,17 @@ function pvTab(t){
 function renderUserBub(m){
   var q=m.quotedText;
   var qtHtml=q?'<div class="qt-msg">'+esc(q.length>200?q.slice(0,200)+'…':q)+'</div>':'';
-  return '<div class="mav u">VK</div><div><div class="bub">'+qtHtml+esc(m.content)+'</div>'+uActBar()+'</div>';
+  var attHtml='';
+  if(m.attachment){
+    if(m.attachment.type==='image'){
+      attHtml=m.attachment.thumb
+        ?'<img class="msg-attach-img" src="'+m.attachment.thumb+'" alt="'+esc(m.attachment.name)+'" onclick="lbOpen(this.src)">'
+        :'<div class="msg-attach-file" style="cursor:pointer" onclick="notify(\'Image preview is only available in the live session\')">🖼 '+esc(m.attachment.name)+'</div>';
+    }else{
+      attHtml='<div class="msg-attach-file">📄 '+esc(m.attachment.name)+'</div>';
+    }
+  }
+  return '<div class="mav u">'+userInitials()+'</div><div><div class="bub">'+attHtml+qtHtml+esc(m.content)+'</div>'+uActBar()+'</div>';
 }
 var qtText='';
 function srHide(){var b=document.getElementById('sel-btn');if(b)b.style.display='none';}
@@ -1495,30 +1656,80 @@ function qCancel(){
   var bar=document.getElementById('qt-bar');if(bar)bar.classList.remove('on');
 }
 
+// ── Attachment ────────────────────────────────────────────────────────────────
+var attachData=null;
+function lbOpen(src){var lb=document.getElementById('img-lb');if(!lb||!src)return;document.getElementById('img-lb-img').src=src;lb.classList.add('show');}
+function lbClose(){var lb=document.getElementById('img-lb');if(lb){lb.classList.remove('show');document.getElementById('img-lb-img').src='';}}
+function attachPick(){var m=document.getElementById('attach-menu');if(m)m.classList.toggle('open');}
+function attachMenuClose(){var m=document.getElementById('attach-menu');if(m)m.classList.remove('open');}
+function attachPickImg(){attachMenuClose();document.getElementById('attach-img-input').click();}
+function attachPickFile(){attachMenuClose();document.getElementById('attach-file-input').click();}
+function attachClear(){
+  attachData=null;
+  document.getElementById('attach-bar').classList.remove('on');
+  document.getElementById('attach-img-input').value='';
+  document.getElementById('attach-file-input').value='';
+}
+function showAttachBar(previewHtml,name){
+  document.getElementById('attach-preview-inner').innerHTML=previewHtml+(name?' <span class="attach-name">'+esc(name)+'</span>':'');
+  document.getElementById('attach-bar').classList.add('on');
+}
+function attachHandle(file){
+  if(!file)return;
+  var isImg=/^image\/(jpeg|png|webp)$/.test(file.type);
+  var isTxt=/\.(txt|md|csv|json|js|py|html|css)$/i.test(file.name);
+  if(!isImg&&!isTxt){notify('Unsupported file. Use images (JPG/PNG/WEBP) or text files (txt/md/csv/json/js/py/html/css).');return;}
+  if(isImg&&file.size>5*1024*1024){notify('Image must be under 5MB');return;}
+  if(isTxt&&file.size>1*1024*1024){notify('Text file must be under 1MB');return;}
+  var reader=new FileReader();
+  reader.onload=function(e){
+    var data=e.target.result;
+    if(isImg){
+      var b64=data.split(',')[1];
+      attachData={type:'image',name:file.name,mimeType:file.type,data:b64,thumb:data};
+      showAttachBar('<img src="'+data+'" class="attach-thumb" alt="">',file.name);
+    }else{
+      attachData={type:'text',name:file.name,mimeType:'text/plain',data:data};
+      showAttachBar('<span style="font-size:14px">📄</span>',file.name);
+    }
+  };
+  if(isImg)reader.readAsDataURL(file);else reader.readAsText(file);
+}
+
 function send(){
   var inp=document.getElementById('chat-in');
-  var t=inp.value.trim();if(!t)return;
+  var t=inp.value.trim();if(!t&&!attachData)return;
   var msgs=document.getElementById('chat-msgs');
-  var qtSnap=qtText; // snapshot before clearing
+  var qtSnap=qtText;
+  var attSnap=attachData; // snapshot before clearing
   var u=document.createElement('div');u.className='msg u';
-  u.innerHTML=renderUserBub({content:t,quotedText:qtSnap});
-  msgs.appendChild(u);inp.value='';msgs.scrollTop=msgs.scrollHeight;
-  qCancel();
+  // Live display: pass thumb so image shows inline this session
+  u.innerHTML=renderUserBub({content:t,quotedText:qtSnap,attachment:attSnap?{type:attSnap.type,name:attSnap.name,thumb:attSnap.thumb}:null});
+  msgs.appendChild(u);inp.value='';rsz(inp);msgs.scrollTop=msgs.scrollHeight;
+  qCancel();attachClear();
   var typ=document.createElement('div');typ.id='typ';typ.className='msg';
   typ.innerHTML='<div class="mav ai">F</div><div class="bub"><div class="typing"><div class="dot"></div><div class="dot"></div><div class="dot"></div></div></div>';
   msgs.appendChild(typ);msgs.scrollTop=msgs.scrollHeight;
   go('chat',document.querySelector((isSimple()?'#simple-nav':'#pro-nav')+' .ni'));
-  // Push user message now so RECENT updates immediately (before API responds)
   var apiPrompt=qtSnap?'Quoted text: "'+qtSnap+'"\n\nUser question: '+t:t;
+  // Strip attachment from history items (no base64 replay; replace empty content with label)
   var histForApi=chatHistory.slice(-10).map(function(m){
     if(m.role==='user'&&m.quotedText){return {role:'user',content:'Quoted text: "'+m.quotedText+'"\n\nUser question: '+m.content};}
-    return m;
+    if(m.role==='user'&&m.attachment&&!m.content){
+      var label=m.attachment.type==='image'?('[shared image: '+m.attachment.name+']'):('[shared file: '+m.attachment.name+']');
+      return {role:'user',content:label};
+    }
+    return {role:m.role,content:m.content};
   });
   var msgObj={role:'user',content:t};
   if(qtSnap)msgObj.quotedText=qtSnap;
+  // Store placeholder only (no base64 image data in localStorage)
+  if(attSnap)msgObj.attachment={type:attSnap.type,name:attSnap.name};
   chatHistory.push(msgObj);
   saveChat();chSync();
-  fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt:apiPrompt,history:histForApi,enterpriseMode:enterpriseMode,simpleMode:isSimple()})})
+  var fetchBody={prompt:apiPrompt||'',history:histForApi,enterpriseMode:enterpriseMode,simpleMode:isSimple()};
+  if(attSnap)fetchBody.attachment={type:attSnap.type,name:attSnap.name,mimeType:attSnap.mimeType,data:attSnap.data};
+  fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(fetchBody)})
     .then(function(r){return r.json();})
     .then(function(d){
       var ty=document.getElementById('typ');if(ty)ty.remove();
@@ -1541,6 +1752,28 @@ function send(){
 }
 function ck(e){if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();send();}}
 function rsz(el){el.style.height='';el.style.height=Math.min(el.scrollHeight,80)+'px';}
+// Drag-and-drop files onto the chat panel
+(function(){
+  var p=document.getElementById('panel-chat');
+  if(!p)return;
+  p.addEventListener('dragover',function(e){e.preventDefault();p.classList.add('drag-over');});
+  p.addEventListener('dragleave',function(e){if(!p.contains(e.relatedTarget))p.classList.remove('drag-over');});
+  p.addEventListener('drop',function(e){e.preventDefault();p.classList.remove('drag-over');var f=e.dataTransfer&&e.dataTransfer.files[0];if(f)attachHandle(f);});
+})();
+// Paste image from clipboard
+document.getElementById('chat-in').addEventListener('paste',function(e){
+  var items=e.clipboardData&&e.clipboardData.items;
+  if(!items)return;
+  for(var i=0;i<items.length;i++){if(/^image\//.test(items[i].type)){e.preventDefault();var f=items[i].getAsFile();if(f)attachHandle(f);break;}}
+});
+// Close attach menu on outside click or Escape
+document.addEventListener('click',function(e){
+  var menu=document.getElementById('attach-menu');
+  if(!menu||!menu.classList.contains('open'))return;
+  var wrap=document.getElementById('attach-menu-wrap');
+  if(wrap&&!wrap.contains(e.target))attachMenuClose();
+});
+document.addEventListener('keydown',function(e){if(e.key==='Escape'){attachMenuClose();lbClose();}});
 var buildLogs=[['Building architecture...','Analysis'],['Generating React frontend...','Frontend'],['Building Node.js backend...','Backend'],['Database setup...','Database'],['Payment integration...','Payments'],['Running tests...','Testing'],['GitHub push...','GitHub'],['Vercel deploy...','Vercel'],['SSL setup...','SSL'],['App is LIVE!','Done!']];
 function setPrompt(t){document.getElementById('dw-in').value=t;}
 function cleanDwName(el){
@@ -1712,7 +1945,7 @@ function sendTamil(){
   var t=inp.value.trim();if(!t)return;
   var msgs=document.getElementById('tamil-msgs');
   var u=document.createElement('div');u.className='msg u';
-  u.innerHTML='<div class="mav u">VK</div><div><div class="bub">'+esc(t)+'</div></div>';
+  u.innerHTML='<div class="mav u">'+userInitials()+'</div><div><div class="bub">'+esc(t)+'</div></div>';
   msgs.appendChild(u);inp.value='';msgs.scrollTop=msgs.scrollHeight;
   var typ=document.createElement('div');typ.id='ttyp';typ.className='msg';
   typ.innerHTML='<div class="mav ai" style="background:#FF6B35">AI</div><div class="bub"><div class="typing"><div class="dot"></div><div class="dot"></div><div class="dot"></div></div></div>';
@@ -2089,20 +2322,204 @@ function prjSaveApp(code,name,anchorEl){
 
 (function(){var fill=document.getElementById('dp');if(!fill)return;var p=67;setInterval(function(){p+=Math.random()*2;if(p>=100){p=100;notify('api-service deployed!');}fill.style.width=Math.min(p,100)+'%';},3000);})();
 updateEnterpriseUI();
-// Page-load restore + event wiring
+
+// ── Auth ──────────────────────────────────────────────────────────────────────
+function showAuthScreen(){document.getElementById('auth-screen').style.display='flex';}
+function hideAuthScreen(){document.getElementById('auth-screen').style.display='none';}
+function authTab(tab){
+  document.getElementById('auth-tab-login').classList.toggle('active',tab==='login');
+  document.getElementById('auth-tab-signup').classList.toggle('active',tab==='signup');
+  document.getElementById('auth-form-login').style.display=tab==='login'?'block':'none';
+  document.getElementById('auth-form-signup').style.display=tab==='signup'?'block':'none';
+  document.getElementById('auth-err-login').textContent='';
+  document.getElementById('auth-err-signup').textContent='';
+  if(tab==='signup'){var sm=document.getElementById('auth-success-msg');if(sm)sm.style.display='none';}
+  var ff=document.getElementById('forgot-flow');if(ff)ff.style.display='none';
+}
+function authSubmit(type){
+  var errEl=document.getElementById('auth-err-'+type);
+  var btn=document.getElementById('auth-submit-'+type);
+  errEl.textContent='';btn.disabled=true;
+  btn.textContent=type==='login'?'Logging in...':'Creating account...';
+  var body={};
+  if(type==='login'){body.email=document.getElementById('auth-email-l').value.trim();body.password=document.getElementById('auth-pass-l').value;}
+  else{body.name=document.getElementById('auth-name-s').value.trim();body.email=document.getElementById('auth-email-s').value.trim();body.password=document.getElementById('auth-pass-s').value;body.securityQuestion=document.getElementById('auth-sq-s').value;body.securityAnswer=document.getElementById('auth-sa-s').value.trim();}
+  if(type==='signup'){
+    if(!body.securityQuestion){errEl.textContent='Please select a security question';btn.disabled=false;btn.textContent='Create Account';return;}
+    if(!body.securityAnswer){errEl.textContent='Please answer the security question';btn.disabled=false;btn.textContent='Create Account';return;}
+  }
+  fetch('/api/auth/'+type,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
+    .then(function(r){return r.json();})
+    .then(function(d){
+      btn.disabled=false;btn.textContent=type==='login'?'Login':'Create Account';
+      if(d.error){errEl.textContent=d.error;}
+      else if(type==='signup'){
+        authTab('login');
+        var sm=document.getElementById('auth-success-msg');
+        if(sm){sm.textContent='✅ Account created! Please log in with your email and password';sm.style.display='block';}
+        document.getElementById('auth-email-l').value=body.email;
+        document.getElementById('auth-pass-l').value='';
+        document.getElementById('auth-pass-l').focus();
+      }
+      else{hideAuthScreen();onAuthSuccess(d.user);if(d.user&&!d.user.hasSecurityQuestion)showSecurityQuestionPrompt();}
+    })
+    .catch(function(){btn.disabled=false;btn.textContent=type==='login'?'Login':'Create Account';errEl.textContent='Connection error — is the server running?';});
+}
+var _forgotEmail='';
+function forgotStart(){
+  document.getElementById('auth-form-login').style.display='none';
+  document.getElementById('forgot-flow').style.display='block';
+  document.getElementById('forgot-step1').style.display='block';
+  document.getElementById('forgot-step2').style.display='none';
+  document.getElementById('forgot-step3').style.display='none';
+  document.getElementById('forgot-err1').textContent='';
+  var em=document.getElementById('auth-email-l').value;
+  document.getElementById('forgot-email').value=em||'';
+  setTimeout(function(){document.getElementById('forgot-email').focus();},50);
+}
+function forgotCancel(){
+  document.getElementById('forgot-flow').style.display='none';
+  document.getElementById('auth-form-login').style.display='block';
+  document.getElementById('auth-err-login').textContent='';
+}
+function forgotBack(){
+  document.getElementById('forgot-step2').style.display='none';
+  document.getElementById('forgot-step1').style.display='block';
+  document.getElementById('forgot-err1').textContent='';
+}
+function forgotDone(){
+  var em=_forgotEmail;
+  document.getElementById('forgot-flow').style.display='none';
+  document.getElementById('auth-form-login').style.display='block';
+  document.getElementById('auth-email-l').value=em;
+  document.getElementById('auth-pass-l').value='';
+  document.getElementById('auth-err-login').textContent='';
+  var sm=document.getElementById('auth-success-msg');
+  if(sm){sm.textContent='✅ Password updated! Please log in with your new password';sm.style.display='block';}
+  setTimeout(function(){document.getElementById('auth-pass-l').focus();},50);
+}
+function forgotStep1Submit(){
+  var email=document.getElementById('forgot-email').value.trim();
+  var errEl=document.getElementById('forgot-err1');
+  if(!email){errEl.textContent='Please enter your email address';return;}
+  var btn=document.getElementById('forgot-btn1');
+  btn.disabled=true;btn.textContent='Checking...';errEl.textContent='';
+  fetch('/api/auth/forgot/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:email})})
+    .then(function(r){return r.json();})
+    .then(function(d){
+      btn.disabled=false;btn.textContent='Continue →';
+      if(d.error){errEl.textContent=d.error;return;}
+      if(d.noQuestion){errEl.textContent='No security question set for this account — log in to set one';return;}
+      _forgotEmail=email;
+      document.getElementById('forgot-question-txt').textContent=d.question;
+      document.getElementById('forgot-answer').value='';
+      document.getElementById('forgot-newpass').value='';
+      document.getElementById('forgot-err2').textContent='';
+      document.getElementById('forgot-step1').style.display='none';
+      document.getElementById('forgot-step2').style.display='block';
+      setTimeout(function(){document.getElementById('forgot-answer').focus();},50);
+    })
+    .catch(function(){btn.disabled=false;btn.textContent='Continue →';errEl.textContent='Connection error — is the server running?';});
+}
+function forgotStep2Submit(){
+  var answer=document.getElementById('forgot-answer').value.trim();
+  var newPass=document.getElementById('forgot-newpass').value;
+  var errEl=document.getElementById('forgot-err2');
+  if(!answer){errEl.textContent='Please enter your answer';return;}
+  if(!newPass||newPass.length<8){errEl.textContent='Password must be at least 8 characters';return;}
+  var btn=document.getElementById('forgot-btn2');
+  btn.disabled=true;btn.textContent='Resetting...';errEl.textContent='';
+  fetch('/api/auth/forgot/verify',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:_forgotEmail,answer:answer,newPassword:newPass})})
+    .then(function(r){return r.json();})
+    .then(function(d){
+      btn.disabled=false;btn.textContent='Reset Password';
+      if(d.error){errEl.textContent=d.error;return;}
+      document.getElementById('forgot-step2').style.display='none';
+      document.getElementById('forgot-step3').style.display='block';
+    })
+    .catch(function(){btn.disabled=false;btn.textContent='Reset Password';errEl.textContent='Connection error — is the server running?';});
+}
+function showSecurityQuestionPrompt(){
+  var p=document.getElementById('sq-prompt');
+  if(p){p.style.display='flex';document.getElementById('sq-prompt-err').textContent='';document.getElementById('sq-prompt-q').value='';document.getElementById('sq-prompt-a').value='';}
+}
+function sqPromptDismiss(){
+  var p=document.getElementById('sq-prompt');if(p)p.style.display='none';
+}
+function sqPromptSubmit(){
+  var q=document.getElementById('sq-prompt-q').value;
+  var a=document.getElementById('sq-prompt-a').value.trim();
+  var errEl=document.getElementById('sq-prompt-err');
+  if(!q){errEl.textContent='Please select a security question';return;}
+  if(!a){errEl.textContent='Please enter your answer';return;}
+  var btn=document.getElementById('sq-prompt-btn');
+  btn.disabled=true;btn.textContent='Saving...';errEl.textContent='';
+  fetch('/api/auth/set-security-question',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({question:q,answer:a})})
+    .then(function(r){return r.json();})
+    .then(function(d){
+      btn.disabled=false;btn.textContent='Save';
+      if(d.error){errEl.textContent=d.error;return;}
+      sqPromptDismiss();
+      if(typeof notify==='function')notify('Security question saved ✅');
+    })
+    .catch(function(){btn.disabled=false;btn.textContent='Save';errEl.textContent='Connection error — is the server running?';});
+}
+function doLogout(){
+  fetch('/api/auth/logout',{method:'POST'}).then(function(){
+    currentUser=null;chatHistory=[];tamilHistory=[];
+    document.getElementById('app').classList.remove('show');
+    document.getElementById('welcome').style.display='none';
+    showAuthScreen();
+  });
+}
+function updateUserUI(){
+  if(!currentUser)return;
+  document.getElementById('user-av').textContent=userInitials();
+  document.getElementById('user-name').textContent=currentUser.name;
+}
+function onAuthSuccess(user){
+  currentUser=user;
+  updateUserUI();
+  // Migrate un-namespaced chats → user namespace on first login
+  var migKey='forgeai_uid_migrated_'+user.id;
+  if(!localStorage.getItem(migKey)){
+    var oldC=localStorage.getItem('forgeai_chats'),oldA=localStorage.getItem('forgeai_active_chat');
+    if(oldC&&!localStorage.getItem(_chKey())){localStorage.setItem(_chKey(),oldC);if(oldA&&!localStorage.getItem(_acKey()))localStorage.setItem(_acKey(),oldA);}
+    localStorage.setItem(migKey,'1');
+  }
+  document.getElementById('welcome').style.display='flex';
+  initPageAll();
+}
+// 401 session-expiry interceptor
 (function(){
+  var _orig=window.fetch;
+  window.fetch=function(url,opts){
+    return _orig.apply(this,arguments).then(function(r){
+      if(r.status===401&&typeof url==='string'&&url.startsWith('/api/')&&!url.startsWith('/api/auth/')&&currentUser){
+        currentUser=null;
+        document.getElementById('app').classList.remove('show');
+        document.getElementById('welcome').style.display='none';
+        showAuthScreen();
+      }
+      return r;
+    });
+  };
+})();
+
+// Page-load restore + event wiring
+function initPageAll(){
   var cpyBtn='<div style="margin-top:5px"><button onclick="copyMsg(this)" style="background:none;border:none;cursor:pointer;font-size:11px;color:var(--text3);padding:1px 5px;border-radius:4px;line-height:1.4" title="Copy message">📋</button></div>';
 
   // One-time migration: old flat key → sessions
   var oldFlat=localStorage.getItem('forgeai_chat_history');
-  if(oldFlat&&!localStorage.getItem('forgeai_chats')){
+  if(oldFlat&&!localStorage.getItem(_chKey())){
     try{
       var oldMsgs=JSON.parse(oldFlat);
       if(Array.isArray(oldMsgs)&&oldMsgs.length>0){
         var migId='ch_'+Date.now(),fu=null;
         for(var k=0;k<oldMsgs.length;k++){if(oldMsgs[k].role==='user'){fu=oldMsgs[k];break;}}
         chStore([{id:migId,title:fu?chMakeTitle(fu.content):'Restored Chat',messages:oldMsgs,updatedAt:Date.now()}]);
-        localStorage.setItem('forgeai_active_chat',migId);
+        localStorage.setItem(_acKey(),migId);
         console.log('[init] migrated old chat history to session',migId);
       }
     }catch(e){}
@@ -2116,7 +2533,7 @@ updateEnterpriseUI();
   console.log('[init] sessions on load:',all.length,'activeId:',activeId);
   if(all.length>0){
     if(!activeId||!all.filter(function(s){return s.id===activeId;}).length){
-      activeId=all[0].id;localStorage.setItem('forgeai_active_chat',activeId);
+      activeId=all[0].id;localStorage.setItem(_acKey(),activeId);
     }
     for(var i=0;i<all.length;i++){if(all[i].id===activeId){sess=all[i];break;}}
     if(sess&&Array.isArray(sess.messages)&&sess.messages.length>0){
@@ -2191,9 +2608,16 @@ updateEnterpriseUI();
     if(b&&b.style.display!=='none'&&e.target!==b)srHide();
   });
 
-  // Tamil history (unchanged)
-  var st=localStorage.getItem('forgeai_tamil_history');
-  if(st){try{tamilHistory=JSON.parse(st);var tm=document.getElementById('tamil-msgs');tamilHistory.forEach(function(m){var div=document.createElement('div');if(m.role==='user'){div.className='msg u';div.innerHTML='<div class="mav u">VK</div><div><div class="bub">'+esc(m.content)+'</div></div>';}else{div.className='msg';div.innerHTML='<div class="mav ai" style="background:#FF6B35">AI</div><div><div class="bub" style="font-size:12px">'+formatMarkdown(m.content)+'</div>'+cpyBtn+'</div>';}tm.appendChild(div);});tm.scrollTop=tm.scrollHeight;}catch(e){localStorage.removeItem('forgeai_tamil_history');}}
+  // Tamil history restore
+  var st=localStorage.getItem(_thKey());
+  if(st){try{tamilHistory=JSON.parse(st);var tm=document.getElementById('tamil-msgs');tamilHistory.forEach(function(m){var div=document.createElement('div');if(m.role==='user'){div.className='msg u';div.innerHTML='<div class="mav u">'+userInitials()+'</div><div><div class="bub">'+esc(m.content)+'</div></div>';}else{div.className='msg';div.innerHTML='<div class="mav ai" style="background:#FF6B35">AI</div><div><div class="bub" style="font-size:12px">'+formatMarkdown(m.content)+'</div>'+cpyBtn+'</div>';}tm.appendChild(div);});tm.scrollTop=tm.scrollHeight;}catch(e){localStorage.removeItem(_thKey());}}
+}
+// Auth check on page load — drives everything
+(function(){
+  fetch('/api/auth/me')
+    .then(function(r){return r.json();})
+    .then(function(d){if(d.user)onAuthSuccess(d.user);else showAuthScreen();})
+    .catch(function(){showAuthScreen();});
 })();
 </script>
 </body>

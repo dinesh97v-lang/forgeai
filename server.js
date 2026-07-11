@@ -11,11 +11,41 @@ const express = require('express');
 const axios = require('axios');
 const cors = require('cors');
 const path = require('path');
+const bcrypt = require('bcrypt');
+const session = require('express-session');
+const ConnectSQLite3 = require('connect-sqlite3')(session);
+const Database = require('better-sqlite3');
 
 const app = express();
 app.use(cors());
-app.use(express.json());
+app.use(session({
+  store: new ConnectSQLite3({ db: 'sessions.db', dir: __dirname }),
+  secret: process.env.SESSION_SECRET || 'forgeai-fallback-change-me',
+  resave: false,
+  saveUninitialized: false,
+  cookie: { httpOnly: true, maxAge: 30 * 24 * 60 * 60 * 1000 }
+}));
+app.use(express.json({ limit: '10mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
+
+// ── SQLite DB ────────────────────────────────────────────────────────────────
+const db = new Database(path.join(__dirname, 'forgeai.db'));
+db.exec(`CREATE TABLE IF NOT EXISTS users (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  email TEXT UNIQUE NOT NULL,
+  password_hash TEXT NOT NULL,
+  name TEXT NOT NULL,
+  plan TEXT NOT NULL DEFAULT 'free',
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+)`);
+// Migrate existing DBs — add columns if absent
+try { db.exec(`ALTER TABLE users ADD COLUMN security_question TEXT`); } catch(e) {}
+try { db.exec(`ALTER TABLE users ADD COLUMN security_answer_hash TEXT`); } catch(e) {}
+
+function requireAuth(req, res, next) {
+  if (!req.session?.userId) return res.status(401).json({ error: 'Please log in to continue' });
+  next();
+}
 
 const GROQ_KEY = process.env.GROQ_API_KEY;
 const GEMINI_KEY = process.env.GEMINI_API_KEY;
@@ -345,7 +375,8 @@ function needsSearch(prompt) {
   // Year-based triggers
   if (/\b(2024|2025|2026)\b/.test(p)) return true;
 
-  // English / Thanglish search terms
+  // Word-boundary check prevents false positives like 'now' matching inside 'know',
+  // 'rate' inside 'separate', 'match' inside 'dispatch', etc.
   const searchTerms = [
     'today','current','latest','now','news','price','rate','recent',
     'who is','chief minister','president','prime minister','ceo','chairman',
@@ -354,7 +385,7 @@ function needsSearch(prompt) {
     'indraiku','ipo','ippo','ippa','evlo','thandha','velai',
     'mudalvar','mudhalvar'
   ];
-  if (searchTerms.some(w => p.includes(w))) return true;
+  if (searchTerms.some(w => new RegExp('\\b' + w + '\\b').test(p))) return true;
 
   // Tamil script keywords — check original prompt (Tamil script has no case)
   const tamilSearchTerms = [
@@ -413,7 +444,7 @@ async function callTavily(query) {
   const response = await axios.post(
     'https://api.tavily.com/search',
     { api_key: TAVILY_KEY, query, max_results: 5 },
-    { timeout: 10000 }
+    { timeout: 5000 }
   );
   return response.data.results || [];
 }
@@ -503,6 +534,36 @@ async function callGeminiModel(model, prompt, sysPrompt, history = []) {
   return candidate.content.parts[0].text;
 }
 
+async function callGeminiWithImage(model, prompt, sysPrompt, history, attachment) {
+  const contents = history.map(msg => ({
+    role: msg.role === 'assistant' ? 'model' : 'user',
+    parts: [{ text: msg.content || '' }]
+  }));
+  contents.push({
+    role: 'user',
+    parts: [
+      { inlineData: { mimeType: attachment.mimeType, data: attachment.data } },
+      { text: prompt || 'Describe this image in detail.' }
+    ]
+  });
+  const response = await axios.post(
+    `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_KEY}`,
+    {
+      system_instruction: { parts: [{ text: sysPrompt }] },
+      contents,
+      generationConfig: { maxOutputTokens: 8192 }
+    },
+    { timeout: 60000 }
+  );
+  try { trackGeminiUsage(model); } catch (e) { console.warn('[gemini-track]', e.message); }
+  const candidate = response.data.candidates?.[0];
+  if (!candidate?.content?.parts?.[0]?.text) {
+    const reason = candidate?.finishReason || 'unknown';
+    throw new Error(`Gemini vision returned no text — finishReason: ${reason}`);
+  }
+  return candidate.content.parts[0].text;
+}
+
 // ============================================
 // FALLBACK CHAIN
 // Groq primary=70b:  70b -> 8b -> scout
@@ -557,29 +618,154 @@ async function callWithFallback(primaryModel, prompt, sysPrompt, history) {
   throw lastError || new Error('All models in fallback chain exhausted');
 }
 
-// RATE LIMITER — 60 req/min per IP (no extra packages)
+// RATE LIMITER — 100 messages/day per user (free plan)
 // ============================================
-const _rl = new Map();
-function rlCheck(ip) {
-  const now = Date.now(), win = 60_000, max = 60;
-  let e = _rl.get(ip);
-  if (!e || now > e.r) { e = { n: 1, r: now + win }; _rl.set(ip, e); return false; }
-  return ++e.n > max;
+const _userDaily = new Map(); // userId -> { count, date }
+function rlCheck(userId, plan) {
+  const today = new Date().toLocaleDateString('en-CA'); // YYYY-MM-DD
+  let e = _userDaily.get(userId);
+  if (!e || e.date !== today) { _userDaily.set(userId, { count: 1, date: today }); return false; }
+  const limit = plan === 'free' ? 100 : Infinity;
+  if (e.count >= limit) return true;
+  e.count++;
+  return false;
 }
-// Prune stale entries every 5 min to prevent unbounded growth
-setInterval(() => { const now = Date.now(); for (const [k, v] of _rl) if (now > v.r) _rl.delete(k); }, 5 * 60_000).unref();
+// Prune previous-day entries every hour
+setInterval(() => { const t = new Date().toLocaleDateString('en-CA'); for (const [k, v] of _userDaily) if (v.date !== t) _userDaily.delete(k); }, 60 * 60_000).unref();
+
+// FORGOT-PASSWORD RATE LIMITER — 5 verify attempts per email per hour
+const _forgotRl = new Map();
+function forgotRlCheck(email) {
+  const now = Date.now(), win = 60 * 60_000, max = 5;
+  let e = _forgotRl.get(email);
+  if (!e || now > e.r) { _forgotRl.set(email, { n: 1, r: now + win }); return false; }
+  if (e.n >= max) return true;
+  e.n++;
+  return false;
+}
+setInterval(() => { const now = Date.now(); for (const [k, v] of _forgotRl) if (now > v.r) _forgotRl.delete(k); }, 60 * 60_000).unref();
+
+// ============================================
+// AUTH ROUTES
+// ============================================
+const SECURITY_QUESTIONS = [
+  'What was the name of your first school?',
+  'What is your favourite place?',
+  'What was the name of your first pet?',
+  'What is your mother\'s home town?'
+];
+const _emailRe = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+app.post('/api/auth/signup', async (req, res) => {
+  const { name, email, password, securityQuestion, securityAnswer } = req.body || {};
+  if (!name || !name.trim()) return res.status(400).json({ error: 'Please enter your name' });
+  if (!email || !_emailRe.test(email)) return res.status(400).json({ error: 'Please enter a valid email address' });
+  if (!password || password.length < 8) return res.status(400).json({ error: 'Password must be at least 8 characters' });
+  if (!securityQuestion || !SECURITY_QUESTIONS.includes(securityQuestion)) return res.status(400).json({ error: 'Please select a valid security question' });
+  if (!securityAnswer || !securityAnswer.trim()) return res.status(400).json({ error: 'Please answer the security question' });
+  try {
+    const hash = await bcrypt.hash(password, 10);
+    const answerHash = await bcrypt.hash(securityAnswer.toLowerCase().trim(), 10);
+    try {
+      db.prepare('INSERT INTO users (email, password_hash, name, security_question, security_answer_hash) VALUES (?, ?, ?, ?, ?)').run(email.toLowerCase().trim(), hash, name.trim(), securityQuestion, answerHash);
+    } catch (e) {
+      if (e.message.includes('UNIQUE')) return res.status(409).json({ error: 'This email is already registered — please log in' });
+      throw e;
+    }
+    res.json({ success: true, message: 'Account created' });
+  } catch (err) {
+    console.error('[auth-signup]', err.message);
+    res.status(500).json({ error: 'Server error — please try again' });
+  }
+});
+
+app.post('/api/auth/login', async (req, res) => {
+  const { email, password } = req.body || {};
+  if (!email || !password) return res.status(400).json({ error: 'Please enter your email and password' });
+  try {
+    const user = db.prepare('SELECT * FROM users WHERE email = ?').get(email.toLowerCase().trim());
+    if (!user) return res.status(401).json({ error: 'Incorrect email or password' });
+    const match = await bcrypt.compare(password, user.password_hash);
+    if (!match) return res.status(401).json({ error: 'Incorrect email or password' });
+    req.session.userId = user.id; req.session.userPlan = user.plan;
+    req.session.userName = user.name; req.session.userEmail = user.email;
+    res.json({ user: { id: user.id, name: user.name, email: user.email, plan: user.plan, hasSecurityQuestion: !!user.security_question } });
+  } catch (err) {
+    console.error('[auth-login]', err.message);
+    res.status(500).json({ error: 'Server error — please try again' });
+  }
+});
+
+app.post('/api/auth/logout', (req, res) => {
+  req.session.destroy(() => res.json({ ok: true }));
+});
+
+app.get('/api/auth/me', (req, res) => {
+  if (!req.session?.userId) return res.status(401).json({ error: 'Not logged in' });
+  res.json({ user: { id: req.session.userId, name: req.session.userName, email: req.session.userEmail, plan: req.session.userPlan } });
+});
+
+// POST /api/auth/forgot/start — returns security question for email (no enumeration)
+app.post('/api/auth/forgot/start', async (req, res) => {
+  const { email } = req.body || {};
+  if (!email || !_emailRe.test(email)) return res.status(400).json({ error: 'Please enter a valid email address' });
+  const norm = email.toLowerCase().trim();
+  const user = db.prepare('SELECT security_question FROM users WHERE email = ?').get(norm);
+  if (!user) {
+    // Small delay to prevent timing-based email enumeration
+    await new Promise(r => setTimeout(r, 80 + Math.random() * 80));
+    return res.json({ question: 'Unga favourite oru place?' });
+  }
+  if (!user.security_question) return res.json({ noQuestion: true });
+  res.json({ question: user.security_question });
+});
+
+// POST /api/auth/forgot/verify — check answer, reset password
+app.post('/api/auth/forgot/verify', async (req, res) => {
+  const { email, answer, newPassword } = req.body || {};
+  if (!email || !answer || !newPassword) return res.status(400).json({ error: 'All fields required' });
+  if (newPassword.length < 8) return res.status(400).json({ error: 'Password must be at least 8 characters' });
+  const norm = email.toLowerCase().trim();
+  if (forgotRlCheck(norm)) return res.status(429).json({ error: 'Too many attempts — please try again in an hour' });
+  try {
+    const user = db.prepare('SELECT * FROM users WHERE email = ?').get(norm);
+    if (!user || !user.security_answer_hash) return res.status(401).json({ error: 'Incorrect answer' });
+    const match = await bcrypt.compare(answer.toLowerCase().trim(), user.security_answer_hash);
+    if (!match) return res.status(401).json({ error: 'Incorrect answer' });
+    const newHash = await bcrypt.hash(newPassword, 10);
+    db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(newHash, user.id);
+    res.json({ success: true });
+  } catch (err) {
+    console.error('[auth-forgot-verify]', err.message);
+    res.status(500).json({ error: 'Server error — please try again' });
+  }
+});
+
+// POST /api/auth/set-security-question — authenticated, for users who skipped/existing accounts
+app.post('/api/auth/set-security-question', requireAuth, async (req, res) => {
+  const { question, answer } = req.body || {};
+  if (!question || !SECURITY_QUESTIONS.includes(question)) return res.status(400).json({ error: 'Please select a valid security question' });
+  if (!answer || !answer.trim()) return res.status(400).json({ error: 'Please enter your answer' });
+  try {
+    const hash = await bcrypt.hash(answer.toLowerCase().trim(), 10);
+    db.prepare('UPDATE users SET security_question = ?, security_answer_hash = ? WHERE id = ?').run(question, hash, req.session.userId);
+    res.json({ success: true });
+  } catch (err) {
+    console.error('[auth-set-sq]', err.message);
+    res.status(500).json({ error: 'Server error — please try again' });
+  }
+});
 
 // ============================================
 // MAIN CHAT ENDPOINT — With Router!
 // ============================================
-app.post('/api/chat', async (req, res) => {
-  const ip = req.ip || req.socket?.remoteAddress || 'local';
-  if (rlCheck(ip)) {
-    return res.status(429).json({ error: 'Konjam fast ah messages anuppitinga 😄 oru nimisham wait pannunga' });
+app.post('/api/chat', requireAuth, async (req, res) => {
+  if (rlCheck(req.session.userId, req.session.userPlan)) {
+    return res.status(429).json({ error: 'Innikku 100 messages limit mudinjuchu — naaliku continue pannunga!' });
   }
 
-  const { prompt, history, enterpriseMode, simpleMode } = req.body;
-  if (!prompt || !prompt.trim()) {
+  const { prompt, history, enterpriseMode, simpleMode, attachment } = req.body;
+  if (!attachment && (!prompt || !prompt.trim())) {
     return res.status(400).json({ error: 'Prompt is empty!' });
   }
 
@@ -589,6 +775,7 @@ app.post('/api/chat', async (req, res) => {
   const intent     = detectIntent(prompt);
   const lang       = detectLanguage(prompt);
   const isStudent  = isStudentRequest(prompt);
+  const tDetect    = Date.now() - startTime;
   let sysPrompt;
   let isEnterprise = false;
   if (simpleMode) {
@@ -605,15 +792,50 @@ app.post('/api/chat', async (req, res) => {
   }
 
   // Web search — enrich prompt with live results if needed
-  let finalPrompt = prompt;
+  let finalPrompt = prompt || '';
   let searched    = false;
+
+  // ── Image upload: route directly to Gemini vision, bypass search & routing ──
+  if (attachment?.type === 'image') {
+    const imgPrompt = (prompt || '').trim() || 'Describe this image in detail.';
+    console.log(`[attachment] Image "${attachment.name}" (${attachment.mimeType}) → ${MODELS.GEM_FLASH}`);
+    try {
+      const reply = await callGeminiWithImage(MODELS.GEM_FLASH, imgPrompt, sysPrompt, recentHistory, attachment);
+      const timeTaken = ((Date.now() - startTime) / 1000).toFixed(2);
+      return res.json({ reply, model: MODELS.GEM_FLASH, time: timeTaken + 's', searched: false, enterprise: false });
+    } catch (err) {
+      console.error('[attachment-image-error]', err.message);
+      const msg = err.response?.status === 429
+        ? 'Image analysis ku Gemini quota mudinjuchu — konjam neram kalichu try pannunga'
+        : 'Image analysis la error achu — please try again.';
+      return res.status(500).json({ error: msg });
+    }
+  }
+
+  // ── Text file upload: prepend content to prompt, then continue normal routing ──
+  if (attachment?.type === 'text') {
+    const FILE_CHAR_CAP = 8000;
+    const raw = attachment.data || '';
+    const content = raw.slice(0, FILE_CHAR_CAP);
+    const suffix = raw.length > FILE_CHAR_CAP ? '\n...[file truncated to fit context]' : '';
+    finalPrompt = `User uploaded file '${attachment.name}':\n${content}${suffix}\n\nUser question: ${prompt || 'Analyze this file.'}`;
+    console.log(`[attachment] Text file "${attachment.name}" — ${content.length} chars prepended`);
+  }
+  let tRewrite = 0, tTavily = 0;
   if (needsSearch(prompt) && TAVILY_KEY) {
     try {
-      const searchQuery = recentHistory.length > 0
-        ? await rewriteSearchQuery(prompt, recentHistory)
-        : prompt;
+      let searchQuery = prompt;
+      // Only rewrite short/ambiguous follow-ups — long queries are self-contained.
+      // Skipping rewrite eliminates an extra LLM round-trip (~300-800ms) for most searches.
+      if (recentHistory.length > 0 && prompt.trim().length < 80) {
+        const t1 = Date.now();
+        searchQuery = await rewriteSearchQuery(prompt, recentHistory);
+        tRewrite = Date.now() - t1;
+      }
       if (searchQuery !== prompt) console.log(`Search query rewritten: "${searchQuery}" (original: "${prompt}")`);
+      const t2 = Date.now();
       const results = await callTavily(searchQuery);
+      tTavily = Date.now() - t2;
       if (results.length > 0) {
         const today = new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' });
         const context = results.map((r, i) => `[${i + 1}] ${r.title}\n${r.content}`).join('\n\n');
@@ -636,8 +858,11 @@ app.post('/api/chat', async (req, res) => {
   console.log(`[router] ${decision.reason}`);
 
   try {
+    const tModelStart = Date.now();
     const { reply, model: usedModel } = await callWithFallback(primaryModel, finalPrompt, sysPrompt, recentHistory);
+    const tModel   = Date.now() - tModelStart;
     const timeTaken = ((Date.now() - startTime) / 1000).toFixed(2);
+    console.log(`[timing] detect=${tDetect}ms rewrite=${tRewrite}ms search=${tTavily}ms model=${tModel}ms total=${Date.now() - startTime}ms`);
     if (usedModel !== primaryModel) console.log(`[fallback] Served by ${usedModel} (primary ${primaryModel} unavailable)`);
 
     res.json({

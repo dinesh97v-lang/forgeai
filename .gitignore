@@ -2,3 +2,5 @@
 .env.txt
 node_modules/
 load-test-result.json
+*.db
+*.log
