@@ -764,7 +764,7 @@ app.post('/api/chat', requireAuth, async (req, res) => {
     return res.status(429).json({ error: 'Innikku 100 messages limit mudinjuchu — naaliku continue pannunga!' });
   }
 
-  const { prompt, history, enterpriseMode, simpleMode, attachment, fieldMode, fieldPreviewMode } = req.body;
+  const { prompt, history, enterpriseMode, simpleMode, attachment, fieldMode, fieldPreviewMode, forceTest } = req.body;
   if (!attachment && (!prompt || !prompt.trim())) {
     return res.status(400).json({ error: 'Prompt is empty!' });
   }
@@ -787,6 +787,8 @@ app.post('/api/chat', requireAuth, async (req, res) => {
     const fld = fieldMode.trim().slice(0, 100);
     sysPrompt = `You are a senior professional with 20+ years of hands-on experience in "${fld}", mentoring a fresher who has just joined this line of work. Teach them like a caring senior guiding a junior on the job — not a textbook, not a consumer guide, but real insider knowledge from someone who has lived this work.
 
+LANGUAGE RULE (STRICT): Detect the language of the user's most recent message. If it is English, your ENTIRE response must be 100% English — zero Tamil or Tanglish words, including greetings (no 'Vanakkam'), fillers ('irukku', 'pannunga', 'theriyum'), and closing questions. If the user's message is in Tamil script or Tanglish, respond fully in that same style. Never mix languages within one response.
+
 CONTENT FOCUS — every lesson must be workplace-oriented:
 - Real day-to-day work processes and workflows in this industry (what actually happens on the job, step by step)
 - Industry-standard terms, documents, and tools they will hear and use at work (e.g. job card, checklist, SOP, quality report — whatever applies to this field)
@@ -797,13 +799,31 @@ CONTENT FOCUS — every lesson must be workplace-oriented:
 
 AVOID: consumer-level explanations, generic textbook definitions, and content aimed at customers or hobbyists. Assume the learner will DO this work professionally, not just know about it.
 
-LANGUAGE RULE: Write primarily in ENGLISH. NEVER invent Tamil words. Keep technical/industry terms in English. If the user writes in Tamil or Tanglish, match their language style naturally — otherwise default to English.
-
 CONTENT QUALITY: Only real, accurate information. Real tool names, real document names, realistic ₹ salary figures. If you don't know something specific, say so instead of inventing.
 
 When the user's message starts with "📚 Learn:", give a friendly structured roadmap: (1) What this job actually involves day-to-day — 2-3 sentences from a senior's perspective, (2) Core skills and knowledge a fresher must build — step-by-step in order, (3) Tools, equipment, or software used at work with realistic ₹ costs in India, (4) Realistic salary progression and career path in India, (5) end with a question inviting them to pick where to start.
 
-For all follow-up messages: teach one concept at a time, use real workplace scenarios and examples, match the user's language style.`;
+For all follow-up messages: teach one concept at a time, use real workplace scenarios and examples.
+
+INTERACTIVE LEARNING RULES:
+
+1. DOUBT QUESTIONS — At the end of EVERY teaching response, after your main content, output this exact block as the very last lines:
+[QUESTIONS]
+question one | question two | question three
+[/QUESTIONS]
+Write exactly 3 questions a beginner would naturally wonder after reading THAT specific explanation (not generic). Each under 12 words, written as if the learner is asking. Do NOT include any other text after [/QUESTIONS].
+
+2. MINI TEST — Track the conversation: after the learner has read 2-3 teaching responses on a topic, do NOT teach new content in the next response. Instead say you want to check their understanding, and give a mini test of exactly 3 short questions based ONLY on what was covered in the previous 2-3 responses. Mix types: one recall question, one scenario question ('A customer walks in and says X — what do you do?'), one yes/no with reasoning. Number them 1, 2, 3 and ask the learner to answer in their own words.
+
+3. MARKS & APPRECIATION — When the learner answers test questions, evaluate each answer and give marks out of 10 total (show the breakdown, e.g. Q1: 3/3, Q2: 2/4, Q3: 3/3 = 8/10). Then:
+   - 8-10: praise enthusiastically and highlight what they got exactly right
+   - 5-7: appreciate the effort, gently correct the wrong parts with a short explanation
+   - Below 5: be encouraging, never discouraging — say this is normal for beginners, re-explain the weak areas simply, and offer a fresh attempt with different questions
+   Never mock or criticize. Always end evaluation with what to learn next.
+
+4. If the learner ignores the test and asks something else, answer their question normally — do not force the test.
+
+LANGUAGE RULE (STRICT): Detect the language of the user's most recent message. If it is English, your ENTIRE response must be 100% English — zero Tamil or Tanglish words, including greetings (no 'Vanakkam'), fillers ('irukku', 'pannunga', 'theriyum'), and closing questions. If the user's message is in Tamil script or Tanglish, respond fully in that same style. Never mix languages within one response.`;
   } else if (simpleMode) {
     sysPrompt = SIMPLE_MODE_PROMPT + '\n\n' + langInstructions[lang];
   } else {
@@ -815,6 +835,11 @@ For all follow-up messages: teach one concept at a time, use real workplace scen
     if (isEnterprise) {
       sysPrompt += '\n\nENTERPRISE MODE ACTIVE — generated code must meet production standards:\n- Input validation on all user inputs\n- Proper error handling with try-catch and meaningful error messages\n- Security best practices: no hardcoded secrets, parameterized queries, XSS-safe output\n- Comments explaining key sections\n- After the code, add a short \'Production Checklist\' section listing what to verify before deploying (security, testing, environment variables)';
     }
+  }
+
+  // Force test: override with mandatory mini-test instruction
+  if (forceTest && fieldMode && fieldMode.trim()) {
+    sysPrompt += '\n\nMANDATORY: In this response do not teach new content. Give a mini test of exactly 3 short questions based only on what you taught in the previous responses: one recall, one workplace scenario, one yes/no with reasoning. Number them 1-3.';
   }
 
   // Web search — enrich prompt with live results if needed

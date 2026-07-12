@@ -330,8 +330,8 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .attach-bar.on{display:flex}
 .field-learn-bar{display:none;flex-direction:column;gap:6px;padding:8px 14px;background:var(--bg2);border-bottom:1px solid var(--border);margin:-10px -14px 10px;flex-shrink:0}
 .field-learn-bar.on{display:flex}
-.fl-chip{font-size:11px;padding:3px 9px;border:1px solid var(--border);border-radius:12px;color:var(--text2);cursor:pointer;background:var(--bg);font-family:inherit;transition:all .15s;white-space:nowrap}
-.fl-chip:hover{background:var(--accent);color:white;border-color:var(--accent)}
+.fl-chip{font-size:11.5px;padding:8px 14px;border:1px solid var(--border);border-radius:20px;color:var(--text2);cursor:pointer;background:var(--bg);font-family:inherit;transition:all .18s;white-space:nowrap;display:inline-flex;align-items:center;gap:5px}
+.fl-chip:hover{background:var(--bg3);color:var(--text);border-color:var(--border2);transform:scale(1.03)}
 .fl-preview-card{background:var(--bg2);border:1px solid var(--border);border-radius:var(--rlg);padding:14px 16px;margin:4px 0;max-width:420px}
 .fl-pc-loading{display:flex;align-items:center;gap:8px;color:var(--text2);font-size:12px;padding:12px 14px}
 .fl-pc-spinner{width:14px;height:14px;border:2px solid var(--border2);border-top-color:var(--accent);border-radius:50%;animation:fl-spin .7s linear infinite;flex-shrink:0}
@@ -352,6 +352,9 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .fl-pc-a{font-size:11px;color:var(--text)}
 .fl-pc-btn{width:100%;padding:9px;background:var(--accent);color:white;border:none;border-radius:var(--r);font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;transition:background .2s;margin-top:4px}
 .fl-pc-btn:hover{background:var(--accent2)}
+.fl-doubt-chips{display:flex;flex-wrap:wrap;gap:5px;padding:5px 0 4px 36px}
+.fl-dchip{font-size:11px;padding:4px 10px;border:1px solid var(--border);border-radius:14px;color:var(--text2);cursor:pointer;background:var(--bg);font-family:inherit;transition:all .15s;white-space:nowrap;text-align:left}
+.fl-dchip:hover{background:var(--bg3);color:var(--text);border-color:var(--border2)}
 .attach-thumb{width:36px;height:36px;object-fit:cover;border-radius:5px;border:1px solid var(--border);flex-shrink:0}
 .attach-name{flex:1;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;font-size:11px;color:var(--text)}
 .attach-x{background:none;border:none;cursor:pointer;font-size:16px;color:var(--text3);padding:0 2px;line-height:1;flex-shrink:0}
@@ -659,14 +662,19 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
             <span style="font-size:11px;font-weight:600;color:var(--text2)">Enna kathukanum? Entha field um type pannunga!</span>
             <button class="attach-x" onclick="fieldLearnClose()" title="Cancel">×</button>
           </div>
-          <div style="display:flex;gap:5px;flex-wrap:wrap">
-            <button class="fl-chip" onclick="fieldLearnChip('Fashion Design')">Fashion Design</button>
-            <button class="fl-chip" onclick="fieldLearnChip('Farming')">Farming</button>
-            <button class="fl-chip" onclick="fieldLearnChip('Catering')">Catering</button>
-            <button class="fl-chip" onclick="fieldLearnChip('Beauty &amp; Salon')">Beauty &amp; Salon</button>
-            <button class="fl-chip" onclick="fieldLearnChip('Photography')">Photography</button>
+          <div style="display:flex;gap:6px;flex-wrap:wrap">
+            <button class="fl-chip" onclick="fieldLearnChip('AI &amp; Machine Learning')">🤖 AI &amp; Machine Learning</button>
+            <button class="fl-chip" onclick="fieldLearnChip('Coding &amp; Software')">💻 Coding &amp; Software</button>
+            <button class="fl-chip" onclick="fieldLearnChip('Automobile Industry')">🚗 Automobile Industry</button>
+            <button class="fl-chip" onclick="fieldLearnChip('Digital Marketing')">📱 Digital Marketing</button>
+            <button class="fl-chip" onclick="fieldLearnChip('Fashion Design')">👗 Fashion Design</button>
+            <button class="fl-chip" onclick="fieldLearnChip('Banking &amp; Finance')">🏦 Banking &amp; Finance</button>
+            <button class="fl-chip" onclick="fieldLearnChip('Healthcare &amp; Nursing')">🩺 Healthcare &amp; Nursing</button>
+            <button class="fl-chip" onclick="fieldLearnChip('Electrician &amp; Electronics')">⚡ Electrician &amp; Electronics</button>
+            <button class="fl-chip" onclick="fieldLearnChip('Hotel Management &amp; Cooking')">🍳 Hotel Management &amp; Cooking</button>
+            <button class="fl-chip" onclick="fieldLearnChip('Beauty &amp; Salon')">💇 Beauty &amp; Salon</button>
           </div>
-          <input id="field-learn-input" type="text" class="cin" style="min-height:0;padding:6px 10px;font-size:12px" placeholder="e.g., fashion design, farming, catering, tailoring..." onkeydown="if(event.key==='Enter')fieldLearnStart();if(event.key==='Escape')fieldLearnClose()">
+          <input id="field-learn-input" type="text" class="cin" style="min-height:0;padding:6px 10px;font-size:12px" placeholder="e.g., AI, coding, banking, nursing..." onkeydown="if(event.key==='Enter')fieldLearnStart();if(event.key==='Escape')fieldLearnClose()">
         </div>
         <div class="cin-row">
           <div class="attach-wrap" id="attach-menu-wrap">
@@ -1714,7 +1722,24 @@ function fieldLearnChip(text){var i=document.getElementById('field-learn-input')
 function fieldModeUpdate(){var b=document.getElementById('field-mode-badge');if(!b)return;if(chatFieldMode){b.textContent='📚 Learning: '+chatFieldMode;b.style.display='';}else{b.style.display='none';}}
 function fieldModeSave(field){var id=chCurId(),all=chAll();for(var i=0;i<all.length;i++){if(all[i].id===id){all[i].fieldMode=field;chStore(all);break;}}}
 var _flPreviewField=null;
+var _flTeachCount=0;
+var _flTestPending=false;
 function _flTamilInput(s){return /[஀-௿]/.test(s);}
+function flParseQuestions(reply){
+  var m=(reply||'').match(/\[QUESTIONS\]\s*([\s\S]*?)\s*\[\/QUESTIONS\]/i);
+  if(!m)return{clean:reply||'',questions:[]};
+  var clean=(reply||'').replace(/\s*\[QUESTIONS\][\s\S]*?\[\/QUESTIONS\]/i,'').trim();
+  var qs=m[1].split('|').map(function(q){return q.trim();}).filter(function(q){return q.length>0;});
+  return{clean:clean,questions:qs};
+}
+function flRenderDoubtChips(questions,msgs){
+  var old=document.querySelector('.fl-doubt-chips');if(old)old.remove();
+  if(!questions||questions.length<1)return;
+  var d=document.createElement('div');d.className='fl-doubt-chips';
+  d.innerHTML=questions.map(function(q){return '<button class="fl-dchip" data-q="'+esc(q)+'" onclick="flDoubSend(this.dataset.q)">'+esc(q)+'</button>';}).join('');
+  msgs.appendChild(d);msgs.scrollTop=msgs.scrollHeight;
+}
+function flDoubSend(q){var inp=document.getElementById('chat-in');if(inp){inp.value=q;send();}}
 function fieldLearnStart(){
   var inp=document.getElementById('field-learn-input');
   var field=inp?inp.value.trim():'';
@@ -1768,6 +1793,8 @@ function fieldLearnPreview(field){
 function fieldLearnBegin(field){
   if(!field)field=_flPreviewField;
   if(!field)return;
+  _flTeachCount=0;_flTestPending=false;
+  var old=document.querySelector('.fl-doubt-chips');if(old)old.remove();
   chatFieldMode=field;fieldModeUpdate();
   var msgs=document.getElementById('chat-msgs');
   var u=document.createElement('div');u.className='msg u';
@@ -1784,11 +1811,14 @@ function fieldLearnBegin(field){
     .then(function(r){return r.json();})
     .then(function(d){
       var ty=document.getElementById('typ');if(ty)ty.remove();
-      chatHistory.push({role:'assistant',content:d.reply||d.error||''});
+      var parsed=flParseQuestions(d.reply||'');
+      chatHistory.push({role:'assistant',content:parsed.clean||d.error||''});
       saveChat();chSync();
       var ai=document.createElement('div');ai.className='msg';
-      ai.innerHTML='<div class="mav ai">F</div><div><div class="bub">'+formatMarkdown(d.reply||d.error||'Error')+'</div>'+aiActBar()+'</div>';
+      ai.innerHTML='<div class="mav ai">F</div><div><div class="bub">'+formatMarkdown(parsed.clean||d.error||'Error')+'</div>'+aiActBar()+'</div>';
       msgs.appendChild(ai);msgs.scrollTop=msgs.scrollHeight;
+      _flTeachCount++;
+      flRenderDoubtChips(parsed.questions,msgs);
     })
     .catch(function(){var ty=document.getElementById('typ');if(ty)ty.remove();});
 }
@@ -1858,19 +1888,27 @@ function send(){
   saveChat();chSync();
   var fetchBody={prompt:apiPrompt||'',history:histForApi,enterpriseMode:enterpriseMode,simpleMode:isSimple()};
   if(chatFieldMode)fetchBody.fieldMode=chatFieldMode;
+  if(chatFieldMode&&_flTeachCount>=2){fetchBody.forceTest=true;_flTestPending=true;}
   if(attSnap)fetchBody.attachment={type:attSnap.type,name:attSnap.name,mimeType:attSnap.mimeType,data:attSnap.data};
   fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(fetchBody)})
     .then(function(r){return r.json();})
     .then(function(d){
       var ty=document.getElementById('typ');if(ty)ty.remove();
-      chatHistory.push({role:'assistant',content:d.reply||d.error||''});
+      var parsed=chatFieldMode?flParseQuestions(d.reply||''):{clean:d.reply||'',questions:[]};
+      var _reply=parsed.clean||d.error||'';
+      chatHistory.push({role:'assistant',content:_reply});
       saveChat();chSync();
       var ai=document.createElement('div');ai.className='msg';
       var searchBadge=d.searched?'<span style="font-size:10px;padding:2px 7px;border-radius:8px;font-weight:700;background:var(--ibg);color:var(--info);margin-right:4px">🔍 Web search</span>':'';
       var entBadge=d.enterprise?'<span style="font-size:10px;padding:2px 7px;border-radius:8px;font-weight:700;background:#FFF3CD;color:#9A6E00;margin-right:4px">⚡ Enterprise</span>':'';
       var badge='<div style="margin-top:5px;display:flex;align-items:center;flex-wrap:wrap;gap:2px">'+searchBadge+entBadge+'<span style="font-size:10px;padding:2px 7px;border-radius:8px;font-weight:700;background:var(--sbg);color:var(--success);margin-right:4px">'+esc(d.model||'AI')+'</span><span style="font-size:10px;color:var(--text3)">'+esc(d.time||'')+'</span></div>';
-      ai.innerHTML='<div class="mav ai">F</div><div><div class="bub">'+formatMarkdown(d.reply||d.error||'Error')+'</div>'+badge+aiActBar()+'</div>';
+      ai.innerHTML='<div class="mav ai">F</div><div><div class="bub">'+formatMarkdown(_reply||'Error')+'</div>'+badge+aiActBar()+'</div>';
       msgs.appendChild(ai);msgs.scrollTop=msgs.scrollHeight;
+      if(chatFieldMode){
+        if(_flTestPending){_flTeachCount=0;_flTestPending=false;}
+        else _flTeachCount++;
+        flRenderDoubtChips(parsed.questions,msgs);
+      }
       pvAutoUpdate();
     })
     .catch(function(){
