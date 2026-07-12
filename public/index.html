@@ -332,6 +332,26 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .field-learn-bar.on{display:flex}
 .fl-chip{font-size:11px;padding:3px 9px;border:1px solid var(--border);border-radius:12px;color:var(--text2);cursor:pointer;background:var(--bg);font-family:inherit;transition:all .15s;white-space:nowrap}
 .fl-chip:hover{background:var(--accent);color:white;border-color:var(--accent)}
+.fl-preview-card{background:var(--bg2);border:1px solid var(--border);border-radius:var(--rlg);padding:14px 16px;margin:4px 0;max-width:420px}
+.fl-pc-loading{display:flex;align-items:center;gap:8px;color:var(--text2);font-size:12px;padding:12px 14px}
+.fl-pc-spinner{width:14px;height:14px;border:2px solid var(--border2);border-top-color:var(--accent);border-radius:50%;animation:fl-spin .7s linear infinite;flex-shrink:0}
+@keyframes fl-spin{to{transform:rotate(360deg)}}
+.fl-pc-head{margin-bottom:10px}
+.fl-pc-title{font-size:15px;font-weight:700;color:var(--text);margin-bottom:3px}
+.fl-pc-level{font-size:11px;color:var(--text2)}
+.fl-pc-outcomes{display:flex;flex-direction:column;gap:4px;margin-bottom:10px}
+.fl-pc-outcome{font-size:12px;color:var(--text);display:flex;align-items:flex-start;gap:6px}
+.fl-pc-check{color:var(--success);font-weight:700;flex-shrink:0}
+.fl-pc-timeline{font-size:11px;padding:3px 8px;background:var(--ibg);color:var(--info);border-radius:8px;display:inline-block;margin-bottom:10px;font-weight:600}
+.fl-pc-details{margin-bottom:10px;font-size:12px}
+.fl-pc-details summary{cursor:pointer;color:var(--text2);font-size:12px;user-select:none;list-style:none}
+.fl-pc-details summary::-webkit-details-marker{display:none}
+.fl-pc-details[open] summary{color:var(--text);margin-bottom:6px}
+.fl-pc-qa{background:var(--bg);border:1px solid var(--border);border-radius:var(--r);padding:8px 10px;display:flex;flex-direction:column;gap:5px}
+.fl-pc-q{font-size:11px;color:var(--text2);font-style:italic}
+.fl-pc-a{font-size:11px;color:var(--text)}
+.fl-pc-btn{width:100%;padding:9px;background:var(--accent);color:white;border:none;border-radius:var(--r);font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;transition:background .2s;margin-top:4px}
+.fl-pc-btn:hover{background:var(--accent2)}
 .attach-thumb{width:36px;height:36px;object-fit:cover;border-radius:5px;border:1px solid var(--border);flex-shrink:0}
 .attach-name{flex:1;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;font-size:11px;color:var(--text)}
 .attach-x{background:none;border:none;cursor:pointer;font-size:16px;color:var(--text3);padding:0 2px;line-height:1;flex-shrink:0}
@@ -1693,11 +1713,61 @@ function fieldLearnClose(){var b=document.getElementById('field-learn-bar');if(b
 function fieldLearnChip(text){var i=document.getElementById('field-learn-input');if(i){i.value=text;fieldLearnStart();}}
 function fieldModeUpdate(){var b=document.getElementById('field-mode-badge');if(!b)return;if(chatFieldMode){b.textContent='📚 Learning: '+chatFieldMode;b.style.display='';}else{b.style.display='none';}}
 function fieldModeSave(field){var id=chCurId(),all=chAll();for(var i=0;i<all.length;i++){if(all[i].id===id){all[i].fieldMode=field;chStore(all);break;}}}
+var _flPreviewField=null;
+function _flTamilInput(s){return /[஀-௿]/.test(s);}
 function fieldLearnStart(){
   var inp=document.getElementById('field-learn-input');
   var field=inp?inp.value.trim():'';
   if(!field)return;
+  fieldLearnPreview(field);
+}
+function fieldLearnPreview(field){
   fieldLearnClose();
+  _flPreviewField=field;
+  var cardId='fl-preview-card-'+Date.now();
+  var _tamil=_flTamilInput(field);
+  var msgs=document.getElementById('chat-msgs');
+  var card=document.createElement('div');
+  card.id=cardId;
+  card.className='fl-preview-card fl-pc-loading';
+  card.innerHTML='<div class="fl-pc-spinner"></div><span>'+(_tamil?'Unga learning plan ready aagitu irukku...':'Preparing your learning plan...')+'</span>';
+  msgs.appendChild(card);msgs.scrollTop=msgs.scrollHeight;
+  fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt:field,history:[],fieldPreviewMode:field,simpleMode:false})})
+    .then(function(r){return r.json();})
+    .then(function(d){
+      var raw=(d.reply||'').trim();
+      raw=raw.replace(/^```json\s*/i,'').replace(/^```\s*/i,'').replace(/\s*```$/i,'');
+      var data=null;
+      try{data=JSON.parse(raw);}catch(e){data=null;}
+      var pc=document.getElementById(cardId);
+      if(!data||!data.title){if(pc)pc.remove();fieldLearnBegin(field);return;}
+      var outcomes=Array.isArray(data.outcomes)?data.outcomes:[];
+      var outHtml=outcomes.map(function(o){return '<div class="fl-pc-outcome"><span class="fl-pc-check">&#10003;</span>'+esc(o)+'</div>';}).join('');
+      var qa=data.first_lesson_preview||{};
+      if(pc){
+        pc.className='fl-preview-card';
+        pc.innerHTML=
+          '<div class="fl-pc-head">'+
+            '<div class="fl-pc-title">'+esc(data.title)+'</div>'+
+            '<div class="fl-pc-level">'+esc(data.level_note||'')+'</div>'+
+          '</div>'+
+          '<div class="fl-pc-outcomes">'+outHtml+'</div>'+
+          (data.timeline?'<div class="fl-pc-timeline">&#9202; '+esc(data.timeline)+'</div>':'')+
+          (qa.question?
+            '<details class="fl-pc-details"><summary>'+(_tamil?'Mudhal lesson preview paarunga':'Preview the first lesson')+'</summary>'+
+            '<div class="fl-pc-qa">'+
+              '<div class="fl-pc-q">Q: '+esc(qa.question)+'</div>'+
+              '<div class="fl-pc-a">A: '+esc(qa.answer||'')+'</div>'+
+            '</div></details>':'')+
+          '<button class="fl-pc-btn" onclick="this.disabled=true;fieldLearnBegin()">'+(_tamil?'Free-ya start pannunga &#8594;':'Start for free &#8594;')+'</button>';
+        msgs.scrollTop=msgs.scrollHeight;
+      }
+    })
+    .catch(function(){var pc=document.getElementById(cardId);if(pc)pc.remove();fieldLearnBegin(field);});
+}
+function fieldLearnBegin(field){
+  if(!field)field=_flPreviewField;
+  if(!field)return;
   chatFieldMode=field;fieldModeUpdate();
   var msgs=document.getElementById('chat-msgs');
   var u=document.createElement('div');u.className='msg u';

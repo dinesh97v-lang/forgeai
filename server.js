@@ -764,7 +764,7 @@ app.post('/api/chat', requireAuth, async (req, res) => {
     return res.status(429).json({ error: 'Innikku 100 messages limit mudinjuchu — naaliku continue pannunga!' });
   }
 
-  const { prompt, history, enterpriseMode, simpleMode, attachment, fieldMode } = req.body;
+  const { prompt, history, enterpriseMode, simpleMode, attachment, fieldMode, fieldPreviewMode } = req.body;
   if (!attachment && (!prompt || !prompt.trim())) {
     return res.status(400).json({ error: 'Prompt is empty!' });
   }
@@ -778,17 +778,32 @@ app.post('/api/chat', requireAuth, async (req, res) => {
   const tDetect    = Date.now() - startTime;
   let sysPrompt;
   let isEnterprise = false;
-  if (fieldMode && fieldMode.trim()) {
+  if (fieldPreviewMode && fieldPreviewMode.trim()) {
+    const prevLangNote = (lang === 'tamil' || lang === 'thanglish')
+      ? "All text values must be in Tanglish (Tamil written in English letters, casual friendly tone). Timeline example: '2 weeks-la basics ready'."
+      : "All text values must be in simple, friendly English. Timeline example: '2 weeks to learn the basics'.";
+    sysPrompt = `You are generating a learning preview for a beginner-friendly tutoring app. Respond ONLY with valid JSON, no markdown fences, no extra text. Format: { "title": "", "level_note": "", "outcomes": ["", "", "", ""], "timeline": "", "first_lesson_preview": { "question": "", "answer": "" } } ${prevLangNote} Keep outcomes short and practical. Timeline must be realistic and encouraging. first_lesson_preview should be one simple sample Q&A from the very first lesson.`;
+  } else if (fieldMode && fieldMode.trim()) {
     const fld = fieldMode.trim().slice(0, 100);
-    sysPrompt = `You are a successful industry expert and professional teacher in "${fld}" — teach with the clarity and confidence of a CEO explaining to a newcomer. The user wants to learn this field from zero knowledge.
+    sysPrompt = `You are a senior professional with 20+ years of hands-on experience in "${fld}", mentoring a fresher who has just joined this line of work. Teach them like a caring senior guiding a junior on the job — not a textbook, not a consumer guide, but real insider knowledge from someone who has lived this work.
 
-LANGUAGE RULE: Write primarily in ENGLISH with natural Tanglish flavor (English sentences with occasional common Tamil words like 'nalla', 'pannunga', 'irukku', 'theriyum'). NEVER invent Tamil words. NEVER attempt full Tamil translations of technical terms — keep technical terms in English (e.g., 'sowing seeds', 'hair styling', 'irrigation', 'pattern cutting'). If unsure of a Tamil word, use the English word.
+CONTENT FOCUS — every lesson must be workplace-oriented:
+- Real day-to-day work processes and workflows in this industry (what actually happens on the job, step by step)
+- Industry-standard terms, documents, and tools they will hear and use at work (e.g. job card, checklist, SOP, quality report — whatever applies to this field)
+- What seniors and employers expect from a beginner in the first weeks
+- Common mistakes freshers make on the job and how to avoid them
+- Practical insider tips that only experienced people know
+- Career growth path within this industry in India (junior role → senior role, realistic salary progression)
 
-CONTENT QUALITY: Only real, accurate information. Real tool names, realistic ₹ price ranges, real skill names. If you don't know something specific, say so instead of inventing.
+AVOID: consumer-level explanations, generic textbook definitions, and content aimed at customers or hobbyists. Assume the learner will DO this work professionally, not just know about it.
 
-When the user's message starts with "📚 Learn:", give a friendly structured roadmap: (1) What is this field — 2-3 clear sentences, (2) Basic skills — step-by-step in the order to learn them, (3) Tools/equipment needed with realistic ₹ costs in India, (4) Income/career possibilities in India with realistic numbers, (5) end with "Enga irunthu start pannalaam?" so they pick the first topic.
+LANGUAGE RULE: Write primarily in ENGLISH. NEVER invent Tamil words. Keep technical/industry terms in English. If the user writes in Tamil or Tanglish, match their language style naturally — otherwise default to English.
 
-For all follow-up messages: teach one concept at a time, use simple real-life analogies, match user's language style, search web for current prices, trends, or government schemes when relevant.`;
+CONTENT QUALITY: Only real, accurate information. Real tool names, real document names, realistic ₹ salary figures. If you don't know something specific, say so instead of inventing.
+
+When the user's message starts with "📚 Learn:", give a friendly structured roadmap: (1) What this job actually involves day-to-day — 2-3 sentences from a senior's perspective, (2) Core skills and knowledge a fresher must build — step-by-step in order, (3) Tools, equipment, or software used at work with realistic ₹ costs in India, (4) Realistic salary progression and career path in India, (5) end with a question inviting them to pick where to start.
+
+For all follow-up messages: teach one concept at a time, use real workplace scenarios and examples, match the user's language style.`;
   } else if (simpleMode) {
     sysPrompt = SIMPLE_MODE_PROMPT + '\n\n' + langInstructions[lang];
   } else {
@@ -833,7 +848,7 @@ For all follow-up messages: teach one concept at a time, use simple real-life an
     console.log(`[attachment] Text file "${attachment.name}" — ${content.length} chars prepended`);
   }
   let tRewrite = 0, tTavily = 0;
-  if (needsSearch(prompt) && TAVILY_KEY) {
+  if (needsSearch(prompt) && TAVILY_KEY && !fieldPreviewMode) {
     try {
       let searchQuery = prompt;
       // Only rewrite short/ambiguous follow-ups — long queries are self-contained.
@@ -866,6 +881,10 @@ For all follow-up messages: teach one concept at a time, use simple real-life an
   if (searched && primaryModel === MODELS.GROQ_8B) primaryModel = MODELS.GROQ_70B;
   // Field tutor: always use strongest model — 8b produces fake Tamil words
   if (fieldMode && fieldMode.trim()) {
+    primaryModel = (lang === 'tamil' || lang === 'thanglish') ? MODELS.GEM_FLASH : MODELS.GROQ_70B;
+  }
+  // Preview card: upgrade 8b for reliable JSON generation
+  if (fieldPreviewMode && fieldPreviewMode.trim()) {
     primaryModel = (lang === 'tamil' || lang === 'thanglish') ? MODELS.GEM_FLASH : MODELS.GROQ_70B;
   }
 
