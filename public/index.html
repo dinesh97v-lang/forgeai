@@ -1732,12 +1732,41 @@ function flParseQuestions(reply){
   var qs=m[1].split('|').map(function(q){return q.trim();}).filter(function(q){return q.length>0;});
   return{clean:clean,questions:qs};
 }
+function flGetOrCreateChipBar(msgs){
+  var bar=document.querySelector('.fl-doubt-chips');
+  if(!bar){bar=document.createElement('div');bar.className='fl-doubt-chips';}
+  msgs.appendChild(bar); // always move to bottom after latest message
+  return bar;
+}
 function flRenderDoubtChips(questions,msgs){
-  var old=document.querySelector('.fl-doubt-chips');if(old)old.remove();
-  if(!questions||questions.length<1)return;
-  var d=document.createElement('div');d.className='fl-doubt-chips';
-  d.innerHTML=questions.map(function(q){return '<button class="fl-dchip" data-q="'+esc(q)+'" onclick="flDoubSend(this.dataset.q)">'+esc(q)+'</button>';}).join('');
-  msgs.appendChild(d);msgs.scrollTop=msgs.scrollHeight;
+  var bar=document.querySelector('.fl-doubt-chips');
+  var existing=[];
+  if(bar){bar.querySelectorAll('.fl-dchip').forEach(function(b){existing.push(b.dataset.q);});}
+  // No new questions (test response, etc.) — keep existing chips, just re-anchor to bottom
+  if(!questions||questions.length===0){
+    if(bar&&existing.length>0){msgs.appendChild(bar);msgs.scrollTop=msgs.scrollHeight;}
+    return;
+  }
+  // Deduplicate new questions against still-visible chips (case-insensitive)
+  var toAdd=questions.filter(function(q){
+    var qn=q.trim().toLowerCase();
+    return !existing.some(function(e){return e.trim().toLowerCase()===qn;});
+  });
+  var combined=existing.concat(toAdd);
+  // Cap at 6 — drop oldest (front) first
+  if(combined.length>6)combined=combined.slice(combined.length-6);
+  if(combined.length===0)return;
+  var b=flGetOrCreateChipBar(msgs);
+  b.innerHTML=combined.map(function(q){return '<button class="fl-dchip" data-q="'+esc(q)+'" onclick="flDoubClick(this)">'+esc(q)+'</button>';}).join('');
+  msgs.scrollTop=msgs.scrollHeight;
+}
+function flDoubClick(btn){
+  var q=btn.dataset.q;
+  btn.remove();
+  var bar=document.querySelector('.fl-doubt-chips');
+  if(bar&&bar.querySelectorAll('.fl-dchip').length===0)bar.remove();
+  var inp=document.getElementById('chat-in');
+  if(inp){inp.value=q;send();}
 }
 function flDoubSend(q){var inp=document.getElementById('chat-in');if(inp){inp.value=q;send();}}
 function fieldLearnStart(){
