@@ -1757,38 +1757,49 @@ function fieldLearnPreview(field){
   card.className='fl-preview-card fl-pc-loading';
   card.innerHTML='<div class="fl-pc-spinner"></div><span>'+(_tamil?'Unga learning plan ready aagitu irukku...':'Preparing your learning plan...')+'</span>';
   msgs.appendChild(card);msgs.scrollTop=msgs.scrollHeight;
-  fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt:field,history:[],fieldPreviewMode:field,simpleMode:false})})
-    .then(function(r){return r.json();})
-    .then(function(d){
-      var raw=(d.reply||'').trim();
-      raw=raw.replace(/^```json\s*/i,'').replace(/^```\s*/i,'').replace(/\s*```$/i,'');
-      var data=null;
-      try{data=JSON.parse(raw);}catch(e){data=null;}
-      var pc=document.getElementById(cardId);
-      if(!data||!data.title){if(pc)pc.remove();fieldLearnBegin(field);return;}
-      var outcomes=Array.isArray(data.outcomes)?data.outcomes:[];
-      var outHtml=outcomes.map(function(o){return '<div class="fl-pc-outcome"><span class="fl-pc-check">&#10003;</span>'+esc(o)+'</div>';}).join('');
-      var qa=data.first_lesson_preview||{};
-      if(pc){
-        pc.className='fl-preview-card';
-        pc.innerHTML=
-          '<div class="fl-pc-head">'+
-            '<div class="fl-pc-title">'+esc(data.title)+'</div>'+
-            '<div class="fl-pc-level">'+esc(data.level_note||'')+'</div>'+
-          '</div>'+
-          '<div class="fl-pc-outcomes">'+outHtml+'</div>'+
-          (data.timeline?'<div class="fl-pc-timeline">&#9202; '+esc(data.timeline)+'</div>':'')+
-          (qa.question?
-            '<details class="fl-pc-details"><summary>'+(_tamil?'Mudhal lesson preview paarunga':'Preview the first lesson')+'</summary>'+
-            '<div class="fl-pc-qa">'+
-              '<div class="fl-pc-q">Q: '+esc(qa.question)+'</div>'+
-              '<div class="fl-pc-a">A: '+esc(qa.answer||'')+'</div>'+
-            '</div></details>':'')+
-          '<button class="fl-pc-btn" onclick="this.disabled=true;fieldLearnBegin()">'+(_tamil?'Free-ya start pannunga &#8594;':'Start for free &#8594;')+'</button>';
-        msgs.scrollTop=msgs.scrollHeight;
-      }
-    })
-    .catch(function(){var pc=document.getElementById(cardId);if(pc)pc.remove();fieldLearnBegin(field);});
+  function doFetch(attempt){
+    fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt:field,history:[],fieldPreviewMode:field,simpleMode:false})})
+      .then(function(r){return r.json();})
+      .then(function(d){
+        var raw=(d.reply||'').trim();
+        raw=raw.replace(/^```json\s*/i,'').replace(/^```\s*/i,'').replace(/\s*```$/i,'');
+        var data=null;
+        try{data=JSON.parse(raw);}catch(e){console.warn('[preview] parse fail attempt '+attempt,e);data=null;}
+        if(!data||!data.title){
+          console.warn('[preview] invalid JSON attempt '+attempt);
+          if(attempt<3){doFetch(attempt+1);return;}
+          var pc=document.getElementById(cardId);if(pc)pc.remove();fieldLearnBegin(field);return;
+        }
+        var pc=document.getElementById(cardId);
+        var outcomes=Array.isArray(data.outcomes)?data.outcomes:[];
+        var outHtml=outcomes.map(function(o){return '<div class="fl-pc-outcome"><span class="fl-pc-check">&#10003;</span>'+esc(o)+'</div>';}).join('');
+        var qa=data.first_lesson_preview||{};
+        if(pc){
+          pc.className='fl-preview-card';
+          pc.innerHTML=
+            '<div class="fl-pc-head">'+
+              '<div class="fl-pc-title">'+esc(data.title)+'</div>'+
+              '<div class="fl-pc-level">'+esc(data.level_note||'')+'</div>'+
+            '</div>'+
+            '<div class="fl-pc-outcomes">'+outHtml+'</div>'+
+            (data.timeline?'<div class="fl-pc-timeline">&#9202; '+esc(data.timeline)+'</div>':'')+
+            (qa.question?
+              '<details class="fl-pc-details"><summary>'+(_tamil?'Mudhal lesson preview paarunga':'Preview the first lesson')+'</summary>'+
+              '<div class="fl-pc-qa">'+
+                '<div class="fl-pc-q">Q: '+esc(qa.question)+'</div>'+
+                '<div class="fl-pc-a">A: '+esc(qa.answer||'')+'</div>'+
+              '</div></details>':'')+
+            '<button class="fl-pc-btn" onclick="this.disabled=true;fieldLearnBegin()">'+(_tamil?'Free-ya start pannunga &#8594;':'Start for free &#8594;')+'</button>';
+          msgs.scrollTop=msgs.scrollHeight;
+        }
+      })
+      .catch(function(e){
+        console.warn('[preview] fetch fail attempt '+attempt,e);
+        if(attempt<3){doFetch(attempt+1);return;}
+        var pc=document.getElementById(cardId);if(pc)pc.remove();fieldLearnBegin(field);
+      });
+  }
+  doFetch(1);
 }
 function fieldLearnBegin(field){
   if(!field)field=_flPreviewField;

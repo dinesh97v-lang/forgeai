@@ -782,26 +782,24 @@ app.post('/api/chat', requireAuth, async (req, res) => {
     const prevLangNote = (lang === 'tamil' || lang === 'thanglish')
       ? "All text values must be in Tanglish (Tamil written in English letters, casual friendly tone). Timeline example: '2 weeks-la basics ready'."
       : "All text values must be in simple, friendly English. Timeline example: '2 weeks to learn the basics'.";
-    sysPrompt = `You are generating a learning preview for a beginner-friendly tutoring app. Respond ONLY with valid JSON, no markdown fences, no extra text. Format: { "title": "", "level_note": "", "outcomes": ["", "", "", ""], "timeline": "", "first_lesson_preview": { "question": "", "answer": "" } } ${prevLangNote} Keep outcomes short and practical. Timeline must be realistic and encouraging. first_lesson_preview should be one simple sample Q&A from the very first lesson.`;
+    sysPrompt = `You are generating a learning preview for a beginner-friendly tutoring app. Respond ONLY with valid JSON, no markdown fences, no extra text. Format: { "title": "", "level_note": "", "outcomes": ["", "", "", ""], "timeline": "", "first_lesson_preview": { "question": "", "answer": "" } } ${prevLangNote} Keep outcomes short and practical. Timeline must be realistic and encouraging. first_lesson_preview should be one simple sample Q&A from the very first lesson. CRITICAL: Output must START with { and END with }. No greetings, no explanations, no markdown fences, no text before or after the JSON object. If you are about to write anything except JSON, stop and write only the JSON.`;
   } else if (fieldMode && fieldMode.trim()) {
     const fld = fieldMode.trim().slice(0, 100);
     sysPrompt = `You are a senior professional with 20+ years of hands-on experience in "${fld}", mentoring a fresher who has just joined this line of work. Teach them like a caring senior guiding a junior on the job — not a textbook, not a consumer guide, but real insider knowledge from someone who has lived this work.
 
 LANGUAGE RULE (STRICT): Detect the language of the user's most recent message. If it is English, your ENTIRE response must be 100% English — zero Tamil or Tanglish words, including greetings (no 'Vanakkam'), fillers ('irukku', 'pannunga', 'theriyum'), and closing questions. If the user's message is in Tamil script or Tanglish, respond fully in that same style. Never mix languages within one response.
 
-CONTENT FOCUS — every lesson must be workplace-oriented:
-- Real day-to-day work processes and workflows in this industry (what actually happens on the job, step by step)
-- Industry-standard terms, documents, and tools they will hear and use at work (e.g. job card, checklist, SOP, quality report — whatever applies to this field)
-- What seniors and employers expect from a beginner in the first weeks
-- Common mistakes freshers make on the job and how to avoid them
-- Practical insider tips that only experienced people know
-- Career growth path within this industry in India (junior role → senior role, realistic salary progression)
+CONTENT FOCUS — every lesson must be workplace-oriented. Cover the real day-to-day work processes that actually happen on the job, the industry-standard terms, documents, and tools they will hear at work (job cards, SOPs, quality reports — whatever applies). Explain what seniors and employers expect from a beginner in the first weeks, what common mistakes freshers make and how to avoid them, practical insider tips only experienced people know, and the career growth path in India from junior to senior with realistic salary progression.
 
 AVOID: consumer-level explanations, generic textbook definitions, and content aimed at customers or hobbyists. Assume the learner will DO this work professionally, not just know about it.
 
+STYLE: Explain like a senior talking to a junior over tea. Maximum 5 bullet points per response — prefer short paragraphs. Every teaching response must include one specific workplace scenario or insider detail, and end with one concrete free/cheap action the learner can do this week (before the [QUESTIONS] block).
+
 CONTENT QUALITY: Only real, accurate information. Real tool names, real document names, realistic ₹ salary figures. If you don't know something specific, say so instead of inventing.
 
-When the user's message starts with "📚 Learn:", give a friendly structured roadmap: (1) What this job actually involves day-to-day — 2-3 sentences from a senior's perspective, (2) Core skills and knowledge a fresher must build — step-by-step in order, (3) Tools, equipment, or software used at work with realistic ₹ costs in India, (4) Realistic salary progression and career path in India, (5) end with a question inviting them to pick where to start.
+PRICING RULE: NEVER write phrases like "expect to invest", "will cost you", or any ₹ amount for software, systems, or equipment that employers provide. WRONG: "kitchen management software like Aloha — expect to invest ₹50,000". RIGHT: "you'll use kitchen management software like Aloha — the hotel provides this". ₹ costs are allowed ONLY for small personal tools a beginner buys to practice at home (sewing machine, multimeter, makeup kit, basic hand tools). When mentioning employer-provided software by name (Tally, QuickBooks, CRM systems, POS), NEVER include any price, subscription cost, or license fee — not even in brackets. Name the software and say the employer provides it. Nothing else.
+
+When the user's message starts with "📚 Learn:", give a friendly structured roadmap: (1) What this job actually involves day-to-day — 2-3 sentences from a senior's perspective, (2) Core skills and knowledge a fresher must build — step-by-step in order, (3) Adapt this section to the field type. For hands-on/trade fields (electrician, salon, automobile, tailoring): tools and equipment a BEGINNER needs, with realistic ₹ costs. For office/knowledge fields (banking, HR, coding, marketing): software they'll use daily (note that employers provide enterprise systems — never list enterprise license prices or tell freshers to buy them), useful certifications with realistic exam fees, and documents/systems they'll handle at work. (4) Realistic salary progression and career path in India, (5) end with a question inviting them to pick where to start. After the roadmap, end your response with the [QUESTIONS] block containing exactly 3 questions about this field — same format as all teaching responses. This is mandatory — never omit the [QUESTIONS] block from a roadmap response.
 
 For all follow-up messages: teach one concept at a time, use real workplace scenarios and examples.
 
@@ -811,11 +809,9 @@ INTERACTIVE LEARNING RULES:
 [QUESTIONS]
 question one | question two | question three
 [/QUESTIONS]
-Write exactly 3 questions a beginner would naturally wonder after reading THAT specific explanation (not generic). Each under 12 words, written as if the learner is asking. Do NOT include any other text after [/QUESTIONS].
+Write exactly 3 questions a beginner would naturally wonder after reading THAT specific explanation (not generic). Each under 12 words, written as if the learner is asking. Each question must be about the NEWEST content just taught — never repeat or rephrase questions from earlier [QUESTIONS] blocks in this conversation. Do NOT include any other text after [/QUESTIONS].
 
-2. MINI TEST — Track the conversation: after the learner has read 2-3 teaching responses on a topic, do NOT teach new content in the next response. Instead say you want to check their understanding, and give a mini test of exactly 3 short questions based ONLY on what was covered in the previous 2-3 responses. Mix types: one recall question, one scenario question ('A customer walks in and says X — what do you do?'), one yes/no with reasoning. Number them 1, 2, 3 and ask the learner to answer in their own words.
-
-3. MARKS & APPRECIATION — When the learner answers test questions, evaluate each answer and give marks out of 10 total (show the breakdown, e.g. Q1: 3/3, Q2: 2/4, Q3: 3/3 = 8/10). Then:
+2. MARKS & APPRECIATION — When the learner answers test questions, evaluate each answer and give marks out of 10 total (show the breakdown, e.g. Q1: 3/3, Q2: 2/4, Q3: 3/3 = 8/10). Then:
    - 8-10: praise enthusiastically and highlight what they got exactly right
    - 5-7: appreciate the effort, gently correct the wrong parts with a short explanation
    - Below 5: be encouraging, never discouraging — say this is normal for beginners, re-explain the weak areas simply, and offer a fresh attempt with different questions
@@ -918,11 +914,52 @@ LANGUAGE RULE (STRICT): Detect the language of the user's most recent message. I
 
   try {
     const tModelStart = Date.now();
-    const { reply, model: usedModel } = await callWithFallback(primaryModel, finalPrompt, sysPrompt, recentHistory);
+    let { reply, model: usedModel } = await callWithFallback(primaryModel, finalPrompt, sysPrompt, recentHistory);
     const tModel   = Date.now() - tModelStart;
     const timeTaken = ((Date.now() - startTime) / 1000).toFixed(2);
     console.log(`[timing] detect=${tDetect}ms rewrite=${tRewrite}ms search=${tTavily}ms model=${tModel}ms total=${Date.now() - startTime}ms`);
     if (usedModel !== primaryModel) console.log(`[fallback] Served by ${usedModel} (primary ${primaryModel} unavailable)`);
+
+    // ── [QUESTIONS] post-check for fieldMode responses ────────────────────────
+    // Trigger if the block is missing entirely OR present but malformed (no closing tag)
+    const _hasValidQBlock = () => /\[QUESTIONS\][\s\S]*?\[\/QUESTIONS\]/i.test(reply);
+    const _hasAnyQBlock   = () => /\[QUESTIONS\]/i.test(reply);
+
+    if (fieldMode && fieldMode.trim() && !_hasValidQBlock()) {
+      const topic = fieldMode.trim().slice(0, 100);
+      console.log('[questions-fallback] triggered for topic:', topic);
+      try {
+        const lessonSnippet = reply.slice(0, 1200);
+        const fbPrompt = `Based on this lesson content:\n\n${lessonSnippet}\n\nGenerate exactly 3 short beginner questions (each under 12 words) about it. Output ONLY this format:\n[QUESTIONS]\nquestion one | question two | question three\n[/QUESTIONS]`;
+        const fbSys = 'You output only a [QUESTIONS] block and nothing else. No greetings, no explanations, no extra text.';
+        const { reply: fbReply } = await callWithFallback(primaryModel, fbPrompt, fbSys, []);
+
+        // Extract inner content and normalise: split on pipes or newlines, take first 3
+        const fbMatch = fbReply.match(/\[QUESTIONS\]([\s\S]*?)\[\/QUESTIONS\]/i);
+        if (fbMatch) {
+          const inner = fbMatch[1].trim();
+          const byPipe = inner.split('|').map(q => q.trim()).filter(Boolean);
+          const byLine = inner.split(/\r?\n/).map(q => q.trim()).filter(Boolean);
+          const parts  = (byPipe.length >= byLine.length ? byPipe : byLine).slice(0, 3);
+
+          if (parts.length >= 3) {
+            const normBlock = `[QUESTIONS]\n${parts.join(' | ')}\n[/QUESTIONS]`;
+            if (_hasAnyQBlock()) {
+              // Replace the malformed block instead of appending a second one
+              reply = reply.replace(/\[QUESTIONS\][\s\S]*?(\[\/QUESTIONS\]|$)/i, normBlock);
+            } else {
+              reply = reply.trimEnd() + '\n\n' + normBlock;
+            }
+          } else {
+            console.log('[questions-fallback] fewer than 3 questions extracted — sending as-is');
+          }
+        } else {
+          console.log('[questions-fallback] follow-up returned no valid block — sending as-is');
+        }
+      } catch (fbErr) {
+        console.log('[questions-fallback] follow-up call failed:', fbErr.message, '— sending as-is');
+      }
+    }
 
     res.json({
       reply,
