@@ -565,6 +565,27 @@ async function callGeminiWithImage(model, prompt, sysPrompt, history, attachment
 }
 
 // ============================================
+// COMPACT SYSTEM PROMPT — used when quality-critical fieldMode paths
+// fall back to a smaller model (8B / Scout). Short prompts are followed
+// more reliably by small models than the full 500-word version.
+// ============================================
+function makeFieldCompactPrompt(fld) {
+  return `You are a senior professional with 20+ years of hands-on experience in "${fld}", mentoring a fresher on the job. Speak like an experienced senior — real, practical, workplace-focused.
+
+LANGUAGE RULE (STRICT): Detect the language of the user's most recent message. If English, respond 100% in English — no Tamil or Tanglish words anywhere. If Tamil/Tanglish, respond fully in that style. Never mix languages.
+
+PRICING: Never mention prices or license fees for employer-provided software or systems (Tally, QuickBooks, CRM, POS, ERP, Core Banking, etc.). ₹ costs are allowed ONLY for small personal practice tools a beginner buys themselves (hand tools, basic kit, etc.).
+
+MANDATORY FORMAT: Your response MUST end with exactly this block as the very last lines — no exceptions:
+[QUESTIONS]
+question one | question two | question three
+[/QUESTIONS]
+Write exactly 3 short beginner questions (under 12 words each) about the content you just taught. No text after [/QUESTIONS].
+
+STYLE: Maximum 5 bullet points per response. Prefer short paragraphs. Include one real workplace example per response.`;
+}
+
+// ============================================
 // FALLBACK CHAIN
 // Groq primary=70b:  70b -> 8b -> scout
 // Groq primary=8b:   8b  -> 70b -> scout
@@ -616,6 +637,66 @@ async function callWithFallback(primaryModel, prompt, sysPrompt, history) {
     }
   }
   throw lastError || new Error('All models in fallback chain exhausted');
+}
+
+// ============================================
+// FIELD-MODE FALLBACK — quality-critical Learn paths only.
+// Adds a 3-second 429-retry on the primary before downgrading.
+// If downgrade happens, switches to the compact system prompt so
+// smaller models (8B / Scout) receive a prompt they can follow.
+// ============================================
+async function callWithFieldFallback(primaryModel, prompt, fullSysPrompt, compactSysPrompt, history) {
+  const isGemini = m => m.startsWith('gemini');
+
+  // ── Step 1: try primary with one 429-retry ────────────────────────────────
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      const safeHistory = isGemini(primaryModel)
+        ? history
+        : fitHistory(history, fullSysPrompt, prompt, MODEL_INPUT_LIMITS[primaryModel] ?? 4000);
+      const reply = isGemini(primaryModel)
+        ? await callGeminiModel(primaryModel, prompt, fullSysPrompt, safeHistory)
+        : await callGroqModel(primaryModel, prompt, fullSysPrompt, safeHistory);
+      return { reply, model: primaryModel, didFallback: false };
+    } catch (err) {
+      const status = err.response?.status;
+      if (status === 401) throw err; // bad API key — no point retrying
+      if (status === 429 && attempt === 1) {
+        console.log(`[model-routing] primary ${primaryModel} rate-limited (429) — waiting 3s before retry`);
+        await new Promise(r => setTimeout(r, 3000));
+        continue;
+      }
+      // Non-429 error on attempt 1, or any error on attempt 2 — fall through
+      console.log(`[model-routing] primary ${primaryModel} failed (attempt ${attempt}, HTTP ${status ?? err.code}) — switching to compact fallback`);
+      break;
+    }
+  }
+
+  // ── Step 2: primary exhausted — smaller models with compact prompt ────────
+  const fallbackModels = isGemini(primaryModel)
+    ? [primaryModel === MODELS.GEM_FLASH ? MODELS.GEM_LITE : MODELS.GEM_FLASH, ..._GROQ_CHAIN]
+    : _GROQ_CHAIN.filter(m => m !== primaryModel);
+
+  let lastErr;
+  for (const model of fallbackModels) {
+    if (deadModels.has(model)) { console.log(`[model-routing] skip ${model} — dead`); continue; }
+    if (isLowQuota(model))     { console.log(`[model-routing] skip ${model} — low quota`); continue; }
+    try {
+      const safeHistory = isGemini(model)
+        ? history
+        : fitHistory(history, compactSysPrompt, prompt, MODEL_INPUT_LIMITS[model] ?? 4000);
+      const reply = isGemini(model)
+        ? await callGeminiModel(model, prompt, compactSysPrompt, safeHistory)
+        : await callGroqModel(model, prompt, compactSysPrompt, safeHistory);
+      return { reply, model, didFallback: true };
+    } catch (err) {
+      const status = err.response?.status;
+      console.log(`[model-routing] fallback ${model} -> HTTP ${status ?? err.code}`);
+      if (status === 401) throw err;
+      lastErr = err;
+    }
+  }
+  throw lastErr || new Error('All models in field fallback chain exhausted');
 }
 
 // RATE LIMITER — 100 messages/day per user (free plan)
@@ -914,7 +995,24 @@ LANGUAGE RULE (STRICT): Detect the language of the user's most recent message. I
 
   try {
     const tModelStart = Date.now();
-    let { reply, model: usedModel } = await callWithFallback(primaryModel, finalPrompt, sysPrompt, recentHistory);
+
+    // Quality-critical fieldMode paths get retry + compact-prompt fallback.
+    // All other paths (preview, normal chat) use the standard chain.
+    let reply, usedModel;
+    if (fieldMode && fieldMode.trim()) {
+      const fld = fieldMode.trim().slice(0, 100);
+      const compactPrompt = makeFieldCompactPrompt(fld);
+      const result = await callWithFieldFallback(primaryModel, finalPrompt, sysPrompt, compactPrompt, recentHistory);
+      reply    = result.reply;
+      usedModel = result.model;
+      console.log(`[model-routing] path=fieldMode model=${usedModel} fallback=${result.didFallback}`);
+    } else {
+      ({ reply, model: usedModel } = await callWithFallback(primaryModel, finalPrompt, sysPrompt, recentHistory));
+      if (fieldPreviewMode && fieldPreviewMode.trim()) {
+        console.log(`[model-routing] path=fieldPreview model=${usedModel} fallback=${usedModel !== primaryModel}`);
+      }
+    }
+
     const tModel   = Date.now() - tModelStart;
     const timeTaken = ((Date.now() - startTime) / 1000).toFixed(2);
     console.log(`[timing] detect=${tDetect}ms rewrite=${tRewrite}ms search=${tTavily}ms model=${tModel}ms total=${Date.now() - startTime}ms`);
@@ -932,7 +1030,8 @@ LANGUAGE RULE (STRICT): Detect the language of the user's most recent message. I
         const lessonSnippet = reply.slice(0, 1200);
         const fbPrompt = `Based on this lesson content:\n\n${lessonSnippet}\n\nGenerate exactly 3 short beginner questions (each under 12 words) about it. Output ONLY this format:\n[QUESTIONS]\nquestion one | question two | question three\n[/QUESTIONS]`;
         const fbSys = 'You output only a [QUESTIONS] block and nothing else. No greetings, no explanations, no extra text.';
-        const { reply: fbReply } = await callWithFallback(primaryModel, fbPrompt, fbSys, []);
+        // Use callWithFieldFallback so the primary gets a 429-retry before dropping to 8B/Scout
+        const { reply: fbReply } = await callWithFieldFallback(primaryModel, fbPrompt, fbSys, fbSys, []);
 
         // Extract inner content and normalise: split on pipes or newlines, take first 3
         const fbMatch = fbReply.match(/\[QUESTIONS\]([\s\S]*?)\[\/QUESTIONS\]/i);
@@ -942,19 +1041,19 @@ LANGUAGE RULE (STRICT): Detect the language of the user's most recent message. I
           const byLine = inner.split(/\r?\n/).map(q => q.trim()).filter(Boolean);
           const parts  = (byPipe.length >= byLine.length ? byPipe : byLine).slice(0, 3);
 
-          if (parts.length >= 3) {
+          if (parts.length >= 1) {
             const normBlock = `[QUESTIONS]\n${parts.join(' | ')}\n[/QUESTIONS]`;
             if (_hasAnyQBlock()) {
-              // Replace the malformed block instead of appending a second one
               reply = reply.replace(/\[QUESTIONS\][\s\S]*?(\[\/QUESTIONS\]|$)/i, normBlock);
             } else {
               reply = reply.trimEnd() + '\n\n' + normBlock;
             }
+            console.log(`[questions-fallback] topic=${topic} parsed=${parts.length} appended=true`);
           } else {
-            console.log('[questions-fallback] fewer than 3 questions extracted — sending as-is');
+            console.log(`[questions-fallback] topic=${topic} parsed=0 appended=false`);
           }
         } else {
-          console.log('[questions-fallback] follow-up returned no valid block — sending as-is');
+          console.log(`[questions-fallback] topic=${topic} parsed=0 appended=false (no block in reply)`);
         }
       } catch (fbErr) {
         console.log('[questions-fallback] follow-up call failed:', fbErr.message, '— sending as-is');

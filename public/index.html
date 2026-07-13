@@ -1928,7 +1928,11 @@ function send(){
   saveChat();chSync();
   var fetchBody={prompt:apiPrompt||'',history:histForApi,enterpriseMode:enterpriseMode,simpleMode:isSimple()};
   if(chatFieldMode)fetchBody.fieldMode=chatFieldMode;
-  if(chatFieldMode&&_flTeachCount>=2){fetchBody.forceTest=true;_flTestPending=true;}
+  // Closure-local flag: captures test intent at send-time, not as mutable module state.
+  // Counter resets only when the server actually returns a successful test response.
+  var _ft=!!(chatFieldMode&&_flTeachCount>=2);
+  if(_ft)fetchBody.forceTest=true;
+  if(chatFieldMode)console.log('[test-trigger] count='+_flTeachCount+' forceTest='+_ft);
   if(attSnap)fetchBody.attachment={type:attSnap.type,name:attSnap.name,mimeType:attSnap.mimeType,data:attSnap.data};
   fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(fetchBody)})
     .then(function(r){return r.json();})
@@ -1945,8 +1949,9 @@ function send(){
       ai.innerHTML='<div class="mav ai">F</div><div><div class="bub">'+formatMarkdown(_reply||'Error')+'</div>'+badge+aiActBar()+'</div>';
       msgs.appendChild(ai);msgs.scrollTop=msgs.scrollHeight;
       if(chatFieldMode){
-        if(_flTestPending){_flTeachCount=0;_flTestPending=false;}
-        else _flTeachCount++;
+        if(_ft&&!d.error){_flTeachCount=0;}       // test delivered — reset for next cycle
+        else if(!_ft){_flTeachCount++;}            // teaching exchange — count up
+        // _ft && d.error: server failed, leave count ≥2 so next send retries forceTest
         flRenderDoubtChips(parsed.questions,msgs);
       }
       pvAutoUpdate();
