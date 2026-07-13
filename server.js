@@ -837,6 +837,13 @@ app.post('/api/auth/set-security-question', requireAuth, async (req, res) => {
   }
 });
 
+function extractFirstJson(str) {
+  const s = (str || '').indexOf('{');
+  const e = (str || '').lastIndexOf('}');
+  if (s === -1 || e === -1 || e <= s) return null;
+  try { return JSON.parse(str.slice(s, e + 1)); } catch { return null; }
+}
+
 // ============================================
 // MAIN CHAT ENDPOINT — With Router!
 // ============================================
@@ -845,7 +852,7 @@ app.post('/api/chat', requireAuth, async (req, res) => {
     return res.status(429).json({ error: 'Innikku 100 messages limit mudinjuchu — naaliku continue pannunga!' });
   }
 
-  const { prompt, history, enterpriseMode, simpleMode, attachment, fieldMode, fieldPreviewMode, forceTest } = req.body;
+  const { prompt, history, enterpriseMode, simpleMode, attachment, fieldMode, fieldPreviewMode, forceTest, evaluateTest } = req.body;
   if (!attachment && (!prompt || !prompt.trim())) {
     return res.status(400).json({ error: 'Prompt is empty!' });
   }
@@ -859,7 +866,10 @@ app.post('/api/chat', requireAuth, async (req, res) => {
   const tDetect    = Date.now() - startTime;
   let sysPrompt;
   let isEnterprise = false;
-  if (fieldPreviewMode && fieldPreviewMode.trim()) {
+  if (evaluateTest && fieldMode && fieldMode.trim()) {
+    const fld = fieldMode.trim().slice(0, 100);
+    sysPrompt = `You are evaluating a beginner's quiz answers for the field "${fld}". Respond ONLY with valid JSON — no markdown fences, no explanations, no extra text. Use exactly this structure:\n{"results":[{"question":"","userAnswer":"","verdict":"correct","correctAnswer":"","note":""},{"question":"","userAnswer":"","verdict":"correct","correctAnswer":"","note":""},{"question":"","userAnswer":"","verdict":"correct","correctAnswer":"","note":""}],"score":"X/10","encouragement":""}\nverdict must be exactly "correct", "wrong", or "partial". correctAnswer: Write a COMPLETE, beginner-friendly correct answer in 1-2 sentences — specific enough that someone who got it wrong now fully understands the right answer. Include the key term AND what it means or why. WEAK example: "to inform and target the content". GOOD example: "Keywords help search engines understand what your content is about, so it appears when people search for those terms." Use empty string when verdict is "correct". note: One sentence explaining the gap between the user's answer and the correct one, in an encouraging tone. If the user's answer was empty or "nil", skip comparing and simply say this is a common question freshers face. Use empty string when not needed. score: e.g. "7/10". encouragement: one warm, encouraging sentence. CRITICAL: output must start with { and end with }. Nothing before or after the JSON.`;
+  } else if (fieldPreviewMode && fieldPreviewMode.trim()) {
     const prevLangNote = (lang === 'tamil' || lang === 'thanglish')
       ? "All text values must be in Tanglish (Tamil written in English letters, casual friendly tone). Timeline example: '2 weeks-la basics ready'."
       : "All text values must be in simple, friendly English. Timeline example: '2 weeks to learn the basics'.";
@@ -914,9 +924,9 @@ LANGUAGE RULE (STRICT): Detect the language of the user's most recent message. I
     }
   }
 
-  // Force test: override with mandatory mini-test instruction
-  if (forceTest && fieldMode && fieldMode.trim()) {
-    sysPrompt += '\n\nMANDATORY: In this response do not teach new content. Give a mini test of exactly 3 short questions based only on what you taught in the previous responses: one recall, one workplace scenario, one yes/no with reasoning. Number them 1-3.';
+  // Force test: output machine-readable [TEST] block only — client renders interactive quiz
+  if (forceTest && !evaluateTest && fieldMode && fieldMode.trim()) {
+    sysPrompt += '\n\nMANDATORY: Do not teach new content. Output ONLY a [TEST] block with exactly 3 short questions based on what was taught — one recall question, one workplace scenario question, one yes/no question. Use this exact format and nothing else:\n[TEST]\nquestion one | question two | question three\n[/TEST]\nNo text before or after the [TEST] block.';
   }
 
   // Web search — enrich prompt with live results if needed
@@ -1001,7 +1011,11 @@ LANGUAGE RULE (STRICT): Detect the language of the user's most recent message. I
     let reply, usedModel;
     if (fieldMode && fieldMode.trim()) {
       const fld = fieldMode.trim().slice(0, 100);
-      const compactPrompt = makeFieldCompactPrompt(fld);
+      let compactPrompt = makeFieldCompactPrompt(fld);
+      // For forceTest, the compact prompt used by fallback models must also carry the test instruction
+      if (forceTest && !evaluateTest) {
+        compactPrompt += '\n\nMANDATORY: Do not teach new content. Output ONLY a [TEST] block with exactly 3 short questions based on what was taught. Format:\n[TEST]\nquestion one | question two | question three\n[/TEST]\nNo text before or after the [TEST] block.';
+      }
       const result = await callWithFieldFallback(primaryModel, finalPrompt, sysPrompt, compactPrompt, recentHistory);
       reply    = result.reply;
       usedModel = result.model;
@@ -1018,12 +1032,87 @@ LANGUAGE RULE (STRICT): Detect the language of the user's most recent message. I
     console.log(`[timing] detect=${tDetect}ms rewrite=${tRewrite}ms search=${tTavily}ms model=${tModel}ms total=${Date.now() - startTime}ms`);
     if (usedModel !== primaryModel) console.log(`[fallback] Served by ${usedModel} (primary ${primaryModel} unavailable)`);
 
+    // ── [TEST] parsing for forceTest responses ───────────────────────────────
+    let testQuestions = null;
+    if (forceTest && !evaluateTest && fieldMode && fieldMode.trim()) {
+      console.log('[test-parse] raw tail:', JSON.stringify(reply.slice(-300)));
+      // Accept [TEST], [QUESTIONS] (with or without closing tag), or plain "Questions: ..." heading
+      const _splitQs = inner => {
+        // Strip history-truncation marker before it leaks into user-visible question text
+        const clean = inner.replace(/\s*\.\.\.\[truncated\]/gi, '');
+        const byPipe = clean.split('|').map(q => q.trim()).filter(Boolean);
+        const byLine = clean.split(/\r?\n/).map(q => q.trim()).filter(Boolean);
+        return (byPipe.length >= byLine.length ? byPipe : byLine).slice(0, 3);
+      };
+      const _extractTestQs = text => {
+        const tm = text.match(/\[TEST\]([\s\S]*?)\[\/TEST\]/i);
+        if (tm) return _splitQs(tm[1].trim());
+        // Accept [QUESTIONS] with or without closing tag — 8B often omits [/QUESTIONS]
+        const qm = text.match(/\[QUESTIONS\]([\s\S]*?)\[\/QUESTIONS\]/i)
+                || text.match(/\[QUESTIONS\]\s*([\s\S]{0,500})/i);
+        if (qm) return _splitQs(qm[1].trim().replace(/\[\/QUESTIONS\][\s\S]*/i, ''));
+        const hm = text.match(/\b(?:test\s+)?questions?\s*:\s*(.+)/i);
+        if (hm) return _splitQs(hm[1].trim());
+        return [];
+      };
+      let parts = _extractTestQs(reply);
+      if (parts.length < 1) {
+        console.log('[test-parse] no recognisable question format — retrying');
+        try {
+          const snippet = reply.slice(0, 1200);
+          const retryPrompt = `Generate exactly 3 short test questions from this lesson content. Output ONLY the [TEST] block.\n\nContent:\n${snippet}`;
+          const retrySys = 'Output ONLY a [TEST] block and nothing else. Format: [TEST]\nq1 | q2 | q3\n[/TEST]';
+          const { reply: retryReply } = await callWithFieldFallback(primaryModel, retryPrompt, retrySys, retrySys, []);
+          parts = _extractTestQs(retryReply);
+        } catch (retryErr) {
+          console.log('[test-parse] retry failed:', retryErr.message);
+        }
+      }
+      if (parts.length >= 1) {
+        testQuestions = parts;
+        reply = '';
+        console.log(`[test-parse] extracted ${testQuestions.length} questions`);
+      } else {
+        // Parsing failed — strip any leaked markup so plain-text fallback is clean
+        reply = reply
+          .replace(/\s*\[TEST\][\s\S]*?\[\/TEST\]/gi, '')
+          .replace(/\s*\[QUESTIONS\][\s\S]*?(?:\[\/QUESTIONS\]|$)/gi, '')
+          .trim();
+        console.log('[test-parse] failed, raw tail:', JSON.stringify(reply.slice(-300)));
+      }
+    }
+
+    // ── evaluateTest JSON parsing ────────────────────────────────────────────
+    let evaluationResult = null;
+    if (evaluateTest && fieldMode && fieldMode.trim()) {
+      let evParsed = extractFirstJson(reply);
+      const _validEval = p => p && Array.isArray(p.results) && p.results.length >= 1;
+      if (!_validEval(evParsed)) {
+        console.log('[eval-parse] JSON parse failed — retrying');
+        try {
+          const retryPrompt = `Your previous response could not be parsed as JSON. Re-output ONLY the evaluation JSON object — no markdown fences, no extra text.\n\nEvaluate these answers:\n${finalPrompt}`;
+          const { reply: retryReply } = await callWithFieldFallback(primaryModel, retryPrompt, sysPrompt, sysPrompt, []);
+          evParsed = extractFirstJson(retryReply);
+          if (_validEval(evParsed)) reply = retryReply;
+        } catch (retryErr) {
+          console.log('[eval-parse] retry failed:', retryErr.message);
+        }
+      }
+      if (_validEval(evParsed)) {
+        evaluationResult = evParsed;
+        reply = '';
+        console.log('[eval-parse] evaluation result parsed successfully');
+      } else {
+        console.log('[eval-parse] both attempts failed — plain text fallback');
+      }
+    }
+
     // ── [QUESTIONS] post-check for fieldMode responses ────────────────────────
-    // Trigger if the block is missing entirely OR present but malformed (no closing tag)
+    // Skipped for forceTest and evaluateTest — those have their own blocks above
     const _hasValidQBlock = () => /\[QUESTIONS\][\s\S]*?\[\/QUESTIONS\]/i.test(reply);
     const _hasAnyQBlock   = () => /\[QUESTIONS\]/i.test(reply);
 
-    if (fieldMode && fieldMode.trim() && !_hasValidQBlock()) {
+    if (fieldMode && fieldMode.trim() && !forceTest && !evaluateTest && !_hasValidQBlock()) {
       const topic = fieldMode.trim().slice(0, 100);
       console.log('[questions-fallback] triggered for topic:', topic);
       try {
@@ -1033,7 +1122,6 @@ LANGUAGE RULE (STRICT): Detect the language of the user's most recent message. I
         // Use callWithFieldFallback so the primary gets a 429-retry before dropping to 8B/Scout
         const { reply: fbReply } = await callWithFieldFallback(primaryModel, fbPrompt, fbSys, fbSys, []);
 
-        // Extract inner content and normalise: split on pipes or newlines, take first 3
         const fbMatch = fbReply.match(/\[QUESTIONS\]([\s\S]*?)\[\/QUESTIONS\]/i);
         if (fbMatch) {
           const inner = fbMatch[1].trim();
@@ -1066,7 +1154,9 @@ LANGUAGE RULE (STRICT): Detect the language of the user's most recent message. I
       reason:     decision.reason,
       time:       timeTaken + 's',
       searched,
-      enterprise: isEnterprise
+      enterprise: isEnterprise,
+      ...(testQuestions    ? { testQuestions }    : {}),
+      ...(evaluationResult ? { evaluationResult } : {}),
     });
 
   } catch (error) {

@@ -355,6 +355,26 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .fl-doubt-chips{display:flex;flex-wrap:wrap;gap:5px;padding:5px 0 4px 36px}
 .fl-dchip{font-size:11px;padding:4px 10px;border:1px solid var(--border);border-radius:14px;color:var(--text2);cursor:pointer;background:var(--bg);font-family:inherit;transition:all .15s;white-space:nowrap;text-align:left}
 .fl-dchip:hover{background:var(--bg3);color:var(--text);border-color:var(--border2)}
+.fl-quiz-card{background:var(--bg2);border:1px solid var(--border);border-radius:var(--rlg);padding:16px;margin:4px 0;max-width:420px;transition:opacity .15s}
+.fl-quiz-hdr{font-size:10px;font-weight:700;color:var(--accent);letter-spacing:.5px;text-transform:uppercase;margin-bottom:10px}
+.fl-quiz-prog{font-size:11px;color:var(--text2);margin-bottom:8px}
+.fl-quiz-q{font-size:13px;font-weight:600;color:var(--text);margin-bottom:10px;line-height:1.4}
+.fl-quiz-ta{width:100%;box-sizing:border-box;padding:8px 10px;border:1px solid var(--border);border-radius:var(--r);background:var(--bg);color:var(--text);font-size:13px;font-family:inherit;resize:vertical;min-height:52px;outline:none;transition:border-color .2s}
+.fl-quiz-ta:focus{border-color:var(--accent)}
+.fl-quiz-sub{margin-top:8px;width:100%;padding:9px;background:var(--accent);color:white;border:none;border-radius:var(--r);font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;transition:background .2s}
+.fl-quiz-sub:hover:not(:disabled){background:var(--accent2)}
+.fl-quiz-sub:disabled{opacity:.45;cursor:not-allowed}
+.fl-quiz-chk{display:flex;align-items:center;justify-content:center;gap:8px;color:var(--text2);font-size:12px;padding:10px 0}
+.fl-quiz-ri{margin-bottom:10px;padding:8px 10px;border-radius:var(--r);background:var(--bg);border:1px solid var(--border)}
+.fl-quiz-rq{font-size:11px;color:var(--text2);font-style:italic;margin-bottom:3px}
+.fl-quiz-ra{font-size:12px;color:var(--text);margin-bottom:4px;font-weight:500}
+.fl-quiz-vt{font-size:11px;font-weight:700}
+.fl-quiz-vt.ok{color:var(--success)}
+.fl-quiz-vt.no{color:var(--danger)}
+.fl-quiz-vt.pm{color:var(--warning)}
+.fl-quiz-note{font-size:11px;color:var(--text2);margin-top:2px}
+.fl-quiz-score{font-size:15px;font-weight:700;color:var(--text);margin-top:12px;margin-bottom:4px}
+.fl-quiz-enc{font-size:12px;color:var(--text2)}
 .attach-thumb{width:36px;height:36px;object-fit:cover;border-radius:5px;border:1px solid var(--border);flex-shrink:0}
 .attach-name{flex:1;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;font-size:11px;color:var(--text)}
 .attach-x{background:none;border:none;cursor:pointer;font-size:16px;color:var(--text3);padding:0 2px;line-height:1;flex-shrink:0}
@@ -1729,7 +1749,7 @@ function flParseQuestions(reply){
   var m=(reply||'').match(/\[QUESTIONS\]\s*([\s\S]*?)\s*\[\/QUESTIONS\]/i);
   if(!m)return{clean:reply||'',questions:[]};
   var clean=(reply||'').replace(/\s*\[QUESTIONS\][\s\S]*?\[\/QUESTIONS\]/i,'').trim();
-  var qs=m[1].split('|').map(function(q){return q.trim();}).filter(function(q){return q.length>0;});
+  var qs=m[1].split('|').map(function(q){return q.trim().replace(/\s*\.\.\.\[truncated\]/gi,'');}).filter(function(q){return q.length>0;});
   return{clean:clean,questions:qs};
 }
 function flGetOrCreateChipBar(msgs){
@@ -1769,6 +1789,95 @@ function flDoubClick(btn){
   if(inp){inp.value=q;send();}
 }
 function flDoubSend(q){var inp=document.getElementById('chat-in');if(inp){inp.value=q;send();}}
+var _flQuizState={};
+function flRenderQuizCard(questions,msgs,cardId){
+  _flQuizState[cardId]={questions:questions,answers:[],current:0};
+  var card=document.createElement('div');card.id=cardId;card.className='fl-quiz-card';
+  _flQzDraw(cardId,card);
+  msgs.appendChild(card);msgs.scrollTop=msgs.scrollHeight;
+}
+function _flQzDraw(cardId,card){
+  var s=_flQuizState[cardId];if(!s)return;
+  if(!card)card=document.getElementById(cardId);if(!card)return;
+  var q=s.questions[s.current]||'';
+  var tot=s.questions.length;
+  card.innerHTML=
+    '<div class="fl-quiz-hdr">Quick check! Answer in your own words</div>'+
+    '<div class="fl-quiz-prog">Question '+(s.current+1)+' of '+tot+'</div>'+
+    '<div class="fl-quiz-q">'+esc(q)+'</div>'+
+    '<textarea class="fl-quiz-ta" id="'+cardId+'-inp" placeholder="Type your answer..." oninput="flQzInp(\''+cardId+'\')"></textarea>'+
+    '<button class="fl-quiz-sub" id="'+cardId+'-btn" disabled onclick="flQzSub(\''+cardId+'\')">Submit</button>';
+}
+function flQzInp(cardId){
+  var i=document.getElementById(cardId+'-inp'),b=document.getElementById(cardId+'-btn');
+  if(i&&b)b.disabled=!i.value.trim();
+}
+function flQzSub(cardId){
+  var s=_flQuizState[cardId];if(!s)return;
+  var inp=document.getElementById(cardId+'-inp');
+  s.answers.push(inp?inp.value.trim():'');
+  if(s.current<s.questions.length-1){
+    s.current++;
+    var card=document.getElementById(cardId);
+    if(card){
+      card.style.opacity='0';
+      setTimeout(function(){
+        _flQzDraw(cardId,card);
+        card.style.opacity='1';
+        var ni=document.getElementById(cardId+'-inp');if(ni)ni.focus();
+      },130);
+    }
+    return;
+  }
+  // All 3 answered — show checking state and send evaluation request
+  var card=document.getElementById(cardId);if(!card)return;
+  card.innerHTML='<div class="fl-quiz-hdr">Quick check! Answer in your own words</div><div class="fl-quiz-chk"><div class="fl-pc-spinner"></div>Checking your answers...</div>';
+  var evalPrompt=s.questions.map(function(q,i){return 'Q'+(i+1)+': '+q+'\nA'+(i+1)+': '+(s.answers[i]||'(no answer)');}).join('\n\n');
+  fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+    prompt:evalPrompt,
+    history:chatHistory.slice(-10).map(function(m){return{role:m.role,content:m.content};}),
+    fieldMode:chatFieldMode,
+    evaluateTest:true
+  })})
+  .then(function(r){return r.json();})
+  .then(function(d){
+    if(d.evaluationResult){flQzResult(d.evaluationResult,cardId,s);}
+    else{
+      var c=document.getElementById(cardId);if(!c)return;
+      c.innerHTML='<div class="fl-quiz-hdr">Quiz Results</div><div style="font-size:12px;color:var(--text2);padding:4px 0">'+(d.reply?formatMarkdown(d.reply):'Could not evaluate — ask the tutor to review your answers.')+'</div>';
+      _flTeachCount=0;
+    }
+  })
+  .catch(function(){
+    var c=document.getElementById(cardId);if(!c)return;
+    c.innerHTML='<div class="fl-quiz-hdr">Quick check!</div><div style="font-size:12px;color:var(--danger)">Connection error — please try again.</div>';
+  });
+}
+function flQzResult(result,cardId,state){
+  var c=document.getElementById(cardId);if(!c)return;
+  var VL={correct:'✓ Correct',wrong:'✗ Wrong',partial:'~ Partial'};
+  var VC={correct:'ok',wrong:'no',partial:'pm'};
+  var items=(result.results||[]).map(function(r,i){
+    var vt=VL[r.verdict]||r.verdict||'';
+    var vc=VC[r.verdict]||'pm';
+    var note='';
+    if(r.verdict!=='correct'&&r.correctAnswer)note+='<div class="fl-quiz-note"><strong>Answer:</strong> '+esc(r.correctAnswer)+'</div>';
+    if(r.note)note+='<div class="fl-quiz-note">'+esc(r.note)+'</div>';
+    return '<div class="fl-quiz-ri">'+
+      '<div class="fl-quiz-rq">'+esc(r.question||(state&&state.questions[i])||'')+'</div>'+
+      '<div class="fl-quiz-ra">“'+esc(r.userAnswer||(state&&state.answers[i])||'')+'”</div>'+
+      '<div class="fl-quiz-vt '+vc+'">'+vt+'</div>'+
+      note+
+      '</div>';
+  }).join('');
+  c.innerHTML='<div class="fl-quiz-hdr">Quiz Results</div>'+items+
+    '<div class="fl-quiz-score">'+(result.score||'')+'</div>'+
+    '<div class="fl-quiz-enc">'+esc(result.encouragement||'')+'</div>';
+  _flTeachCount=0;
+  delete _flQuizState[cardId];
+  var msgs=document.getElementById('chat-msgs');
+  if(msgs)flRenderDoubtChips([],msgs);
+}
 function fieldLearnStart(){
   var inp=document.getElementById('field-learn-input');
   var field=inp?inp.value.trim():'';
@@ -1938,6 +2047,15 @@ function send(){
     .then(function(r){return r.json();})
     .then(function(d){
       var ty=document.getElementById('typ');if(ty)ty.remove();
+      // ── Quiz card: server returned structured test questions ───────────────
+      if(d.testQuestions&&d.testQuestions.length>=1){
+        var qcId='fl-quiz-card-'+Date.now();
+        chatHistory.push({role:'assistant',content:'[quiz: '+d.testQuestions.join(' | ')+']'});
+        saveChat();chSync();
+        flRenderQuizCard(d.testQuestions,msgs,qcId);
+        if(chatFieldMode){if(_ft&&!d.error){_flTeachCount=0;}flRenderDoubtChips([],msgs);}
+        pvAutoUpdate();return;
+      }
       var parsed=chatFieldMode?flParseQuestions(d.reply||''):{clean:d.reply||'',questions:[]};
       var _reply=parsed.clean||d.error||'';
       chatHistory.push({role:'assistant',content:_reply});
