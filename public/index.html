@@ -219,6 +219,13 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .aisum{background:var(--bg2);border:1px solid var(--border);border-left:3px solid var(--accent);border-radius:0 var(--r) var(--r) 0;padding:10px 12px;margin-bottom:6px}
 .aisum-l{font-size:10px;color:var(--accent);font-weight:700;margin-bottom:4px}
 .aisum-t{font-size:12px;color:var(--text2);line-height:1.6}
+.rdm-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9000;overflow-y:auto;padding:32px 16px;box-sizing:border-box}
+.rdm-box{max-width:720px;width:100%;margin:0 auto;background:var(--bg);border-radius:var(--rlg);border:1px solid var(--border);display:flex;flex-direction:column;max-height:calc(100vh - 64px);overflow:hidden}
+.rdm-hdr{display:flex;align-items:flex-start;gap:8px;padding:12px 16px;border-bottom:1px solid var(--border);flex-shrink:0}
+.rdm-title{flex:1;font-size:13px;font-weight:700;color:var(--text);line-height:1.4;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+.rdm-orig{flex-shrink:0;font-size:11px;color:var(--accent);text-decoration:none;white-space:nowrap;padding:4px 8px;border:1px solid var(--accent);border-radius:var(--r);line-height:1.4}
+.rdm-close{flex-shrink:0;background:none;border:none;font-size:16px;color:var(--text2);cursor:pointer;padding:2px 6px;line-height:1;font-family:inherit}
+.rdm-body{flex:1;overflow-y:auto;padding:20px;font-size:13px;line-height:1.75;color:var(--text2);white-space:pre-wrap;word-wrap:break-word}
 /* ONE PROMPT */
 .dw-steps{display:flex;gap:0;padding:12px 14px;border-bottom:1px solid var(--border);flex-shrink:0}
 .dws{display:flex;align-items:center;gap:5px;font-size:10px;color:var(--text3);white-space:nowrap}
@@ -355,6 +362,22 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .fl-doubt-chips{display:flex;flex-wrap:wrap;gap:5px;padding:5px 0 4px 36px}
 .fl-dchip{font-size:11px;padding:4px 10px;border:1px solid var(--border);border-radius:14px;color:var(--text2);cursor:pointer;background:var(--bg);font-family:inherit;transition:all .15s;white-space:nowrap;text-align:left}
 .fl-dchip:hover{background:var(--bg3);color:var(--text);border-color:var(--border2)}
+.fl-qr-bar{display:flex;flex-wrap:wrap;gap:5px;padding:5px 0 4px 36px}
+.fl-qr-btn{font-size:11px;padding:6px 12px;min-height:44px;border:1px solid var(--accent);border-radius:14px;color:var(--accent);cursor:pointer;background:var(--bg);font-family:inherit;transition:transform 0.15s ease,box-shadow 0.15s ease,background .15s,color .15s;text-align:left;line-height:1.3}
+.fl-qr-btn:hover:not(:disabled){background:var(--accent);color:white;transform:scale(1.06);box-shadow:0 4px 12px rgba(0,0,0,.15)}
+.fl-qr-btn:active:not(:disabled){transform:scale(.98)}
+.fl-qr-btn:disabled{opacity:.4;cursor:not-allowed}
+.cc-wrap{margin:2px 0 0 36px}
+.cc-check-btn{font-size:11px;padding:5px 12px;border:1px solid var(--accent);border-radius:var(--r);background:transparent;color:var(--accent);cursor:pointer;font-family:inherit;transition:all .15s}
+.cc-check-btn:hover{background:var(--accent);color:white}
+.cc-card{margin-top:6px;padding:10px 12px;border-radius:var(--r);border:1px solid var(--border);background:var(--bg2);font-size:12px}
+.cc-issue{color:var(--warning);padding:1px 0 1px 8px}
+.cc-btn{font-size:11px;padding:5px 12px;border-radius:var(--r);border:none;cursor:pointer;font-family:inherit;font-weight:700;margin:6px 4px 0 0;transition:all .15s}
+.cc-btn.prim{background:var(--accent);color:white}
+.cc-btn.prim:hover{background:var(--accent2)}
+.cc-btn.sec{background:var(--bg);border:1px solid var(--border);color:var(--text2)}
+.cc-btn.sec:hover{border-color:var(--border2);color:var(--text)}
+.cc-btn:disabled{opacity:.45;cursor:not-allowed}
 .fl-quiz-card{background:var(--bg2);border:1px solid var(--border);border-radius:var(--rlg);padding:16px;margin:4px 0;max-width:420px;transition:opacity .15s}
 .fl-quiz-hdr{font-size:10px;font-weight:700;color:var(--accent);letter-spacing:.5px;text-transform:uppercase;margin-bottom:10px}
 .fl-quiz-prog{font-size:11px;color:var(--text2);margin-bottom:8px}
@@ -415,6 +438,16 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 </head>
 <body>
 <div class="notif" id="notif"></div>
+<div class="rdm-overlay" id="rdm-overlay" onclick="if(event.target===this)closePreview()">
+  <div class="rdm-box">
+    <div class="rdm-hdr">
+      <div class="rdm-title" id="rdm-title"></div>
+      <a class="rdm-orig" id="rdm-orig" href="#" target="_blank" rel="noopener noreferrer">Open ↗</a>
+      <button class="rdm-close" onclick="closePreview()">✕</button>
+    </div>
+    <div class="rdm-body" id="rdm-body"></div>
+  </div>
+</div>
 <button id="sel-btn" title="Quote reply">↩ Reply</button>
 
 <!-- AUTH SCREEN -->
@@ -1218,6 +1251,13 @@ function chOpen(id){
         if(m.role==='user'){div.className='msg u';div.innerHTML=renderUserBub(m);}
         else{div.className='msg';div.innerHTML='<div class="mav ai">F</div><div><div class="bub">'+formatMarkdown(m.content)+'</div>'+aiActBar()+'</div>';}
         cm.appendChild(div);
+        if(m.role!=='user'&&/```/.test(m.content)){
+          var ccId='cc-r'+i;
+          _ccStore[ccId]={files:null,fixedFiles:null,lastIssues:[]};
+          var ccWrap=document.createElement('div');ccWrap.className='cc-wrap';ccWrap.id=ccId;
+          ccWrap.innerHTML='<button class="cc-check-btn" onclick="ccRunCheck(\''+ccId+'\')">&#10003; Check &amp; Download ZIP</button>';
+          cm.appendChild(ccWrap);
+        }
       }catch(e){console.warn('[chat] skipped bad message at index',i,e.message);}
     }
     cm.scrollTop=cm.scrollHeight;
@@ -1746,6 +1786,35 @@ var _flPreviewField=null;
 var _flTeachCount=0;
 var _flTestPending=false;
 function _flTamilInput(s){return /[஀-௿]/.test(s);}
+function flParseQuickReply(text){
+  var m=(text||'').match(/<<QUICK_REPLY>>([\s\S]*?)<<END_QUICK_REPLY>>/i);
+  if(!m)return{clean:text||'',qr:null};
+  var clean=(text||'').replace(/\s*<<QUICK_REPLY>>[\s\S]*?<<END_QUICK_REPLY>>/i,'').trim();
+  try{
+    var qr=JSON.parse(m[1].trim());
+    if(!qr||typeof qr.question!=='string'||!Array.isArray(qr.options)||qr.options.length===0)return{clean:text||'',qr:null};
+    qr.options=qr.options.slice(0,4);
+    return{clean:clean,qr:qr};
+  }catch(e){console.warn('[quick_reply] JSON parse failed:',e.message);return{clean:text||'',qr:null};}
+}
+function flRenderQuickReply(qr,msgs){
+  var bar=document.createElement('div');bar.className='fl-qr-bar';
+  bar.innerHTML=qr.options.map(function(opt){return '<button class="fl-qr-btn" onclick="flQrClick(this)" data-opt="'+esc(opt)+'">'+esc(opt)+'</button>';}).join('');
+  var hint=document.createElement('div');
+  hint.setAttribute('data-qr-hint','1');
+  hint.style.cssText='font-size:10px;color:var(--text2);padding:3px 0 0 2px;width:100%';
+  hint.textContent='or type your own answer ✍️';
+  bar.appendChild(hint);
+  msgs.appendChild(bar);msgs.scrollTop=msgs.scrollHeight;
+}
+function flQrClick(btn){
+  var opt=btn.dataset.opt;
+  var bar=btn.parentElement;
+  bar.querySelectorAll('.fl-qr-btn').forEach(function(b){b.disabled=true;});
+  var hint=bar.querySelector('[data-qr-hint]');if(hint)hint.style.display='none';
+  var inp=document.getElementById('chat-in');
+  if(inp){inp.value=opt;send();}
+}
 function flParseQuestions(reply){
   var m=(reply||'').match(/\[QUESTIONS\]\s*([\s\S]*?)\s*\[\/QUESTIONS\]/i);
   if(!m)return{clean:reply||'',questions:[]};
@@ -1791,6 +1860,8 @@ function flDoubClick(btn){
 }
 function flDoubSend(q){var inp=document.getElementById('chat-in');if(inp){inp.value=q;send();}}
 var _flQuizState={};
+var _pendingSourceUrl=null;
+var _ccStore={};
 function flRenderQuizCard(questions,msgs,cardId){
   _flQuizState[cardId]={questions:questions,answers:[],current:0};
   var card=document.createElement('div');card.id=cardId;card.className='fl-quiz-card';
@@ -2038,6 +2109,7 @@ function send(){
   saveChat();chSync();
   var fetchBody={prompt:apiPrompt||'',history:histForApi,enterpriseMode:enterpriseMode,simpleMode:isSimple()};
   if(chatFieldMode)fetchBody.fieldMode=chatFieldMode;
+  if(_pendingSourceUrl){fetchBody.sourceUrl=_pendingSourceUrl;_pendingSourceUrl=null;}
   // Closure-local flag: captures test intent at send-time, not as mutable module state.
   // Counter resets only when the server actually returns a successful test response.
   var _ft=!!(chatFieldMode&&_flTeachCount>=2);
@@ -2058,6 +2130,8 @@ function send(){
         pvAutoUpdate();return;
       }
       var parsed=chatFieldMode?flParseQuestions(d.reply||''):{clean:d.reply||'',questions:[]};
+      var _qrParsed=flParseQuickReply(parsed.clean||'');
+      if(_qrParsed&&_qrParsed.qr)parsed.clean=_qrParsed.clean;
       var _reply=parsed.clean||d.error||'';
       chatHistory.push({role:'assistant',content:_reply});
       saveChat();chSync();
@@ -2067,12 +2141,20 @@ function send(){
       var badge='<div style="margin-top:5px;display:flex;align-items:center;flex-wrap:wrap;gap:2px">'+searchBadge+entBadge+'<span style="font-size:10px;padding:2px 7px;border-radius:8px;font-weight:700;background:var(--sbg);color:var(--success);margin-right:4px">'+esc(d.model||'AI')+'</span><span style="font-size:10px;color:var(--text3)">'+esc(d.time||'')+'</span></div>';
       ai.innerHTML='<div class="mav ai">F</div><div><div class="bub">'+formatMarkdown(_reply||'Error')+'</div>'+badge+aiActBar()+'</div>';
       msgs.appendChild(ai);msgs.scrollTop=msgs.scrollHeight;
+      if(/```/.test(_reply)){
+        var ccId='cc-'+Date.now();
+        _ccStore[ccId]={files:null,fixedFiles:null,lastIssues:[]};
+        var ccWrap=document.createElement('div');ccWrap.className='cc-wrap';ccWrap.id=ccId;
+        ccWrap.innerHTML='<button class="cc-check-btn" onclick="ccRunCheck(\''+ccId+'\')">&#10003; Check &amp; Download ZIP</button>';
+        msgs.appendChild(ccWrap);
+      }
       if(chatFieldMode){
         if(_ft&&!d.error){_flTeachCount=0;}       // test delivered — reset for next cycle
         else if(!_ft){_flTeachCount++;}            // teaching exchange — count up
         // _ft && d.error: server failed, leave count ≥2 so next send retries forceTest
         flRenderDoubtChips(parsed.questions,msgs);
       }
+      if(_qrParsed&&_qrParsed.qr)flRenderQuickReply(_qrParsed.qr,msgs);
       pvAutoUpdate();
     })
     .catch(function(){
@@ -2330,26 +2412,138 @@ function runSearch(){
   var q=document.getElementById('search-in').value.trim();
   if(!q){notify('Enter a search query!');return;}
   var area=document.getElementById('search-results-area');
-  area.innerHTML='<div style="text-align:center;padding:28px;color:var(--text3);font-size:12px">🔍 Searching...</div>';
+  area.innerHTML='<div style="text-align:center;padding:28px;color:var(--text2);font-size:12px">🔍 Searching the web...</div>';
   fetch('/api/search',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({query:q})})
     .then(function(r){return r.json();})
     .then(function(d){
-      if(d.error){area.innerHTML='<div style="color:var(--danger);font-size:12px;padding:12px;background:var(--dbg);border-radius:var(--r)">⚠️ '+esc(d.error)+'</div>';return;}
+      if(d.error){area.innerHTML='<div style="color:var(--danger);font-size:12px;padding:12px;background:var(--bg2);border-radius:var(--r)">⚠️ '+esc(d.error)+'</div>';return;}
       var html='';
-      if(d.answer){html+='<div class="aisum"><div class="aisum-l">✨ ForgeAI Summary</div><div class="aisum-t">'+esc(d.answer)+'</div></div>';}
+      if(d.answer){html+='<div class="aisum"><div class="aisum-l">✨ ForgeAI Answer</div><div class="aisum-t">'+esc(d.answer)+'</div></div>';}
       if(d.results&&d.results.length){
+        html+='<div style="font-size:10px;color:var(--text2);font-weight:700;letter-spacing:.5px;text-transform:uppercase;margin:8px 0 4px">Sources</div>';
         html+=d.results.map(function(r){
-          return '<div class="sres">'+
-            '<div class="srt"><a href="'+esc(r.url)+'" target="_blank" rel="noopener noreferrer" style="color:var(--info);text-decoration:none;cursor:pointer">'+esc(r.title)+'</a></div>'+
-            '<div class="sru"><a href="'+esc(r.url)+'" target="_blank" rel="noopener noreferrer" style="color:var(--success);text-decoration:none;cursor:pointer">🌐 '+esc(r.url)+'</a></div>'+
+          return '<div class="sres" onclick="openSourceInChat(this.dataset.title,this.dataset.url)" data-url="'+esc(r.url)+'" data-title="'+esc(r.title)+'">'+
+            '<div class="srt">'+esc(r.title)+'</div>'+
+            '<div class="sru">🌐 '+esc(r.url)+'</div>'+
             '<div class="srn">'+esc(r.content)+'</div>'+
           '</div>';
         }).join('');
-      }else if(!d.answer){html='<div style="color:var(--text3);font-size:12px;padding:16px;text-align:center">No results found.</div>';}
+      }else if(!d.answer){html='<div style="color:var(--text2);font-size:12px;padding:16px;text-align:center">No results found.</div>';}
+      if(typeof d.remaining==='number'){html+='<div style="font-size:10px;color:var(--text2);text-align:right;margin-top:8px;padding-top:6px;border-top:1px solid var(--border)">'+d.remaining+' searches left today</div>';}
       area.innerHTML=html;
     })
-    .catch(function(){area.innerHTML='<div style="color:var(--danger);font-size:12px;padding:12px;background:var(--dbg);border-radius:var(--r)">⚠️ Connection error. Is the server running?</div>';});
+    .catch(function(){area.innerHTML='<div style="color:var(--danger);font-size:12px;padding:12px;background:var(--bg2);border-radius:var(--r)">⚠️ Connection error. Is the server running?</div>';});
 }
+function ccGetFiles(){
+  scanChatFiles();
+  var files=[];
+  if(pvFiles.html)files.push({filename:'index.html',content:pvFiles.html});
+  if(pvFiles.css)files.push({filename:'styles.css',content:pvFiles.css});
+  if(pvFiles.js)files.push({filename:'script.js',content:pvFiles.js});
+  Object.keys(pvFiles.reactNative).forEach(function(fn){files.push({filename:fn,content:pvFiles.reactNative[fn]});});
+  return files;
+}
+function ccRunCheck(ccId){
+  var wrap=document.getElementById(ccId);if(!wrap)return;
+  var files=ccGetFiles();
+  if(!files.length){wrap.innerHTML='<div class="cc-card" style="color:var(--text2)">No code files found in this conversation.</div>';return;}
+  _ccStore[ccId]={files:files,fixedFiles:null,lastIssues:[]};
+  wrap.innerHTML='<div style="font-size:11px;color:var(--text2);padding:4px 0">Checking code...</div>';
+  fetch('/api/code-check',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({files:files})})
+    .then(function(r){return r.json();})
+    .then(function(d){ccShowResult(ccId,d,false);})
+    .catch(function(){wrap.innerHTML='<div class="cc-card" style="color:var(--danger)">Code check failed — server error.</div>';});
+}
+function ccShowResult(ccId,result,isRecheck){
+  var wrap=document.getElementById(ccId);if(!wrap)return;
+  var st=_ccStore[ccId]||{};
+  if(result.issues)st.lastIssues=result.issues;
+  if(result.status==='pass'){
+    wrap.innerHTML='<div class="cc-card"><div style="color:var(--success);font-weight:700;margin-bottom:6px">'+(isRecheck?'Issues fixed and verified ✓':'All checks passed ✓')+'</div>'
+      +'<button class="cc-btn prim" onclick="ccDownload(\''+ccId+'\')">Download ZIP</button></div>';
+  }else{
+    var issueHtml=(result.issues||[]).map(function(i){return '<div class="cc-issue">• '+esc(i)+'</div>';}).join('');
+    var note=isRecheck?'<div style="color:var(--text2);font-size:11px;margin-bottom:4px">Some issues remain after auto-fix.</div>':'';
+    var fixBtn=!isRecheck?'<button class="cc-btn prim" onclick="ccRunFix(\''+ccId+'\')">Auto-Fix Issues</button>':'';
+    wrap.innerHTML='<div class="cc-card">'+note+issueHtml+'<div>'+fixBtn
+      +'<button class="cc-btn sec" onclick="ccDownload(\''+ccId+'\')">'+(isRecheck?'Download ZIP':'Download Anyway')+'</button></div></div>';
+  }
+}
+function ccRunFix(ccId){
+  var wrap=document.getElementById(ccId);if(!wrap)return;
+  var st=_ccStore[ccId]||{};
+  var files=st.files||[];
+  var issues=st.lastIssues||[];
+  wrap.innerHTML='<div style="font-size:11px;color:var(--text2);padding:4px 0">Fixing issues...</div>';
+  fetch('/api/code-fix',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({files:files,issues:issues})})
+    .then(function(r){return r.json();})
+    .then(function(d){
+      if(d.error){
+        wrap.innerHTML='<div class="cc-card"><div style="color:var(--danger);margin-bottom:6px">Auto-fix failed — download original files</div>'
+          +'<button class="cc-btn sec" onclick="ccDownload(\''+ccId+'\')">Download Anyway</button></div>';
+        return;
+      }
+      _ccStore[ccId].fixedFiles=d.files;
+      ccShowResult(ccId,d.recheck,true);
+    })
+    .catch(function(){
+      wrap.innerHTML='<div class="cc-card" style="color:var(--danger)">Auto-fix failed — server error.</div>';
+    });
+}
+async function ccDownload(ccId){
+  var st=_ccStore[ccId]||{};
+  var files=st.fixedFiles||st.files||[];
+  if(!files.length){notify('No files to download');return;}
+  var pName='forge-project';
+  try{
+    var r=await fetch('/api/export-zip',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({files:files,projectName:pName})});
+    if(!r.ok){notify('Download failed (server error '+r.status+')');return;}
+    var blob=await r.blob();
+    if(blob.size<100){notify('ZIP too small — server error');return;}
+    var url=URL.createObjectURL(blob);
+    var a=document.createElement('a');a.href=url;a.download=pName+'.zip';
+    document.body.appendChild(a);a.click();a.remove();
+    URL.revokeObjectURL(url);
+  }catch(e){notify('Download failed');console.error('[ccDownload]',e);}
+}
+function openSourceInChat(title,url){
+  _pendingSourceUrl=url;
+  var inp=document.getElementById('chat-in');
+  inp.value='Explain the details from this page: '+title+' ('+url+')';
+  send();
+}
+function openPreview(url){
+  var overlay=document.getElementById('rdm-overlay');
+  var body=document.getElementById('rdm-body');
+  var title=document.getElementById('rdm-title');
+  var orig=document.getElementById('rdm-orig');
+  overlay.style.display='block';
+  document.body.style.overflow='hidden';
+  orig.href=url;
+  title.textContent='';
+  body.textContent='';
+  body.innerHTML='<div style="text-align:center;padding:40px;color:var(--text2);font-size:13px">Loading preview...</div>';
+  fetch('/api/preview?url='+encodeURIComponent(url))
+    .then(function(r){return r.json();})
+    .then(function(d){
+      orig.href=d.originalUrl||url;
+      if(d.error){
+        title.textContent='Preview not available';
+        body.innerHTML='<div style="text-align:center;padding:32px 16px;color:var(--text2);font-size:13px">Preview not available for this site.</div>';
+        return;
+      }
+      title.textContent=d.title||'';
+      body.textContent=d.content||'';
+    })
+    .catch(function(){
+      body.innerHTML='<div style="text-align:center;padding:32px;color:var(--danger);font-size:13px">Failed to load preview.</div>';
+    });
+}
+function closePreview(){
+  document.getElementById('rdm-overlay').style.display='none';
+  document.body.style.overflow='';
+}
+document.addEventListener('keydown',function(e){if(e.key==='Escape')closePreview();});
 function notify(msg){
   var n=document.getElementById('notif');
   n.textContent=msg;n.classList.add('show');
