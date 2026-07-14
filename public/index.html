@@ -1185,7 +1185,8 @@ function chMakeTitle(txt){var s=String(txt||'').trim().split(/\s+/).slice(0,6).j
 function chDraw(){
   var el=document.getElementById('ch-list');
   if(!el){console.warn('[chDraw] #ch-list missing');return;}
-  var all=chAll(),cur=chCurId();
+  var all=chAll().slice().sort(function(a,b){return (b.updatedAt||0)-(a.updatedAt||0);});
+  var cur=chCurId();
   console.log('[chDraw] sessions='+all.length+' active='+cur);
   if(!all.length){
     el.innerHTML='<div style="padding:5px 14px;font-size:11px;color:var(--text3);font-style:italic">No saved chats</div>';
