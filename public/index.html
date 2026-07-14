@@ -398,10 +398,16 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .fl-quiz-note{font-size:11px;color:var(--text2);margin-top:2px}
 .fl-quiz-score{font-size:15px;font-weight:700;color:var(--text);margin-top:12px;margin-bottom:4px}
 .fl-quiz-enc{font-size:12px;color:var(--text2)}
-.attach-thumb{width:36px;height:36px;object-fit:cover;border-radius:5px;border:1px solid var(--border);flex-shrink:0}
+.attach-thumb{width:60px;height:60px;object-fit:cover;border-radius:6px;border:1px solid var(--border);flex-shrink:0;display:block;cursor:pointer}
 .attach-name{flex:1;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;font-size:11px;color:var(--text)}
 .attach-x{background:none;border:none;cursor:pointer;font-size:16px;color:var(--text3);padding:0 2px;line-height:1;flex-shrink:0}
 .attach-x:hover{color:var(--danger)}
+.attach-bar.img-mode .attach-x{display:none}
+.att-img-x{position:absolute;top:-6px;right:-6px;width:18px;height:18px;border-radius:50%;background:rgba(0,0,0,.65);color:#fff;border:none;cursor:pointer;font-size:12px;line-height:18px;text-align:center;padding:0;display:flex;align-items:center;justify-content:center}
+.att-img-x:hover{background:var(--danger)}
+.att-thumb-wrap{position:relative;display:inline-block}
+.att-preview-lbl{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);font-size:10px;font-weight:500;color:#fff;background:rgba(0,0,0,.45);padding:2px 6px;border-radius:3px;pointer-events:none;transition:background .15s;white-space:nowrap}
+.att-thumb-wrap:hover .att-preview-lbl{background:rgba(0,0,0,.65)}
 .msg-attach-img{max-width:220px;max-height:160px;object-fit:cover;border-radius:8px;cursor:pointer;display:block;margin-bottom:6px;border:1px solid rgba(255,255,255,.15)}
 .msg-attach-file{display:inline-flex;align-items:center;gap:5px;background:rgba(0,0,0,.12);border-radius:5px;padding:4px 8px;font-size:11px;margin-bottom:5px;word-break:break-all}
 .panel.drag-over{outline:2px dashed var(--accent);outline-offset:-3px;border-radius:var(--rlg)}
@@ -2049,13 +2055,23 @@ function fieldLearnBegin(field){
 }
 function attachClear(){
   attachData=null;
-  document.getElementById('attach-bar').classList.remove('on');
+  var bar=document.getElementById('attach-bar');
+  bar.classList.remove('on');
+  bar.classList.remove('img-mode');
   document.getElementById('attach-img-input').value='';
   document.getElementById('attach-file-input').value='';
 }
 function showAttachBar(previewHtml,name){
-  document.getElementById('attach-preview-inner').innerHTML=previewHtml+(name?' <span class="attach-name">'+esc(name)+'</span>':'');
-  document.getElementById('attach-bar').classList.add('on');
+  var bar=document.getElementById('attach-bar');
+  var inner=document.getElementById('attach-preview-inner');
+  if(/^<img/.test(previewHtml)){
+    inner.innerHTML='<div class="att-thumb-wrap">'+previewHtml.replace('<img ','<img onclick="lbOpen(this.src)" ')+'<span class="att-preview-lbl">Preview</span><button class="att-img-x" onclick="event.stopPropagation();attachClear()" title="Remove">×</button></div>';
+    bar.classList.add('img-mode');
+  }else{
+    inner.innerHTML=previewHtml+(name?' <span class="attach-name">'+esc(name)+'</span>':'');
+    bar.classList.remove('img-mode');
+  }
+  bar.classList.add('on');
 }
 function attachHandle(file){
   if(!file)return;
