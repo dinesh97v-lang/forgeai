@@ -15,6 +15,9 @@ const bcrypt = require('bcrypt');
 const session = require('express-session');
 const ConnectSQLite3 = require('connect-sqlite3')(session);
 const Database = require('better-sqlite3');
+const { Readability } = require('@mozilla/readability');
+const { JSDOM } = require('jsdom');
+const archiver = require('archiver');
 
 const app = express();
 app.use(cors());
@@ -41,6 +44,18 @@ db.exec(`CREATE TABLE IF NOT EXISTS users (
 // Migrate existing DBs — add columns if absent
 try { db.exec(`ALTER TABLE users ADD COLUMN security_question TEXT`); } catch(e) {}
 try { db.exec(`ALTER TABLE users ADD COLUMN security_answer_hash TEXT`); } catch(e) {}
+
+db.exec(`CREATE TABLE IF NOT EXISTS search_cache (
+  query TEXT PRIMARY KEY,
+  result TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+)`);
+db.exec(`CREATE TABLE IF NOT EXISTS search_ratelimit (
+  user_id INTEGER NOT NULL,
+  date TEXT NOT NULL,
+  count INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (user_id, date)
+)`);
 
 function requireAuth(req, res, next) {
   if (!req.session?.userId) return res.status(401).json({ error: 'Please log in to continue' });
@@ -852,7 +867,7 @@ app.post('/api/chat', requireAuth, async (req, res) => {
     return res.status(429).json({ error: 'Innikku 100 messages limit mudinjuchu — naaliku continue pannunga!' });
   }
 
-  const { prompt, history, enterpriseMode, simpleMode, attachment, fieldMode, fieldPreviewMode, forceTest, evaluateTest } = req.body;
+  const { prompt, history, enterpriseMode, simpleMode, attachment, fieldMode, fieldPreviewMode, forceTest, evaluateTest, sourceUrl } = req.body;
   if (!attachment && (!prompt || !prompt.trim())) {
     return res.status(400).json({ error: 'Prompt is empty!' });
   }
@@ -879,6 +894,20 @@ app.post('/api/chat', requireAuth, async (req, res) => {
     sysPrompt = `You are a senior professional with 20+ years of hands-on experience in "${fld}", mentoring a fresher who has just joined this line of work. Teach them like a caring senior guiding a junior on the job — not a textbook, not a consumer guide, but real insider knowledge from someone who has lived this work.
 
 LANGUAGE RULE (STRICT): Detect the language of the user's most recent message. If it is English, your ENTIRE response must be 100% English — zero Tamil or Tanglish words, including greetings (no 'Vanakkam'), fillers ('irukku', 'pannunga', 'theriyum'), and closing questions. If the user's message is in Tamil script or Tanglish, respond fully in that same style. Never mix languages within one response.
+
+QUICK REPLY BLOCKS — MANDATORY: Whenever you ask the user to choose between options (level check, topic selection, next-step choice, yes/no confirmation), you MUST output the structured quick_reply block instead of a plain-text question. Never ask a choice question as plain text.
+
+Format (place at the very end of your response, AFTER the [QUESTIONS] block if present):
+<<QUICK_REPLY>>{"type":"quick_reply","question":"Your question?","options":["Option 1","Option 2","Option 3"]}<<END_QUICK_REPLY>>
+
+WRONG — plain-text choice question (never do this):
+"What is your current level? Are you a complete beginner, do you know the basics, or are you intermediate?"
+
+CORRECT — same question as a quick_reply block:
+I'd love to tailor this to where you're at.
+<<QUICK_REPLY>>{"type":"quick_reply","question":"What is your current level?","options":["Complete beginner","Know the basics","Intermediate","Self-taught"]}<<END_QUICK_REPLY>>
+
+Rules: Maximum 4 options. Each option maximum 5 words. ONE quick_reply block per response only. Use ONLY for genuine choice moments — regular teaching stays as plain text.
 
 CONTENT FOCUS — every lesson must be workplace-oriented. Cover the real day-to-day work processes that actually happen on the job, the industry-standard terms, documents, and tools they will hear at work (job cards, SOPs, quality reports — whatever applies). Explain what seniors and employers expect from a beginner in the first weeks, what common mistakes freshers make and how to avoid them, practical insider tips only experienced people know, and the career growth path in India from junior to senior with realistic salary progression.
 
@@ -913,11 +942,13 @@ Write exactly 3 questions a beginner would naturally wonder after reading THAT s
 LANGUAGE RULE (STRICT): Detect the language of the user's most recent message. If it is English, your ENTIRE response must be 100% English — zero Tamil or Tanglish words, including greetings (no 'Vanakkam'), fillers ('irukku', 'pannunga', 'theriyum'), and closing questions. If the user's message is in Tamil script or Tanglish, respond fully in that same style. Never mix languages within one response.`;
   } else if (simpleMode) {
     sysPrompt = SIMPLE_MODE_PROMPT + '\n\n' + langInstructions[lang];
+    sysPrompt += '\n\nQUICK REPLY BLOCKS — MANDATORY: Whenever you ask the user to choose between options (yes/no, topic choice, next-step choice), you MUST output the structured quick_reply block instead of a plain-text question.\n\nFormat (at the very end of your response):\n<<QUICK_REPLY>>{"type":"quick_reply","question":"Your question?","options":["Option 1","Option 2","Option 3"]}<<END_QUICK_REPLY>>\n\nRules: Maximum 4 options. Each option maximum 5 words. ONE quick_reply block per response. Regular answers stay as plain text.';
   } else {
     const identity = isStudent ? STUDENT_IDENTITY
       : (lang === 'tamil' || lang === 'thanglish') ? TAMIL_CODING_IDENTITY
       : CODING_IDENTITY;
     sysPrompt = identity + '\n\n' + systemPrompts[intent] + '\n\n' + langInstructions[lang];
+    sysPrompt += '\n\nQUICK REPLY BLOCKS — MANDATORY: Whenever you ask the user to choose between options (topic selection, yes/no confirmation, next-step choice, architecture choice, etc.), you MUST output the structured quick_reply block instead of a plain-text question. Never ask a choice question as plain text.\n\nFormat (place at the very end of your response):\n<<QUICK_REPLY>>{"type":"quick_reply","question":"Your question?","options":["Option 1","Option 2","Option 3"]}<<END_QUICK_REPLY>>\n\nWRONG — plain-text choice question (never do this):\n"Would you like to use Monolithic or Microservices architecture?"\n\nCORRECT — same question as a quick_reply block:\nHere\'s a quick breakdown of both. Before I go deeper, let me know which direction you\'re leaning:\n<<QUICK_REPLY>>{"type":"quick_reply","question":"Which architecture fits your project?","options":["Monolithic","Microservices","Not sure yet"]}<<END_QUICK_REPLY>>\n\nRules: Maximum 4 options. Each option maximum 5 words. ONE quick_reply block per response only. Use ONLY for genuine choice moments — regular answers stay as plain text.';
     isEnterprise = !!(enterpriseMode && isCodeRequest(prompt));
     if (isEnterprise) {
       sysPrompt += '\n\nENTERPRISE MODE ACTIVE — generated code must meet production standards:\n- Input validation on all user inputs\n- Proper error handling with try-catch and meaningful error messages\n- Security best practices: no hardcoded secrets, parameterized queries, XSS-safe output\n- Comments explaining key sections\n- After the code, add a short \'Production Checklist\' section listing what to verify before deploying (security, testing, environment variables)';
@@ -959,8 +990,31 @@ LANGUAGE RULE (STRICT): Detect the language of the user's most recent message. I
     finalPrompt = `User uploaded file '${attachment.name}':\n${content}${suffix}\n\nUser question: ${prompt || 'Analyze this file.'}`;
     console.log(`[attachment] Text file "${attachment.name}" — ${content.length} chars prepended`);
   }
+  // Source-card path: fetch page via Readability and inject into prompt
+  let sourcePageFetched = false;
+  if (sourceUrl && /^https?:\/\//i.test(sourceUrl)) {
+    let pageText = '';
+    try {
+      const srcRes = await axios.get(sourceUrl, {
+        timeout: 10000,
+        maxRedirects: 5,
+        headers: { 'User-Agent': 'Mozilla/5.0 (compatible; ForgeAI/1.0)' },
+        responseType: 'text'
+      });
+      const srcDom = new JSDOM(srcRes.data, { url: sourceUrl });
+      const srcArticle = new Readability(srcDom.window.document).parse();
+      pageText = srcArticle ? (srcArticle.textContent || '').trim().slice(0, 6000) : '';
+    } catch (srcErr) {
+      console.error('[source-card] fetch failed:', srcErr.message);
+    }
+    sysPrompt = 'The user clicked a search result. Using the following page content, explain the key details clearly and concisely. If the content is missing or empty, say the page could not be read and answer from the search snippet instead.';
+    finalPrompt = `Page URL: ${sourceUrl}\n\nPage content:\n${pageText || '(Could not fetch page content)'}\n\nUser request: ${prompt}`;
+    sourcePageFetched = true;
+    console.log(`[source-card] fetched ${sourceUrl} — ${pageText.length} chars`);
+  }
+
   let tRewrite = 0, tTavily = 0;
-  if (needsSearch(prompt) && TAVILY_KEY && !fieldPreviewMode) {
+  if (needsSearch(prompt) && TAVILY_KEY && !fieldPreviewMode && !sourcePageFetched) {
     try {
       let searchQuery = prompt;
       // Only rewrite short/ambiguous follow-ups — long queries are self-contained.
@@ -997,6 +1051,10 @@ LANGUAGE RULE (STRICT): Detect the language of the user's most recent message. I
   }
   // Preview card: upgrade 8b for reliable JSON generation
   if (fieldPreviewMode && fieldPreviewMode.trim()) {
+    primaryModel = (lang === 'tamil' || lang === 'thanglish') ? MODELS.GEM_FLASH : MODELS.GROQ_70B;
+  }
+  // Source card: page content is large — use 70b for better synthesis
+  if (sourcePageFetched) {
     primaryModel = (lang === 'tamil' || lang === 'thanglish') ? MODELS.GEM_FLASH : MODELS.GROQ_70B;
   }
 
@@ -1176,34 +1234,208 @@ LANGUAGE RULE (STRICT): Detect the language of the user's most recent message. I
 
 
 // ============================================
-// SEARCH ENDPOINT — Tavily
+// SEARCH ENDPOINT — Tavily + AI synthesis
 // ============================================
-app.post('/api/search', async (req, res) => {
+app.post('/api/search', requireAuth, async (req, res) => {
   const { query } = req.body;
-  if (!query || !query.trim()) {
-    return res.status(400).json({ error: 'Query is empty!' });
+  if (!query || !query.trim()) return res.status(400).json({ error: 'Query is empty!' });
+  if (!TAVILY_KEY) return res.status(503).json({ error: 'Search not configured. Add TAVILY_API_KEY to .env' });
+
+  const q = query.trim();
+  const userId = req.session.userId;
+  const today = new Date().toISOString().slice(0, 10);
+
+  // Rate limit — 10 searches per user per day
+  const rl = db.prepare('SELECT count FROM search_ratelimit WHERE user_id=? AND date=?').get(userId, today);
+  const usedToday = rl ? rl.count : 0;
+  if (usedToday >= 10) {
+    return res.status(429).json({ error: 'Search limit reached (10/day). Try again tomorrow.' });
   }
-  if (!TAVILY_KEY) {
-    return res.status(503).json({ error: 'Search not configured. Add TAVILY_API_KEY to .env' });
+
+  // Cache lookup — 24 hours
+  const cacheKey = q.toLowerCase();
+  const cached = db.prepare('SELECT result FROM search_cache WHERE query=? AND created_at > ?').get(cacheKey, Date.now() - 86400000);
+  if (cached) {
+    const parsed = JSON.parse(cached.result);
+    parsed.remaining = 10 - usedToday;
+    return res.json(parsed);
+  }
+
+  try {
+    // Fetch web results from Tavily
+    const tavilyRes = await axios.post(
+      'https://api.tavily.com/search',
+      { api_key: TAVILY_KEY, query: q, max_results: 6, include_answer: false },
+      { timeout: 10000 }
+    );
+    const sources = (tavilyRes.data.results || []).map(r => ({
+      title: r.title || '',
+      url: r.url || '',
+      content: (r.content || r.snippet || '').slice(0, 400)
+    }));
+
+    // AI synthesis
+    const lang = detectLanguage(q);
+    const context = sources.map((r, i) => `[${i + 1}] ${r.title}: ${r.content}`).join('\n\n');
+    const synthSys = 'You are a search assistant. Answer the question in 3-5 sentences using the provided web search results. Be factual, clear, and cite key information. Do not add disclaimers or preambles.';
+    const synthPrompt = `Question: ${q}\n\nWeb search results:\n${context}`;
+    let aiAnswer = '';
+
+    try {
+      if (lang === 'tamil' && GEMINI_KEY) {
+        const gemRes = await axios.post(
+          `https://generativelanguage.googleapis.com/v1beta/models/${MODELS.GEM_FLASH}:generateContent?key=${GEMINI_KEY}`,
+          {
+            system_instruction: { parts: [{ text: synthSys }] },
+            contents: [{ role: 'user', parts: [{ text: synthPrompt }] }],
+            generationConfig: { maxOutputTokens: 400 }
+          },
+          { timeout: 15000 }
+        );
+        aiAnswer = gemRes.data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+      } else if (GROQ_KEY) {
+        const groqRes = await axios.post(
+          'https://api.groq.com/openai/v1/chat/completions',
+          {
+            model: MODELS.GROQ_70B,
+            messages: [
+              { role: 'system', content: synthSys },
+              { role: 'user', content: synthPrompt }
+            ],
+            max_tokens: 400,
+            temperature: 0.3
+          },
+          { headers: { Authorization: `Bearer ${GROQ_KEY}` }, timeout: 15000 }
+        );
+        aiAnswer = groqRes.data?.choices?.[0]?.message?.content || '';
+      }
+    } catch (synthErr) {
+      console.error('[search-synth] AI synthesis failed:', synthErr.message);
+    }
+
+    const result = { answer: aiAnswer.trim(), results: sources };
+
+    // Cache + rate limit update
+    db.prepare('INSERT OR REPLACE INTO search_cache (query, result, created_at) VALUES (?,?,?)').run(cacheKey, JSON.stringify(result), Date.now());
+    db.prepare('INSERT INTO search_ratelimit (user_id, date, count) VALUES (?,?,1) ON CONFLICT(user_id, date) DO UPDATE SET count=count+1').run(userId, today);
+
+    result.remaining = 10 - (usedToday + 1);
+    res.json(result);
+  } catch (err) {
+    console.error('[search] Error:', err.response?.data || err.message);
+    res.status(500).json({ error: 'Search failed. Please try again.' });
+  }
+});
+
+// ============================================
+// READER PREVIEW — fetch + Readability extract
+// ============================================
+app.get('/api/preview', requireAuth, async (req, res) => {
+  const url = (req.query.url || '').trim();
+  if (!url || !/^https?:\/\//i.test(url)) {
+    return res.status(400).json({ error: true, originalUrl: url });
   }
   try {
-    const response = await axios.post(
-      'https://api.tavily.com/search',
-      { api_key: TAVILY_KEY, query: query.trim(), max_results: 6, include_answer: true },
-      { timeout: 15000 }
-    );
-    const data = response.data;
-    res.json({
-      answer: data.answer || '',
-      results: (data.results || []).map(r => ({
-        title: r.title || '',
-        url: r.url || '',
-        content: (r.content || r.snippet || '').slice(0, 300)
-      }))
+    const response = await axios.get(url, {
+      timeout: 10000,
+      maxRedirects: 5,
+      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; ForgeAI/1.0; +https://forgeai.app)' },
+      responseType: 'text'
     });
+    const dom = new JSDOM(response.data, { url });
+    const article = new Readability(dom.window.document).parse();
+    if (!article) return res.json({ error: true, originalUrl: url });
+    res.json({ title: article.title || '', content: (article.textContent || '').trim(), originalUrl: url });
   } catch (err) {
-    console.error('Search error:', err.response?.data || err.message);
-    res.status(500).json({ error: 'Search failed. Please try again.' });
+    console.error('[preview]', err.message);
+    res.json({ error: true, originalUrl: url });
+  }
+});
+
+// ============================================
+// CODE PIPELINE — check / fix / zip
+// ============================================
+async function runCodeCheck(files) {
+  const content = files.map(f => `=== ${f.filename} ===\n${f.content}`).join('\n\n').slice(0, 8000);
+  const resp = await axios.post(
+    'https://api.groq.com/openai/v1/chat/completions',
+    {
+      model: MODELS.GROQ_70B,
+      messages: [
+        { role: 'system', content: 'You are a code reviewer. Check the following files for syntax errors, obvious bugs, missing dependencies, and security issues (hardcoded secrets, eval). Respond in this exact JSON format only: { "status": "pass" or "issues", "issues": ["issue 1", "issue 2"] }. If code is fine, status is pass with empty issues array.' },
+        { role: 'user', content: content }
+      ],
+      max_tokens: 800,
+      temperature: 0
+    },
+    { headers: { Authorization: `Bearer ${GROQ_KEY}` }, timeout: 20000 }
+  );
+  const raw = resp.data?.choices?.[0]?.message?.content || '';
+  const parsed = extractFirstJson(raw);
+  return (parsed && (parsed.status === 'pass' || parsed.status === 'issues'))
+    ? parsed
+    : { status: 'issues', issues: ['Could not parse check result'] };
+}
+
+app.post('/api/code-check', requireAuth, async (req, res) => {
+  const { files } = req.body;
+  if (!Array.isArray(files) || files.length === 0) return res.status(400).json({ error: 'No files provided' });
+  try {
+    res.json(await runCodeCheck(files));
+  } catch (err) {
+    console.error('[code-check]', err.message);
+    res.status(500).json({ error: 'Code check failed' });
+  }
+});
+
+app.post('/api/code-fix', requireAuth, async (req, res) => {
+  const { files, issues } = req.body;
+  if (!Array.isArray(files) || files.length === 0) return res.json({ error: true });
+  try {
+    const content = files.map(f => `=== ${f.filename} ===\n${f.content}`).join('\n\n').slice(0, 8000);
+    const issueList = (Array.isArray(issues) ? issues : []).join('\n');
+    const resp = await axios.post(
+      'https://api.groq.com/openai/v1/chat/completions',
+      {
+        model: MODELS.GROQ_70B,
+        messages: [
+          { role: 'system', content: 'You are a code fixer. Fix ONLY the listed issues. Do not refactor, rename, or change anything else. Return ONLY valid JSON: { "files": [{ "filename": "...", "content": "...full corrected file content..." }] }' },
+          { role: 'user', content: `Issues to fix:\n${issueList}\n\nFiles:\n${content}` }
+        ],
+        max_tokens: 4000,
+        temperature: 0
+      },
+      { headers: { Authorization: `Bearer ${GROQ_KEY}` }, timeout: 30000 }
+    );
+    const raw = resp.data?.choices?.[0]?.message?.content || '';
+    const parsed = extractFirstJson(raw);
+    if (!parsed || !Array.isArray(parsed.files)) return res.json({ error: true });
+    const recheck = await runCodeCheck(parsed.files);
+    res.json({ files: parsed.files, recheck });
+  } catch (err) {
+    console.error('[code-fix]', err.message);
+    res.json({ error: true });
+  }
+});
+
+app.post('/api/export-zip', requireAuth, async (req, res) => {
+  const { files, projectName } = req.body;
+  const pName = (projectName || 'project').replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 50);
+  res.setHeader('Content-Type', 'application/zip');
+  res.setHeader('Content-Disposition', `attachment; filename="${pName}.zip"`);
+  try {
+    if (!Array.isArray(files) || files.length === 0) throw new Error('no files');
+    const archive = archiver('zip', { zlib: { level: 6 } });
+    archive.on('error', err => { console.error('[export-zip] archiver error:', err.message); });
+    archive.pipe(res);
+    for (const f of files) {
+      const safeFn = (f.filename || 'file.txt').replace(/\.\.[/\\]/g, '').replace(/^[/\\]+/, '') || 'file.txt';
+      archive.append(Buffer.from(String(f.content || ''), 'utf8'), { name: safeFn });
+    }
+    await archive.finalize();
+  } catch (err) {
+    console.error('[export-zip] fatal:', err.message);
+    if (!res.headersSent) res.status(500).json({ error: 'zip failed' });
   }
 });
 
