@@ -687,7 +687,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 
     <!-- CHAT -->
     <div class="panel active" id="panel-chat">
-      <div style="display:flex;align-items:center;justify-content:space-between;padding:5px 12px 4px;border-bottom:1px solid var(--border);flex-shrink:0"><span id="field-mode-badge" style="display:none;font-size:10px;padding:2px 8px;border-radius:8px;background:var(--ibg);color:var(--info);font-weight:700"></span><button class="ib" onclick="clearChat()" title="Clear chat">🗑</button></div>
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:5px 12px 4px;border-bottom:1px solid var(--border);flex-shrink:0"><span id="field-mode-badge" style="display:none;font-size:10px;padding:2px 8px;border-radius:8px;background:var(--ibg);color:var(--info);font-weight:700"></span><button class="ib" onclick="clearChat()" title="Clear chat" style="width:auto;padding:0 10px;gap:6px;font-size:12px">🗑 Clear chat</button></div>
       <div class="msgs" id="chat-msgs">
         <div class="msg"><div class="mav ai">F</div><div><div class="bub" id="welcome-bub">Welcome to Forge AI! I can help you code, deploy, test, search, and more. Your data stays private on your server. What shall we build today?</div></div></div>
       </div>
@@ -3076,6 +3076,13 @@ function initPageAll(){
           if(m.role==='user'){div.className='msg u';div.innerHTML=renderUserBub(m);}
           else{div.className='msg';div.innerHTML='<div class="mav ai">F</div><div><div class="bub">'+formatMarkdown(m.content)+'</div>'+aiActBar()+'</div>';}
           cm.appendChild(div);
+          if(m.role!=='user'&&/```/.test(m.content)){
+            var ccId='cc-r'+i;
+            _ccStore[ccId]={files:null,fixedFiles:null,lastIssues:[]};
+            var ccWrap=document.createElement('div');ccWrap.className='cc-wrap';ccWrap.id=ccId;
+            ccWrap.innerHTML='<button class="cc-check-btn" onclick="ccRunCheck(\''+ccId+'\')">&#10003; Check &amp; Download ZIP</button>';
+            cm.appendChild(ccWrap);
+          }
         }catch(e){console.warn('[chat] skipped bad message at index',i,e.message);}
       }
       cm.scrollTop=cm.scrollHeight;
