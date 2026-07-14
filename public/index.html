@@ -1736,7 +1736,8 @@ function renderUserBub(m){
   return '<div class="mav u">'+userInitials()+'</div><div><div class="bub">'+attHtml+qtHtml+esc(m.content)+'</div>'+uActBar()+'</div>';
 }
 var qtText='';
-function srHide(){var b=document.getElementById('sel-btn');if(b)b.style.display='none';}
+var _srTimer=null;
+function srHide(reason){var b=document.getElementById('sel-btn');if(b)b.style.display='none';}
 function srShow(rect){
   var b=document.getElementById('sel-btn');if(!b)return;
   var bW=76;
@@ -1747,11 +1748,13 @@ function srShow(rect){
 function srCheck(){
   var sel=window.getSelection();
   if(!sel||sel.isCollapsed||!sel.rangeCount){srHide();return;}
-  var txt=sel.toString().trim();if(!txt){srHide();return;}
+  var txt=sel.toString().trim();
+  if(!txt){srHide();return;}
   var range=sel.getRangeAt(0);
   var msgs=document.getElementById('chat-msgs');if(!msgs){srHide();return;}
   // Both range endpoints must be inside the SAME .bub (no cross-message selections)
-  function nearestBub(n){return n.nodeType===3?n.parentElement&&n.parentElement.closest&&n.parentElement.closest('.bub'):n.closest&&n.closest('.bub');}
+  // el.querySelector fallback handles browser placing endContainer on the parent of .bub when selection reaches end of bubble
+  function nearestBub(n){var el=n.nodeType===3?n.parentElement:n;if(!el)return null;return (el.closest&&el.closest('.bub'))||(el.querySelector&&el.querySelector('.bub'))||null;}
   var sb=nearestBub(range.startContainer);
   var eb=nearestBub(range.endContainer);
   if(!sb||!eb||sb!==eb||!msgs.contains(sb)){srHide();return;}
@@ -3116,6 +3119,8 @@ function initPageAll(){
     _cm.addEventListener('touchend',function(){setTimeout(srCheck,60);});
     _cm.addEventListener('scroll',srHide);
   }
+  // selectionchange catches double-click word selection (fires AFTER browser expands to word boundary, which mouseup+10ms misses)
+  document.addEventListener('selectionchange',function(){clearTimeout(_srTimer);_srTimer=setTimeout(srCheck,50);});
   var _sb=document.getElementById('sel-btn');
   if(_sb){
     // mousedown (not click) so we can e.preventDefault() before the selection collapses
