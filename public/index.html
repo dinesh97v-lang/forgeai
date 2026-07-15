@@ -360,8 +360,8 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .fl-pc-btn{width:100%;padding:9px;background:var(--accent);color:white;border:none;border-radius:var(--r);font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;transition:background .2s;margin-top:4px}
 .fl-pc-btn:hover{background:var(--accent2)}
 .fl-doubt-chips{display:flex;flex-wrap:wrap;gap:5px;padding:5px 0 4px 36px}
-.fl-dchip{font-size:11px;padding:4px 10px;border:1px solid var(--border);border-radius:14px;color:var(--text2);cursor:pointer;background:var(--bg);font-family:inherit;transition:all .15s;white-space:nowrap;text-align:left}
-.fl-dchip:hover{background:var(--bg3);color:var(--text);border-color:var(--border2)}
+.fl-dchip{font-size:11px;padding:4px 10px;border:1px solid var(--border);border-radius:14px;color:var(--text2);cursor:pointer;background:var(--bg);font-family:inherit;transition:all .15s;white-space:nowrap;text-align:left;position:relative}
+.fl-dchip:hover{background:var(--bg3);color:var(--text);border-color:var(--border2);transform:scale(1.15);z-index:1}
 .fl-qr-bar{display:flex;flex-wrap:wrap;gap:5px;padding:5px 0 4px 36px}
 .fl-qr-btn{font-size:11px;padding:6px 12px;min-height:44px;border:1px solid var(--accent);border-radius:14px;color:var(--accent);cursor:pointer;background:var(--bg);font-family:inherit;transition:transform 0.15s ease,box-shadow 0.15s ease,background .15s,color .15s;text-align:left;line-height:1.3}
 .fl-qr-btn:hover:not(:disabled){background:var(--accent);color:white;transform:scale(1.06);box-shadow:0 4px 12px rgba(0,0,0,.15)}
@@ -720,6 +720,14 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
           <div style="display:flex;align-items:center;justify-content:space-between;gap:6px">
             <span style="font-size:11px;font-weight:600;color:var(--text2)">What do you want to learn? Pick a field or type your own!</span>
             <button class="attach-x" onclick="fieldLearnClose()" title="Cancel">×</button>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+            <span style="font-size:11px;font-weight:600;color:var(--text2);flex-shrink:0">Language:</span>
+            <button class="fl-chip" id="fl-lang-tamil" onclick="learnLangSet('tamil')" style="padding:4px 12px;background:var(--accent);color:#fff;border-color:var(--accent)">Tamil</button>
+            <button class="fl-chip" id="fl-lang-english" onclick="learnLangSet('english')" style="padding:4px 12px">English</button>
+            <button class="fl-chip" id="fl-lang-tanglish" onclick="learnLangSet('tanglish')" style="padding:4px 12px">Tanglish</button>
+            <button class="fl-chip" id="fl-lang-hindi" onclick="learnLangSet('hindi')" style="padding:4px 12px">Hindi</button>
+            <button class="fl-chip" id="fl-lang-telugu" onclick="learnLangSet('telugu')" style="padding:4px 12px">Telugu</button>
           </div>
           <div style="display:flex;gap:6px;flex-wrap:wrap">
             <button class="fl-chip" onclick="fieldLearnChip('AI &amp; Machine Learning')">🤖 AI &amp; Machine Learning</button>
@@ -1787,7 +1795,9 @@ function attachMenuClose(){var m=document.getElementById('attach-menu');if(m)m.c
 function attachPickImg(){attachMenuClose();document.getElementById('attach-img-input').click();}
 function attachPickFile(){attachMenuClose();document.getElementById('attach-file-input').click();}
 var chatFieldMode=null;
-function fieldLearnOpen(){attachMenuClose();var b=document.getElementById('field-learn-bar');if(!b)return;b.style.display='flex';setTimeout(function(){var i=document.getElementById('field-learn-input');if(i)i.focus();},50);}
+var _learnLang=(localStorage.getItem('learnLang')||'tamil');
+function learnLangSet(l){_learnLang=l;localStorage.setItem('learnLang',l);['tamil','english','tanglish','hindi','telugu'].forEach(function(k){var b=document.getElementById('fl-lang-'+k);if(!b)return;if(k===l){b.style.background='var(--accent)';b.style.color='#fff';b.style.borderColor='var(--accent)';}else{b.style.background='';b.style.color='';b.style.borderColor='';}});}
+function fieldLearnOpen(){attachMenuClose();var b=document.getElementById('field-learn-bar');if(!b)return;b.style.display='flex';learnLangSet(_learnLang);setTimeout(function(){var i=document.getElementById('field-learn-input');if(i)i.focus();},50);}
 function fieldLearnClose(){var b=document.getElementById('field-learn-bar');if(b)b.style.display='none';var i=document.getElementById('field-learn-input');if(i)i.value='';}
 function fieldLearnChip(text){var i=document.getElementById('field-learn-input');if(i){i.value=text;fieldLearnStart();}}
 function fieldModeUpdate(){var b=document.getElementById('field-mode-badge');if(!b)return;if(chatFieldMode){b.textContent='📚 Learning: '+chatFieldMode;b.style.display='';}else{b.style.display='none';}}
@@ -1797,15 +1807,27 @@ var _flTeachCount=0;
 var _flTestPending=false;
 function _flTamilInput(s){return /[஀-௿]/.test(s);}
 function flParseQuickReply(text){
-  var m=(text||'').match(/<<QUICK_REPLY>>([\s\S]*?)<<END_QUICK_REPLY>>/i);
+  // Normalize all known close-tag variants to canonical <<END_QUICK_REPLY>>
+  var normalized=(text||'')
+    .replace(/<<END_Q[A-Z_]*>>/gi,'<<END_QUICK_REPLY>>')
+    .replace(/\[\/QUICK_REPLY\]\s*<<END_QUICK_REPLY>>/gi,'<<END_QUICK_REPLY>>')
+    .replace(/\[\/QUICK_REPLY\]/gi,'<<END_QUICK_REPLY>>');
+  var m=normalized.match(/<<QUICK_REPLY>>([\s\S]*?)<<END_QUICK_REPLY>>/i);
   if(!m)return{clean:text||'',qr:null};
-  var clean=(text||'').replace(/\s*<<QUICK_REPLY>>[\s\S]*?<<END_QUICK_REPLY>>/i,'').trim();
+  var clean=normalized.replace(/\s*<<QUICK_REPLY>>[\s\S]*?<<END_QUICK_REPLY>>/i,'').trim();
+  var raw=m[1].trim();
+  // Primary: pipe-separated format — opt1|opt2|opt3
+  var opts=raw.split('|').map(function(o){return o.trim();}).filter(function(o){return o.length>0&&o.length<80;});
+  if(opts.length>=2)return{clean:clean,qr:{options:opts.slice(0,4)}};
+  // Fallback: JSON format (some models may still emit it)
   try{
-    var qr=JSON.parse(m[1].trim());
-    if(!qr||typeof qr.question!=='string'||!Array.isArray(qr.options)||qr.options.length===0)return{clean:text||'',qr:null};
-    qr.options=qr.options.slice(0,4);
-    return{clean:clean,qr:qr};
-  }catch(e){console.warn('[quick_reply] JSON parse failed:',e.message);return{clean:text||'',qr:null};}
+    var s=raw.indexOf('{');var e=raw.lastIndexOf('}');
+    if(s!==-1&&e>s){
+      var qr=JSON.parse(raw.slice(s,e+1));
+      if(qr&&Array.isArray(qr.options)&&qr.options.length>=2)return{clean:clean,qr:{options:qr.options.slice(0,4)}};
+    }
+  }catch(err){console.warn('[quick_reply] parse failed:',err.message);}
+  return{clean:clean,qr:null};
 }
 function flRenderQuickReply(qr,msgs){
   var bar=document.createElement('div');bar.className='fl-qr-bar';
@@ -1813,7 +1835,8 @@ function flRenderQuickReply(qr,msgs){
   var hint=document.createElement('div');
   hint.setAttribute('data-qr-hint','1');
   hint.style.cssText='font-size:10px;color:var(--text2);padding:3px 0 0 2px;width:100%';
-  hint.textContent='or type your own answer ✍️';
+  var _qrHints={tamil:'அல்லது உங்கள் பதிலை தட்டச்சு செய்யவும் ✍️',tanglish:'illa unga sondha reply type pannunga ✍️',hindi:'या अपना जवाब टाइप करें ✍️',telugu:'లేదా మీ సొంత జవాబును టైప్ చేయండి ✍️',english:'or type your own answer ✍️'};
+  hint.textContent=_qrHints[_learnLang]||_qrHints.english;
   bar.appendChild(hint);
   msgs.appendChild(bar);msgs.scrollTop=msgs.scrollHeight;
 }
@@ -1919,7 +1942,8 @@ function flQzSub(cardId){
     prompt:evalPrompt,
     history:chatHistory.slice(-10).map(function(m){return{role:m.role,content:m.content};}),
     fieldMode:chatFieldMode,
-    evaluateTest:true
+    evaluateTest:true,
+    learnLang:_learnLang
   })})
   .then(function(r){return r.json();})
   .then(function(d){
@@ -1978,7 +2002,7 @@ function fieldLearnPreview(field){
   card.innerHTML='<div class="fl-pc-spinner"></div><span>'+(_tamil?'Unga learning plan ready aagitu irukku...':'Preparing your learning plan...')+'</span>';
   msgs.appendChild(card);msgs.scrollTop=msgs.scrollHeight;
   function doFetch(attempt){
-    fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt:field,history:[],fieldPreviewMode:field,simpleMode:false})})
+    fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt:field,history:[],fieldPreviewMode:field,simpleMode:false,learnLang:_learnLang})})
       .then(function(r){return r.json();})
       .then(function(d){
         var raw=(d.reply||'').trim();
@@ -2038,11 +2062,13 @@ function fieldLearnBegin(field){
   chatHistory.push(msgObj);
   saveChat();chSync();
   fieldModeSave(field);
-  fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt:'📚 Learn: '+field,history:[],fieldMode:field,simpleMode:isSimple()})})
+  fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt:'📚 Learn: '+field,history:[],fieldMode:field,simpleMode:isSimple(),learnLang:_learnLang})})
     .then(function(r){return r.json();})
     .then(function(d){
       var ty=document.getElementById('typ');if(ty)ty.remove();
       var parsed=flParseQuestions(d.reply||'');
+      var _qrParsed=flParseQuickReply(parsed.clean||'');
+      parsed.clean=_qrParsed.clean;
       chatHistory.push({role:'assistant',content:parsed.clean||d.error||''});
       saveChat();chSync();
       var ai=document.createElement('div');ai.className='msg';
@@ -2050,6 +2076,7 @@ function fieldLearnBegin(field){
       msgs.appendChild(ai);msgs.scrollTop=msgs.scrollHeight;
       _flTeachCount++;
       flRenderDoubtChips(parsed.questions,msgs);
+      if(_qrParsed&&_qrParsed.qr)flRenderQuickReply(_qrParsed.qr,msgs);
     })
     .catch(function(){var ty=document.getElementById('typ');if(ty)ty.remove();});
 }
@@ -2128,7 +2155,7 @@ function send(){
   chatHistory.push(msgObj);
   saveChat();chSync();
   var fetchBody={prompt:apiPrompt||'',history:histForApi,enterpriseMode:enterpriseMode,simpleMode:isSimple()};
-  if(chatFieldMode)fetchBody.fieldMode=chatFieldMode;
+  if(chatFieldMode){fetchBody.fieldMode=chatFieldMode;fetchBody.learnLang=_learnLang;}
   if(_pendingSourceUrl){fetchBody.sourceUrl=_pendingSourceUrl;_pendingSourceUrl=null;}
   // Closure-local flag: captures test intent at send-time, not as mutable module state.
   // Counter resets only when the server actually returns a successful test response.
@@ -2151,7 +2178,7 @@ function send(){
       }
       var parsed=chatFieldMode?flParseQuestions(d.reply||''):{clean:d.reply||'',questions:[]};
       var _qrParsed=flParseQuickReply(parsed.clean||'');
-      if(_qrParsed&&_qrParsed.qr)parsed.clean=_qrParsed.clean;
+      parsed.clean=_qrParsed.clean;
       var _reply=parsed.clean||d.error||'';
       chatHistory.push({role:'assistant',content:_reply});
       saveChat();chSync();

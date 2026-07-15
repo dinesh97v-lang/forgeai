@@ -498,9 +498,9 @@ async function rewriteSearchQuery(userPrompt, history) {
 // ============================================
 // GROQ API — parameterized model
 // ============================================
-async function callGroqModel(model, prompt, sysPrompt, history = []) {
+async function callGroqModel(model, prompt, sysPrompt, history = [], maxTokensOverride = null) {
   const MAX_OUT = { [MODELS.GROQ_8B]: 1500, [MODELS.GROQ_70B]: 4096, [MODELS.GROQ_SCOUT]: 8192 };
-  const maxTok = MAX_OUT[model] ?? 2048;
+  const maxTok = maxTokensOverride ?? MAX_OUT[model] ?? 2048;
   const response = await axios.post(
     'https://api.groq.com/openai/v1/chat/completions',
     {
@@ -524,7 +524,7 @@ async function callGroqModel(model, prompt, sysPrompt, history = []) {
 // ============================================
 // GEMINI API — parameterized model
 // ============================================
-async function callGeminiModel(model, prompt, sysPrompt, history = []) {
+async function callGeminiModel(model, prompt, sysPrompt, history = [], maxTokensOverride = null) {
   const contents = history.map(msg => ({
     role: msg.role === 'assistant' ? 'model' : 'user',
     parts: [{ text: msg.content }]
@@ -536,7 +536,7 @@ async function callGeminiModel(model, prompt, sysPrompt, history = []) {
     {
       system_instruction: { parts: [{ text: sysPrompt }] },
       contents,
-      generationConfig: { maxOutputTokens: 8192 }
+      generationConfig: { maxOutputTokens: maxTokensOverride ?? 8192 }
     },
     { timeout: 60000 }
   );
@@ -591,11 +591,20 @@ LANGUAGE RULE (STRICT): Detect the language of the user's most recent message. I
 
 PRICING: Never mention prices or license fees for employer-provided software or systems (Tally, QuickBooks, CRM, POS, ERP, Core Banking, etc.). ₹ costs are allowed ONLY for small personal practice tools a beginner buys themselves (hand tools, basic kit, etc.).
 
-MANDATORY FORMAT: Your response MUST end with exactly this block as the very last lines — no exceptions:
+MANDATORY FORMAT: Your response MUST end with these two blocks in order — no exceptions:
+
+1. Doubt questions (always include):
 [QUESTIONS]
 question one | question two | question three
 [/QUESTIONS]
-Write exactly 3 short beginner questions (under 12 words each) about the content you just taught. No text after [/QUESTIONS].
+Write exactly 3 short beginner questions (under 12 words each) about the content you just taught.
+
+2. Quick reply (include whenever your response ends with a choice for the user):
+<<QUICK_REPLY>>option1|option2|option3<<END_QUICK_REPLY>>
+Example: <<QUICK_REPLY>>Complete beginner|Know the basics|Intermediate<<END_QUICK_REPLY>>
+Rules: 2–4 short options only, each under 6 words, pipe-separated. NEVER put a full sentence or single question inside — only short clickable phrases. NEVER use any other closing tag — it is always <<END_QUICK_REPLY>>.
+
+No text after either block.
 
 STYLE: Maximum 5 bullet points per response. Prefer short paragraphs. Include one real workplace example per response.`;
 }
@@ -660,7 +669,7 @@ async function callWithFallback(primaryModel, prompt, sysPrompt, history) {
 // If downgrade happens, switches to the compact system prompt so
 // smaller models (8B / Scout) receive a prompt they can follow.
 // ============================================
-async function callWithFieldFallback(primaryModel, prompt, fullSysPrompt, compactSysPrompt, history) {
+async function callWithFieldFallback(primaryModel, prompt, fullSysPrompt, compactSysPrompt, history, maxTokens = null) {
   const isGemini = m => m.startsWith('gemini');
 
   // ── Step 1: try primary with one 429-retry ────────────────────────────────
@@ -670,8 +679,8 @@ async function callWithFieldFallback(primaryModel, prompt, fullSysPrompt, compac
         ? history
         : fitHistory(history, fullSysPrompt, prompt, MODEL_INPUT_LIMITS[primaryModel] ?? 4000);
       const reply = isGemini(primaryModel)
-        ? await callGeminiModel(primaryModel, prompt, fullSysPrompt, safeHistory)
-        : await callGroqModel(primaryModel, prompt, fullSysPrompt, safeHistory);
+        ? await callGeminiModel(primaryModel, prompt, fullSysPrompt, safeHistory, maxTokens)
+        : await callGroqModel(primaryModel, prompt, fullSysPrompt, safeHistory, maxTokens);
       return { reply, model: primaryModel, didFallback: false };
     } catch (err) {
       const status = err.response?.status;
@@ -701,8 +710,8 @@ async function callWithFieldFallback(primaryModel, prompt, fullSysPrompt, compac
         ? history
         : fitHistory(history, compactSysPrompt, prompt, MODEL_INPUT_LIMITS[model] ?? 4000);
       const reply = isGemini(model)
-        ? await callGeminiModel(model, prompt, compactSysPrompt, safeHistory)
-        : await callGroqModel(model, prompt, compactSysPrompt, safeHistory);
+        ? await callGeminiModel(model, prompt, compactSysPrompt, safeHistory, maxTokens)
+        : await callGroqModel(model, prompt, compactSysPrompt, safeHistory, maxTokens);
       return { reply, model, didFallback: true };
     } catch (err) {
       const status = err.response?.status;
@@ -867,7 +876,7 @@ app.post('/api/chat', requireAuth, async (req, res) => {
     return res.status(429).json({ error: 'Innikku 100 messages limit mudinjuchu — naaliku continue pannunga!' });
   }
 
-  const { prompt, history, enterpriseMode, simpleMode, attachment, fieldMode, fieldPreviewMode, forceTest, evaluateTest, sourceUrl } = req.body;
+  const { prompt, history, enterpriseMode, simpleMode, attachment, fieldMode, fieldPreviewMode, forceTest, evaluateTest, sourceUrl, learnLang } = req.body;
   if (!attachment && (!prompt || !prompt.trim())) {
     return res.status(400).json({ error: 'Prompt is empty!' });
   }
@@ -895,19 +904,16 @@ app.post('/api/chat', requireAuth, async (req, res) => {
 
 LANGUAGE RULE (STRICT): Detect the language of the user's most recent message. If it is English, your ENTIRE response must be 100% English — zero Tamil or Tanglish words, including greetings (no 'Vanakkam'), fillers ('irukku', 'pannunga', 'theriyum'), and closing questions. If the user's message is in Tamil script or Tanglish, respond fully in that same style. Never mix languages within one response.
 
-QUICK REPLY BLOCKS — MANDATORY: Whenever you ask the user to choose between options (level check, topic selection, next-step choice, yes/no confirmation), you MUST output the structured quick_reply block instead of a plain-text question. Never ask a choice question as plain text.
+QUICK REPLY BLOCKS — MANDATORY: Whenever you offer the user a choice (level check, topic selection, next-step choice, yes/no confirmation), you MUST output a quick reply block instead of a plain-text question. Never ask a choice question as plain text.
 
-Format (place at the very end of your response, AFTER the [QUESTIONS] block if present):
-<<QUICK_REPLY>>{"type":"quick_reply","question":"Your question?","options":["Option 1","Option 2","Option 3"]}<<END_QUICK_REPLY>>
+Format — pipe-separated options, placed at the very end of your response AFTER the [QUESTIONS] block:
+<<QUICK_REPLY>>Option one|Option two|Option three<<END_QUICK_REPLY>>
 
-WRONG — plain-text choice question (never do this):
-"What is your current level? Are you a complete beginner, do you know the basics, or are you intermediate?"
-
-CORRECT — same question as a quick_reply block:
+Example:
 I'd love to tailor this to where you're at.
-<<QUICK_REPLY>>{"type":"quick_reply","question":"What is your current level?","options":["Complete beginner","Know the basics","Intermediate","Self-taught"]}<<END_QUICK_REPLY>>
+<<QUICK_REPLY>>Complete beginner|Know the basics|Intermediate|Self-taught<<END_QUICK_REPLY>>
 
-Rules: Maximum 4 options. Each option maximum 5 words. ONE quick_reply block per response only. Use ONLY for genuine choice moments — regular teaching stays as plain text.
+Rules: 2–4 options only. Each option maximum 5 words. ONE quick_reply block per response. Options must be short clickable phrases — NEVER full sentences, questions, or encouragements inside the block. ALWAYS include this block when your response ends with a choice question.
 
 CONTENT FOCUS — every lesson must be workplace-oriented. Cover the real day-to-day work processes that actually happen on the job, the industry-standard terms, documents, and tools they will hear at work (job cards, SOPs, quality reports — whatever applies). Explain what seniors and employers expect from a beginner in the first weeks, what common mistakes freshers make and how to avoid them, practical insider tips only experienced people know, and the career growth path in India from junior to senior with realistic salary progression.
 
@@ -915,11 +921,13 @@ AVOID: consumer-level explanations, generic textbook definitions, and content ai
 
 STYLE: Explain like a senior talking to a junior over tea. Maximum 5 bullet points per response — prefer short paragraphs. Every teaching response must include one specific workplace scenario or insider detail, and end with one concrete free/cheap action the learner can do this week (before the [QUESTIONS] block).
 
+RESPONSE BUDGET: Keep the main lesson concise — maximum 5 short sections. The [QUESTIONS] block and <<QUICK_REPLY>> block at the end are MANDATORY — budget your response so they ALWAYS fit. If your lesson content is running long, cut it short. Never cut the end blocks.
+
 CONTENT QUALITY: Only real, accurate information. Real tool names, real document names, realistic ₹ salary figures. If you don't know something specific, say so instead of inventing.
 
 PRICING RULE: NEVER write phrases like "expect to invest", "will cost you", or any ₹ amount for software, systems, or equipment that employers provide. WRONG: "kitchen management software like Aloha — expect to invest ₹50,000". RIGHT: "you'll use kitchen management software like Aloha — the hotel provides this". ₹ costs are allowed ONLY for small personal tools a beginner buys to practice at home (sewing machine, multimeter, makeup kit, basic hand tools). When mentioning employer-provided software by name (Tally, QuickBooks, CRM systems, POS), NEVER include any price, subscription cost, or license fee — not even in brackets. Name the software and say the employer provides it. Nothing else.
 
-When the user's message starts with "📚 Learn:", give a friendly structured roadmap: (1) What this job actually involves day-to-day — 2-3 sentences from a senior's perspective, (2) Core skills and knowledge a fresher must build — step-by-step in order, (3) Adapt this section to the field type. For hands-on/trade fields (electrician, salon, automobile, tailoring): tools and equipment a BEGINNER needs, with realistic ₹ costs. For office/knowledge fields (banking, HR, coding, marketing): software they'll use daily (note that employers provide enterprise systems — never list enterprise license prices or tell freshers to buy them), useful certifications with realistic exam fees, and documents/systems they'll handle at work. (4) Realistic salary progression and career path in India, (5) end with a question inviting them to pick where to start. After the roadmap, end your response with the [QUESTIONS] block containing exactly 3 questions about this field — same format as all teaching responses. This is mandatory — never omit the [QUESTIONS] block from a roadmap response.
+When the user's message starts with "📚 Learn:", give a friendly structured roadmap: (1) What this job actually involves day-to-day — 2-3 sentences from a senior's perspective, (2) Core skills and knowledge a fresher must build — step-by-step in order, (3) Adapt this section to the field type. For hands-on/trade fields (electrician, salon, automobile, tailoring): tools and equipment a BEGINNER needs, with realistic ₹ costs. For office/knowledge fields (banking, HR, coding, marketing): software they'll use daily (note that employers provide enterprise systems — never list enterprise license prices or tell freshers to buy them), useful certifications with realistic exam fees, and documents/systems they'll handle at work. (4) Realistic salary progression and career path in India, (5) end with a question inviting them to pick where to start. After the roadmap, end your response with the [QUESTIONS] block containing exactly 3 questions about this field. Then immediately after [/QUESTIONS], include the <<QUICK_REPLY>> block with 2–4 short options for what to learn first. Both blocks are mandatory — never omit them from a roadmap response.
 
 For all follow-up messages: teach one concept at a time, use real workplace scenarios and examples.
 
@@ -953,6 +961,31 @@ LANGUAGE RULE (STRICT): Detect the language of the user's most recent message. I
     if (isEnterprise) {
       sysPrompt += '\n\nENTERPRISE MODE ACTIVE — generated code must meet production standards:\n- Input validation on all user inputs\n- Proper error handling with try-catch and meaningful error messages\n- Security best practices: no hardcoded secrets, parameterized queries, XSS-safe output\n- Comments explaining key sections\n- After the code, add a short \'Production Checklist\' section listing what to verify before deploying (security, testing, environment variables)';
     }
+  }
+
+  // When a non-English language is explicitly selected, strip the fieldMode auto-detection rule
+  // which says "if message is English, respond in English" — it conflicts with the override below
+  // because field names like "📚 Learn: Coding & Software" are always English text.
+  if (learnLang && learnLang !== 'english' && fieldMode) {
+    sysPrompt = sysPrompt.replace(/\n?LANGUAGE RULE \(STRICT\):[\s\S]*?Never mix languages[^\n]*\./g, '');
+  }
+
+  // Explicit language override for Learn Any Field paths — placed last to win over detection rules
+  if (learnLang && (fieldMode || fieldPreviewMode) && !evaluateTest) {
+    const _markerNote = 'IMPORTANT EXCEPTION — STRUCTURAL MARKERS must stay in exact ASCII:\n' +
+      'Doubt questions use ONLY this format: [QUESTIONS] question1 | question2 | question3 [/QUESTIONS]\n' +
+      'Quick reply buttons use ONLY this format: <<QUICK_REPLY>>option1|option2|option3<<END_QUICK_REPLY>>\n' +
+      'These are TWO SEPARATE formats — NEVER mix them. NEVER write [/QUICK_REPLY] inside a <<QUICK_REPLY>> block — that tag does not exist here. The closing tag for <<QUICK_REPLY>> is ALWAYS <<END_QUICK_REPLY>>. Each option inside <<QUICK_REPLY>> must be a short phrase under 6 words written in the selected language — NEVER full sentences or encouragements. Always include the <<QUICK_REPLY>> block when your response ends with a choice question.';
+    const _li = learnLang === 'tamil'
+      ? 'CRITICAL LANGUAGE OVERRIDE: The user has explicitly chosen Tamil as their response language. You MUST respond entirely in Tamil using Tamil script. This overrides the language detection rule above — even if the user\'s message contains English words, respond only in Tamil script. ' + _markerNote
+      : learnLang === 'tanglish'
+      ? 'CRITICAL LANGUAGE OVERRIDE: The user has explicitly chosen Tanglish as their response language. You MUST respond in Tanglish — Tamil words written in Roman/English letters in a natural, conversational style. This overrides the language detection rule above. ' + _markerNote
+      : learnLang === 'hindi'
+      ? 'CRITICAL LANGUAGE OVERRIDE: The user has explicitly chosen Hindi as their response language. You MUST respond entirely in Hindi using Devanagari script. This overrides the language detection rule above — even if the user\'s message contains English words, respond only in Hindi. ' + _markerNote
+      : learnLang === 'telugu'
+      ? 'CRITICAL LANGUAGE OVERRIDE: The user has explicitly chosen Telugu as their response language. You MUST respond entirely in Telugu using Telugu script. This overrides the language detection rule above — even if the user\'s message contains English words, respond only in Telugu. ' + _markerNote
+      : 'CRITICAL LANGUAGE OVERRIDE: The user has explicitly chosen English as their response language. You MUST respond entirely in English. No Tamil or Tanglish words. ' + _markerNote;
+    sysPrompt += '\n\n' + _li;
   }
 
   // Force test: output machine-readable [TEST] block only — client renders interactive quiz
@@ -1047,11 +1080,13 @@ LANGUAGE RULE (STRICT): Detect the language of the user's most recent message. I
   if (searched && primaryModel === MODELS.GROQ_8B) primaryModel = MODELS.GROQ_70B;
   // Field tutor: always use strongest model — 8b produces fake Tamil words
   if (fieldMode && fieldMode.trim()) {
-    primaryModel = (lang === 'tamil' || lang === 'thanglish') ? MODELS.GEM_FLASH : MODELS.GROQ_70B;
+    const _fl = learnLang || lang;
+    primaryModel = (_fl === 'tamil' || _fl === 'tanglish' || _fl === 'thanglish' || _fl === 'hindi' || _fl === 'telugu') ? MODELS.GEM_FLASH : MODELS.GROQ_70B;
   }
   // Preview card: upgrade 8b for reliable JSON generation
   if (fieldPreviewMode && fieldPreviewMode.trim()) {
-    primaryModel = (lang === 'tamil' || lang === 'thanglish') ? MODELS.GEM_FLASH : MODELS.GROQ_70B;
+    const _fl = learnLang || lang;
+    primaryModel = (_fl === 'tamil' || _fl === 'tanglish' || _fl === 'thanglish' || _fl === 'hindi' || _fl === 'telugu') ? MODELS.GEM_FLASH : MODELS.GROQ_70B;
   }
   // Source card: page content is large — use 70b for better synthesis
   if (sourcePageFetched) {
@@ -1070,11 +1105,22 @@ LANGUAGE RULE (STRICT): Detect the language of the user's most recent message. I
     if (fieldMode && fieldMode.trim()) {
       const fld = fieldMode.trim().slice(0, 100);
       let compactPrompt = makeFieldCompactPrompt(fld);
+      if (learnLang && learnLang !== 'english') {
+        compactPrompt = compactPrompt.replace(/\n?LANGUAGE RULE \(STRICT\):[\s\S]*?Never mix languages[^\n]*\./g, '');
+        const _cMarker = 'Keep [QUESTIONS], [/QUESTIONS], <<QUICK_REPLY>>, <<END_QUICK_REPLY>>, and | in ASCII exactly as shown.';
+        const _cli = learnLang === 'tamil' ? 'MANDATORY: Respond entirely in Tamil script. ' + _cMarker
+          : learnLang === 'tanglish' ? 'MANDATORY: Respond in Tanglish (Tamil written in Roman/English letters). ' + _cMarker
+          : learnLang === 'hindi' ? 'MANDATORY: Respond entirely in Hindi using Devanagari script. ' + _cMarker
+          : learnLang === 'telugu' ? 'MANDATORY: Respond entirely in Telugu using Telugu script. ' + _cMarker
+          : '';
+        if (_cli) compactPrompt = _cli + '\n\n' + compactPrompt;
+      }
       // For forceTest, the compact prompt used by fallback models must also carry the test instruction
       if (forceTest && !evaluateTest) {
         compactPrompt += '\n\nMANDATORY: Do not teach new content. Output ONLY a [TEST] block with exactly 3 short questions based on what was taught. Format:\n[TEST]\nquestion one | question two | question three\n[/TEST]\nNo text before or after the [TEST] block.';
       }
-      const result = await callWithFieldFallback(primaryModel, finalPrompt, sysPrompt, compactPrompt, recentHistory);
+      const _fieldMaxTok = (learnLang === 'tamil' || learnLang === 'hindi' || learnLang === 'telugu') ? 4000 : 2500;
+      const result = await callWithFieldFallback(primaryModel, finalPrompt, sysPrompt, compactPrompt, recentHistory, _fieldMaxTok);
       reply    = result.reply;
       usedModel = result.model;
       console.log(`[model-routing] path=fieldMode model=${usedModel} fallback=${result.didFallback}`);
@@ -1120,7 +1166,7 @@ LANGUAGE RULE (STRICT): Detect the language of the user's most recent message. I
           const snippet = reply.slice(0, 1200);
           const retryPrompt = `Generate exactly 3 short test questions from this lesson content. Output ONLY the [TEST] block.\n\nContent:\n${snippet}`;
           const retrySys = 'Output ONLY a [TEST] block and nothing else. Format: [TEST]\nq1 | q2 | q3\n[/TEST]';
-          const { reply: retryReply } = await callWithFieldFallback(primaryModel, retryPrompt, retrySys, retrySys, []);
+          const { reply: retryReply } = await callWithFieldFallback(primaryModel, retryPrompt, retrySys, retrySys, [], 200);
           parts = _extractTestQs(retryReply);
         } catch (retryErr) {
           console.log('[test-parse] retry failed:', retryErr.message);
@@ -1149,7 +1195,7 @@ LANGUAGE RULE (STRICT): Detect the language of the user's most recent message. I
         console.log('[eval-parse] JSON parse failed — retrying');
         try {
           const retryPrompt = `Your previous response could not be parsed as JSON. Re-output ONLY the evaluation JSON object — no markdown fences, no extra text.\n\nEvaluate these answers:\n${finalPrompt}`;
-          const { reply: retryReply } = await callWithFieldFallback(primaryModel, retryPrompt, sysPrompt, sysPrompt, []);
+          const { reply: retryReply } = await callWithFieldFallback(primaryModel, retryPrompt, sysPrompt, sysPrompt, [], 600);
           evParsed = extractFirstJson(retryReply);
           if (_validEval(evParsed)) reply = retryReply;
         } catch (retryErr) {
@@ -1178,7 +1224,7 @@ LANGUAGE RULE (STRICT): Detect the language of the user's most recent message. I
         const fbPrompt = `Based on this lesson content:\n\n${lessonSnippet}\n\nGenerate exactly 3 short beginner questions (each under 12 words) about it. Output ONLY this format:\n[QUESTIONS]\nquestion one | question two | question three\n[/QUESTIONS]`;
         const fbSys = 'You output only a [QUESTIONS] block and nothing else. No greetings, no explanations, no extra text.';
         // Use callWithFieldFallback so the primary gets a 429-retry before dropping to 8B/Scout
-        const { reply: fbReply } = await callWithFieldFallback(primaryModel, fbPrompt, fbSys, fbSys, []);
+        const { reply: fbReply } = await callWithFieldFallback(primaryModel, fbPrompt, fbSys, fbSys, [], 200);
 
         const fbMatch = fbReply.match(/\[QUESTIONS\]([\s\S]*?)\[\/QUESTIONS\]/i);
         if (fbMatch) {
