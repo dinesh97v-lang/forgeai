@@ -85,10 +85,24 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .ch-del{background:none;border:none;cursor:pointer;color:var(--text3);font-size:16px;padding:0 3px;line-height:1;opacity:0.45;transition:opacity .15s;flex-shrink:0}
 .ch-item:hover .ch-del{opacity:0.8}
 .ch-item.active .ch-del{color:rgba(255,255,255,.7);opacity:1}
+.ch-star{background:none;border:none;cursor:pointer;font-size:12px;padding:0 1px;line-height:1;flex-shrink:0;color:var(--text3);opacity:0;transition:opacity .15s}
+.ch-item:hover .ch-star,.ch-item.ch-starred .ch-star{opacity:1}
+.ch-item.ch-starred .ch-star{color:#f59e0b}
+.ch-item.active .ch-star{color:rgba(255,255,255,.45)}
+.ch-item.active.ch-starred .ch-star{color:rgba(255,255,255,.9)}
+.ch-more{background:none;border:none;cursor:pointer;font-size:15px;padding:0 2px;line-height:1;flex-shrink:0;color:var(--text3);opacity:0;transition:opacity .15s}
+.ch-item:hover .ch-more{opacity:0.6}
+.ch-item.active .ch-more{color:rgba(255,255,255,.6)}
 .proj-item{display:flex;align-items:center;padding:7px 12px;cursor:pointer;font-size:12px;color:var(--text2);border-radius:6px;margin:2px 6px;gap:5px;transition:background .12s;background:#e9e8e4}
 .proj-item:hover{background:#d8d7d1;color:var(--text)}
 .proj-new-btn{display:block;margin:4px 8px 2px;padding:5px 10px;background:transparent;color:var(--accent);border:1px dashed var(--accent);border-radius:var(--r);cursor:pointer;font-size:11px;font-weight:600;text-align:left;font-family:inherit;width:calc(100% - 16px)}
 .proj-new-btn:hover{background:var(--dbg)}
+.prj-card{background:var(--bg3);border:1px solid var(--border);border-radius:var(--r);padding:14px;cursor:pointer;transition:border-color .15s,box-shadow .15s;margin-bottom:10px}
+.prj-card:hover{border-color:var(--accent);box-shadow:0 2px 8px rgba(0,0,0,.08)}
+.prj-card-name{font-size:13px;font-weight:600;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0}
+.prj-card-desc{font-size:11px;color:var(--text3);padding-left:28px;margin-top:2px}
+.prj-card-menu{background:none;border:none;cursor:pointer;font-size:16px;padding:0 2px;line-height:1;color:var(--text3);opacity:0;transition:opacity .15s;flex-shrink:0;margin-left:auto}
+.prj-card:hover .prj-card-menu{opacity:.7}
 .proj-picker{position:fixed;background:var(--bg);border:1px solid var(--border2);border-radius:var(--r);box-shadow:0 4px 20px rgba(0,0,0,.15);z-index:9999;min-width:160px;padding:4px 0;display:none;max-height:220px;overflow-y:auto}
 .proj-picker-hd{padding:5px 12px;font-size:10px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid var(--border)}
 .proj-picker-item{padding:8px 14px;cursor:pointer;color:var(--text2);font-size:12px}
@@ -618,28 +632,22 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
           <div class="ni ni-sub" onclick="go('oneprompt',this)"><span class="ni-icon">⚡</span>One Prompt<span class="nbadge r">New</span></div>
         </div>
       </div>
-      <div class="ni" onclick="go('deploy',this)"><span class="ni-icon">🚀</span>Deploy<span class="nbadge g">Live</span></div>
-      <div class="ni" onclick="go('test',this)"><span class="ni-icon">🧪</span>Testing<span class="nbadge r">2</span></div>
-      <div class="ni" onclick="go('memory',this)"><span class="ni-icon">🧠</span>Memory</div>
-      <div class="ni" onclick="go('api',this)"><span class="ni-icon">⚡</span>API Studio</div>
-      <div class="ni" onclick="go('database',this)"><span class="ni-icon">🗄</span>Database</div>
-      <div class="ni" onclick="go('monitor',this)"><span class="ni-icon">📊</span>Monitor<span class="nbadge a">3</span></div>
-      <div class="ni" onclick="go('tamil',this)"><span class="ni-icon">🌟</span>Tamil AI<span class="nbadge r">New</span></div>
-      <div class="ni" onclick="go('whatsapp',this)"><span class="ni-icon">💬</span>WhatsApp<span class="nbadge r">New</span></div>
-      <div class="ni" onclick="go('privacy',this)"><span class="ni-icon">🛡</span>Privacy<span class="nbadge g">99.9%</span></div>
-      <div class="nav-sec">Integrations</div>
-      <div class="ni"><span class="ni-icon">🐙</span>GitHub<span class="nbadge g">✓</span></div>
-      <div class="ni"><span class="ni-icon">▲</span>Vercel<span class="nbadge g">✓</span></div>
-      <div class="ni"><span class="ni-icon">🚂</span>Railway<span class="nbadge g">✓</span></div>
-      <div class="ni"><span class="ni-icon">🐳</span>Docker<span class="nbadge g">✓</span></div>
-      <div class="ni"><span class="ni-icon">💳</span>Razorpay<span class="nbadge g">✓</span></div>
-      <div class="ai-group open" id="proj-group">
-        <div class="ai-group-hd" onclick="toggleAiTools(this.parentElement)">📁 Projects<span class="ai-group-arr">▾</span></div>
-        <div class="ai-group-body">
-          <button class="proj-new-btn" onclick="prjNew()">+ New Project</button>
-          <div id="proj-list"></div>
-        </div>
-      </div>
+      <div class="ni" data-feature="deploy" onclick="go('deploy',this)"><span class="ni-icon">🚀</span>Deploy<span class="nbadge g">Live</span></div>
+      <div class="ni" data-feature="testing" onclick="go('test',this)"><span class="ni-icon">🧪</span>Testing<span class="nbadge r">2</span></div>
+      <div class="ni" data-feature="memory" onclick="go('memory',this)"><span class="ni-icon">🧠</span>Memory</div>
+      <div class="ni" data-feature="apiStudio" onclick="go('api',this)"><span class="ni-icon">⚡</span>API Studio</div>
+      <div class="ni" data-feature="database" onclick="go('database',this)"><span class="ni-icon">🗄</span>Database</div>
+      <div class="ni" data-feature="monitor" onclick="go('monitor',this)"><span class="ni-icon">📊</span>Monitor<span class="nbadge a">3</span></div>
+      <div class="ni" data-feature="tamilAI" onclick="go('tamil',this)"><span class="ni-icon">🌟</span>Tamil AI<span class="nbadge r">New</span></div>
+      <div class="ni" data-feature="whatsapp" onclick="go('whatsapp',this)"><span class="ni-icon">💬</span>WhatsApp<span class="nbadge r">New</span></div>
+      <div class="ni" data-feature="privacy" onclick="go('privacy',this)"><span class="ni-icon">🛡</span>Privacy<span class="nbadge g">99.9%</span></div>
+      <div class="nav-sec" data-feature-group="github,vercel,railway,docker,razorpay">Integrations</div>
+      <div class="ni" data-feature="github"><span class="ni-icon">🐙</span>GitHub<span class="nbadge g">✓</span></div>
+      <div class="ni" data-feature="vercel"><span class="ni-icon">▲</span>Vercel<span class="nbadge g">✓</span></div>
+      <div class="ni" data-feature="railway"><span class="ni-icon">🚂</span>Railway<span class="nbadge g">✓</span></div>
+      <div class="ni" data-feature="docker"><span class="ni-icon">🐳</span>Docker<span class="nbadge g">✓</span></div>
+      <div class="ni" data-feature="razorpay"><span class="ni-icon">💳</span>Razorpay<span class="nbadge g">✓</span></div>
+      <div class="ni" id="proj-nav-item" onclick="go('projects',this)"><span class="ni-icon">📁</span>Projects</div>
     </div>
     <div id="simple-nav" style="display:none">
       <div class="nav-sec">For You</div>
@@ -662,9 +670,9 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
           <div class="ni ni-sub" onclick="go('business',this)"><span class="ni-icon">💼</span>Business</div>
         </div>
       </div>
-      <div class="ni" onclick="go('tamil',this)"><span class="ni-icon">🌟</span>Tamil AI<span class="nbadge r">New</span></div>
-      <div class="ni" onclick="go('whatsapp',this)"><span class="ni-icon">💬</span>WhatsApp<span class="nbadge r">New</span></div>
-      <div class="ni" onclick="go('privacy',this)"><span class="ni-icon">🛡</span>Privacy</div>
+      <div class="ni" data-feature="tamilAI" onclick="go('tamil',this)"><span class="ni-icon">🌟</span>Tamil AI<span class="nbadge r">New</span></div>
+      <div class="ni" data-feature="whatsapp" onclick="go('whatsapp',this)"><span class="ni-icon">💬</span>WhatsApp<span class="nbadge r">New</span></div>
+      <div class="ni" data-feature="privacy" onclick="go('privacy',this)"><span class="ni-icon">🛡</span>Privacy</div>
     </div>
     </div>
     <div class="sb-bot">
@@ -970,6 +978,14 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
       </div>
     </div>
 
+    <div class="panel" id="panel-coming-soon">
+      <div style="display:flex;align-items:center;justify-content:center;height:100%;flex-direction:column;gap:8px;color:var(--text2)">
+        <div style="font-size:36px">&#128274;</div>
+        <div style="font-size:15px;font-weight:600;color:var(--text)">Coming Soon</div>
+        <div style="font-size:12px">This feature is not available yet.</div>
+      </div>
+    </div>
+
     <!-- STUDENT -->
     <div class="panel" id="panel-student">
       <div class="scroll">
@@ -1054,6 +1070,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
     <!-- PROJECTS -->
     <div class="panel" id="panel-projects">
       <div style="padding:12px 14px;border-bottom:1px solid var(--border);flex-shrink:0;display:flex;align-items:center;gap:8px">
+        <button id="proj-back-btn" onclick="prjShowAll()" style="display:none;background:none;border:none;cursor:pointer;font-size:13px;padding:0 6px 0 0;color:var(--accent);font-family:inherit;font-weight:600">&#8592; All</button>
         <span style="font-size:18px">📁</span>
         <div id="proj-panel-title" style="font-size:14px;font-weight:700;color:var(--text);flex:1">Projects</div>
         <button onclick="prjNew()" style="font-size:11px;padding:4px 10px;border:1px solid var(--accent);border-radius:var(--r);background:transparent;color:var(--accent);cursor:pointer;font-weight:600;font-family:inherit">+ New</button>
@@ -1087,9 +1104,35 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
   </div>
 </div>
 <div id="proj-picker" class="proj-picker"></div>
+<div id="ch-more-menu" class="proj-picker"></div>
+<div id="prj-menu" class="proj-picker"></div>
+<div id="qr-hints" style="display:none">
+  <span data-lang="tamil">அல்லது உங்கள் பதிலை தட்டச்சு செய்யவும் ✍️</span>
+  <span data-lang="tanglish">illa unga sondha reply type pannunga ✍️</span>
+  <span data-lang="hindi">या अपना जवाब टाइप करें ✍️</span>
+  <span data-lang="telugu">లేదా మీ సొంత జవాబును టైప్ చేయండి ✍️</span>
+  <span data-lang="english">or type your own answer ✍️</span>
+</div>
 
 <script>
-var panels=['chat','search','deploy','test','memory','api','database','monitor','oneprompt','tamil','whatsapp','privacy','student','finance','shop','travel','health','govt','business','projects'];
+const FEATURES={
+  deploy:false,
+  testing:false,
+  memory:false,
+  apiStudio:false,
+  database:false,
+  monitor:false,
+  privacy:false,
+  whatsapp:false,
+  tamilAI:false,
+  github:false,
+  vercel:false,
+  railway:false,
+  docker:false,
+  razorpay:false
+};
+var _featureRoutes={deploy:'deploy',test:'testing',memory:'memory',api:'apiStudio',database:'database',monitor:'monitor',tamil:'tamilAI',whatsapp:'whatsapp',privacy:'privacy'};
+var panels=['chat','search','deploy','test','memory','api','database','monitor','oneprompt','tamil','whatsapp','privacy','student','finance','shop','travel','health','govt','business','projects','coming-soon'];
 var titles={chat:'AI Chat',search:'Private Search',deploy:'Deploy Manager',test:'AI Testing',memory:'Company Memory',api:'API Studio',database:'Database Manager',monitor:'App Monitor',oneprompt:'One Prompt - Full App',tamil:'Tamil AI Coding',whatsapp:'WhatsApp Dev',privacy:'Privacy & Security',student:'Student Assistant',finance:'Personal Finance',shop:'Smart Shopping',travel:'Travel Planner',health:'Health Assistant',govt:'Govt Services',business:'Business Tools',projects:'Projects'};
 var badges={chat:'Private',search:'No tracking',deploy:'3 apps',test:'Live checks',memory:'15,847 items',api:'5 endpoints',database:'1.2M rows',monitor:'3 alerts',oneprompt:'New Feature!',tamil:'World First!',whatsapp:'India First!',privacy:'99.9% secure',student:'Tamil AI',finance:'Secure',shop:'No ads',travel:'Best deals',health:'Private',govt:'Tamil guide',business:'3 pending',projects:'My Work'};
 
@@ -1109,7 +1152,23 @@ function enterMode(mode){
 }
 
 function toggleAiTools(g){g.classList.toggle('open');}
+function _applyFeatureFlags(){
+  document.querySelectorAll('[data-feature]').forEach(function(el){
+    if(FEATURES[el.getAttribute('data-feature')]===false)el.parentNode.removeChild(el);
+  });
+  document.querySelectorAll('[data-feature-group]').forEach(function(el){
+    var keys=el.getAttribute('data-feature-group').split(',');
+    if(keys.every(function(k){return FEATURES[k]===false;}))el.parentNode.removeChild(el);
+  });
+}
 function go(name,el){
+  var _gf=_featureRoutes[name];
+  if(_gf!==undefined&&!FEATURES[_gf]){
+    panels.forEach(function(p){var x=document.getElementById('panel-'+p);if(x)x.classList.remove('active');});
+    document.querySelectorAll('.ni').forEach(function(n){n.classList.remove('active');});
+    var cs=document.getElementById('panel-coming-soon');if(cs)cs.classList.add('active');
+    return;
+  }
   if(name!=='chat')pvClose();
   panels.forEach(function(p){
     var x=document.getElementById('panel-'+p);
@@ -1131,6 +1190,7 @@ function go(name,el){
   document.getElementById('tb-title').textContent=m;
   document.getElementById('tb-badge').textContent=b;
   if(name==='test') tpLoad();
+  if(name==='projects') prjShowAll();
 }
 
 function switchMode(mode){
@@ -1177,6 +1237,7 @@ function userInitials(){return currentUser?currentUser.name.trim().split(/\s+/).
 var chatHistory=[];
 var tamilHistory=[];
 var enterpriseMode=localStorage.getItem('forgeai_enterprise')==='true';
+var _sendPending=false;
 function toggleEnterprise(){enterpriseMode=!enterpriseMode;localStorage.setItem('forgeai_enterprise',enterpriseMode);updateEnterpriseUI();}
 function updateEnterpriseUI(){var t=document.getElementById('ent-toggle');var k=document.getElementById('ent-knob');var l=document.getElementById('ent-label');if(!t)return;if(enterpriseMode){t.style.background='#E8A800';k.style.transform='translateX(14px)';l.style.color='#9A6E00';}else{t.style.background='var(--border2)';k.style.transform='translateX(0)';l.style.color='var(--text2)';}}
 function saveChat(){chatHistory=chatHistory.slice(-50);localStorage.setItem('forgeai_chat_history',JSON.stringify(chatHistory));}
@@ -1199,7 +1260,13 @@ function chMakeTitle(txt){var s=String(txt||'').trim().split(/\s+/).slice(0,6).j
 function chDraw(){
   var el=document.getElementById('ch-list');
   if(!el){console.warn('[chDraw] #ch-list missing');return;}
-  var all=chAll().slice().sort(function(a,b){return (b.updatedAt||0)-(a.updatedAt||0);});
+  // Exclude chats moved to a project; sort starred first, then by recency
+  var all=chAll().filter(function(s){return !s.projectId;})
+    .sort(function(a,b){
+      var as=!!a.starred,bs=!!b.starred;
+      if(as!==bs)return as?-1:1;
+      return(b.updatedAt||0)-(a.updatedAt||0);
+    });
   var cur=chCurId();
   console.log('[chDraw] sessions='+all.length+' active='+cur);
   if(!all.length){
@@ -1208,12 +1275,18 @@ function chDraw(){
   }
   var html='';
   for(var i=0;i<all.length;i++){
-    var s=all[i],isAct=(s.id===cur);
+    var s=all[i],isAct=(s.id===cur),isStarred=!!s.starred;
+    // Divider between pinned and unpinned groups
+    if(i>0&&!isStarred&&!!all[i-1].starred){
+      html+='<div style="border-top:1px solid var(--border);margin:4px 8px 2px"></div>';
+    }
     var bg=isAct?'background:var(--accent);color:#fff;':'background:#e9e8e4;color:var(--text2);';
     var tx=String(s.title||'New Chat').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-    html+='<div class="ch-item'+(isAct?' active':'')+'" data-id="'+s.id+'" style="display:flex;align-items:center;padding:8px 12px;cursor:pointer;font-size:12px;border-radius:6px;margin:2px 6px;gap:4px;'+bg+'">'
-      +'<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+tx+'</span>'
-      +'<button data-del="'+s.id+'" style="background:none;border:none;cursor:pointer;font-size:16px;padding:0 2px;flex-shrink:0;line-height:1;'+(isAct?'color:rgba(255,255,255,.7)':'color:var(--text3);opacity:0.45')+'" title="Delete">×</button>'
+    html+='<div class="ch-item'+(isAct?' active':'')+(isStarred?' ch-starred':'')+'" data-id="'+s.id+'" style="display:flex;align-items:center;padding:8px 12px;cursor:pointer;font-size:12px;border-radius:6px;margin:2px 6px;gap:4px;'+bg+'">'
+      +'<button class="ch-star" data-star="'+s.id+'" title="'+(isStarred?'Unpin':'Pin')+'">'+(isStarred?'&#9733;':'&#9734;')+'</button>'
+      +'<span class="ch-title">'+tx+'</span>'
+      +'<button class="ch-more" data-more="'+s.id+'" title="More options">&#8942;</button>'
+      +'<button class="ch-del" data-del="'+s.id+'" style="background:none;border:none;cursor:pointer;font-size:16px;padding:0 2px;flex-shrink:0;line-height:1;'+(isAct?'color:rgba(255,255,255,.7)':'color:var(--text3);opacity:0.45')+'" title="Delete">&#215;</button>'
       +'</div>';
   }
   el.innerHTML=html;
@@ -1237,6 +1310,64 @@ function chSync(){
   chStore(all);
   console.log('[chSync] id='+id+' title="'+all[idx].title+'" msgs='+chatHistory.length);
   chDraw();
+}
+function chSaveToOrigin(id,msg){
+  // Re-reads localStorage so a concurrent tab's writes are not overwritten
+  var all=chAll();
+  for(var i=0;i<all.length;i++){
+    if(all[i].id===id){
+      if(!Array.isArray(all[i].messages))all[i].messages=[];
+      all[i].messages.push(msg);
+      all[i].messages=all[i].messages.slice(-50);
+      all[i].updatedAt=Date.now();
+      chStore(all);
+      chDraw();
+      return;
+    }
+  }
+  console.warn('[chSaveToOrigin] session not found:',id);
+}
+function chToggleStar(id){
+  var all=chAll();
+  for(var i=0;i<all.length;i++){if(all[i].id===id){all[i].starred=!all[i].starred;break;}}
+  chStore(all);chDraw();
+}
+var _chMoreAnchor=null;
+function showChMoreMenu(chatId,anchorEl){
+  var mn=document.getElementById('ch-more-menu');
+  var all=chAll(),chat=null;
+  for(var i=0;i<all.length;i++){if(all[i].id===chatId){chat=all[i];break;}}
+  if(!chat)return;
+  _chMoreAnchor=anchorEl;
+  mn.innerHTML='<div class="proj-picker-hd">Chat options</div>'
+    +(chat.projectId
+      ?'<div class="proj-picker-item" onclick="chClearProj(\''+chatId+'\')">Remove from project</div>'
+      :'<div class="proj-picker-item" onclick="chMoveToProj(\''+chatId+'\')">Move to project</div>'
+    );
+  var rect=anchorEl.getBoundingClientRect();
+  mn.style.display='block';
+  var h=Math.min(mn.scrollHeight,200);
+  var top=rect.bottom+4;
+  if(top+h>window.innerHeight-8)top=rect.top-h-4;
+  mn.style.left=Math.min(rect.left,window.innerWidth-170)+'px';
+  mn.style.top=top+'px';
+}
+function chMoveToProj(chatId){
+  document.getElementById('ch-more-menu').style.display='none';
+  showProjPicker(_chMoreAnchor,function(projId){
+    var all=chAll();
+    for(var i=0;i<all.length;i++){if(all[i].id===chatId){all[i].projectId=projId;break;}}
+    chStore(all);chDraw();prjDraw();
+    notify('Chat moved to project!');
+  });
+}
+function chClearProj(chatId){
+  document.getElementById('ch-more-menu').style.display='none';
+  var all=chAll();
+  for(var i=0;i<all.length;i++){if(all[i].id===chatId){delete all[i].projectId;break;}}
+  chStore(all);chDraw();prjDraw();
+  if(window._curProjId)prjOpen(window._curProjId);
+  notify('Chat removed from project!');
 }
 function chNewChat(){
   pvClose(); pvFiles={html:'',css:'',js:'',reactNative:{}};
@@ -1663,6 +1794,39 @@ function pvLoadIframe(html){
   f.style.cssText='width:100%;height:100%;border:none;background:#fff';
   f.srcdoc=html; live.appendChild(f);
 }
+// JS-only fallback shell: wraps bare JS in a minimal page that captures
+// console.log / .error / .warn and displays each call as a visible line.
+// Used when a JS block's Preview is clicked but no HTML file exists yet.
+function pvBuildJsShell(){
+  var js=pvFiles.js||'';
+  var patch=
+    '(function(){'+
+      'var out=document.getElementById("pv-out");'+
+      'function _pvA(cls,args){'+
+        'var line=Array.prototype.slice.call(args).map(function(a){'+
+          'try{return typeof a==="object"?JSON.stringify(a,null,2):String(a);}catch(e){return String(a);}'+
+        '}).join(" ");'+
+        'var el=document.createElement("span");'+
+        'el.className=cls;el.textContent=line;out.appendChild(el);'+
+      '}'+
+      'console.log=function(){_pvA("pv-log",arguments);};'+
+      'console.error=function(){_pvA("pv-err",arguments);};'+
+      'console.warn=function(){_pvA("pv-warn",arguments);};'+
+      'window.onerror=function(m,s,l){_pvA("pv-err",["[Error] "+m+" (line "+l+")"]);return true;};'+
+    '})();';
+  return '<!DOCTYPE html><html><head><meta charset="utf-8">'+
+    '<style>'+
+    'body{font-family:monospace;background:#0f172a;color:#e2e8f0;margin:0;padding:16px;box-sizing:border-box}'+
+    '#pv-hdr{font-size:10px;color:#64748b;margin-bottom:10px;padding-bottom:8px;border-bottom:1px solid #1e293b}'+
+    '#pv-out{white-space:pre-wrap;font-size:13px;line-height:1.6;margin:0}'+
+    '.pv-log{color:#e2e8f0;display:block}.pv-warn{color:#fbbf24;display:block}.pv-err{color:#f87171;display:block}'+
+    '</style></head><body>'+
+    '<div id="pv-hdr">JS console output</div>'+
+    '<pre id="pv-out"></pre>'+
+    '<script>'+patch+'<\/script>'+
+    '<script>\n'+js+'\n<\/script>'+
+    '</body></html>';
+}
 function pvRender(){
   if(Object.keys(pvFiles.reactNative).length>0){pvLoadSnack(pvBuildRNFiles());return;}
   pvCode=pvBuild(); if(!pvCode) return;
@@ -1701,9 +1865,14 @@ function pvOpen(preId,fileKey){
   }
   // Web: no HTML yet
   if(!pvFiles.html&&fileKey!=='html'){
-    requestAnimationFrame(function(){
-      pvLoadIframe('<body style="font-family:sans-serif;padding:24px 16px;text-align:center;margin-top:60px;color:#888;font-size:14px;line-height:1.7">HTML file innum illa —<br>first HTML code vaangunga,<br>appo full preview varum</body>');
-    });
+    if(pvFiles.js){
+      // JS-only conversation: show console output shell instead of "no HTML" message
+      requestAnimationFrame(function(){pvLoadIframe(pvBuildJsShell());});
+    }else{
+      requestAnimationFrame(function(){
+        pvLoadIframe('<body style="font-family:sans-serif;padding:24px 16px;text-align:center;margin-top:60px;color:#888;font-size:14px;line-height:1.7">HTML file innum illa —<br>first HTML code vaangunga,<br>appo full preview varum</body>');
+      });
+    }
     return;
   }
   pvCode=pvBuild();
@@ -1813,11 +1982,46 @@ function flParseQuickReply(text){
     .replace(/\[\/QUICK_REPLY\]\s*<<END_QUICK_REPLY>>/gi,'<<END_QUICK_REPLY>>')
     .replace(/\[\/QUICK_REPLY\]/gi,'<<END_QUICK_REPLY>>');
   var m=normalized.match(/<<QUICK_REPLY>>([\s\S]*?)<<END_QUICK_REPLY>>/i);
-  if(!m)return{clean:text||'',qr:null};
+  if(!m){
+    // Fallback: <<QUICK_REPLY>> present but close tag missing — recover or strip
+    var openIdx=normalized.search(/<<QUICK_REPLY>>/i);
+    if(openIdx===-1)return{clean:text||'',qr:null};
+    var clean=normalized.slice(0,openIdx).trim();
+    var tail=normalized.slice(openIdx).replace(/^<<QUICK_REPLY>>\s*/i,'');
+    // Strip HTML entities (e.g. &#x20;) models sometimes append after JSON
+    tail=tail.replace(/&[a-z0-9#]+;/gi,' ').trim();
+    // Try pipe-separated on first non-empty line
+    var firstLine=(tail.split('\n').filter(function(l){return l.trim().length>0;})[0]||'').trim();
+    var opts=firstLine.split('|').map(function(o){return o.trim();}).filter(function(o){return o.length>0&&o.length<80;});
+    if(opts.length>=3&&opts[0].endsWith('?')){clean=(clean?clean+'\n':'')+opts[0];opts=opts.slice(1);}
+    if(opts.length>=2){console.warn('[quick_reply] recovered from unclosed marker (pipe)');return{clean:clean,qr:{options:opts.slice(0,4)}};}
+    // Try JSON with balanced brace counting
+    var js=tail.indexOf('{');
+    if(js!==-1){
+      var depth=0,je=-1;
+      for(var i=js;i<tail.length;i++){if(tail[i]==='{')depth++;else if(tail[i]==='}'){depth--;if(depth===0){je=i;break;}}}
+      if(je>js){
+        try{
+          var qr=JSON.parse(tail.slice(js,je+1));
+          if(qr&&Array.isArray(qr.options)&&qr.options.length>=2){console.warn('[quick_reply] recovered from unclosed marker (JSON)');return{clean:clean,qr:{options:qr.options.slice(0,4)}};}
+        }catch(err){console.warn('[quick_reply] unclosed marker JSON parse failed:',err.message);}
+      }
+    }
+    // Could not parse — return clean text with entire marker block stripped
+    console.warn('[quick_reply] stripped unparseable unclosed marker');
+    return{clean:clean,qr:null};
+  }
   var clean=normalized.replace(/\s*<<QUICK_REPLY>>[\s\S]*?<<END_QUICK_REPLY>>/i,'').trim();
   var raw=m[1].trim();
   // Primary: pipe-separated format — opt1|opt2|opt3
   var opts=raw.split('|').map(function(o){return o.trim();}).filter(function(o){return o.length>0&&o.length<80;});
+  // If the AI placed the choice question inside the marker as the first pipe item (ends with '?'),
+  // promote it to visible bubble text so the user sees it instead of a pill button.
+  // Only promote when at least 2 real options remain after removing it.
+  if(opts.length>=3&&opts[0].endsWith('?')){
+    clean=(clean?clean+'\n':'')+opts[0];
+    opts=opts.slice(1);
+  }
   if(opts.length>=2)return{clean:clean,qr:{options:opts.slice(0,4)}};
   // Fallback: JSON format (some models may still emit it)
   try{
@@ -1835,12 +2039,13 @@ function flRenderQuickReply(qr,msgs){
   var hint=document.createElement('div');
   hint.setAttribute('data-qr-hint','1');
   hint.style.cssText='font-size:10px;color:var(--text2);padding:3px 0 0 2px;width:100%';
-  var _qrHints={tamil:'அல்லது உங்கள் பதிலை தட்டச்சு செய்யவும் ✍️',tanglish:'illa unga sondha reply type pannunga ✍️',hindi:'या अपना जवाब टाइप करें ✍️',telugu:'లేదా మీ సొంత జవాబును టైప్ చేయండి ✍️',english:'or type your own answer ✍️'};
-  hint.textContent=_qrHints[_learnLang]||_qrHints.english;
+  var _hintEl=document.querySelector('#qr-hints [data-lang="'+(_learnLang||'english')+'"]')||document.querySelector('#qr-hints [data-lang="english"]');
+  hint.textContent=_hintEl?_hintEl.textContent:'or type your own answer ✍️';
   bar.appendChild(hint);
   msgs.appendChild(bar);msgs.scrollTop=msgs.scrollHeight;
 }
 function flQrClick(btn){
+  if(_sendPending)return;
   var opt=btn.dataset.opt;
   var bar=btn.parentElement;
   bar.querySelectorAll('.fl-qr-btn').forEach(function(b){b.disabled=true;});
@@ -1850,7 +2055,18 @@ function flQrClick(btn){
 }
 function flParseQuestions(reply){
   var m=(reply||'').match(/\[QUESTIONS\]\s*([\s\S]*?)\s*\[\/QUESTIONS\]/i);
-  if(!m)return{clean:reply||'',questions:[]};
+  if(!m){
+    // Fallback: [QUESTIONS] present but [/QUESTIONS] missing — recover or strip
+    var openIdx=(reply||'').search(/\[QUESTIONS\]/i);
+    if(openIdx===-1)return{clean:reply||'',questions:[]};
+    var clean=(reply||'').slice(0,openIdx).trim();
+    var tail=(reply||'').slice(openIdx).replace(/^\[QUESTIONS\]\s*/i,'');
+    var firstLine=(tail.split('\n').filter(function(l){return l.trim().length>0;})[0]||'').trim();
+    var qs=firstLine.split('|').map(function(q){return q.trim().replace(/\s*\.\.\.\[truncated\]/gi,'');}).filter(function(q){return q.length>0;});
+    if(qs.length>=1){console.warn('[questions] recovered from unclosed [QUESTIONS] marker');return{clean:clean,questions:qs};}
+    console.warn('[questions] stripped unparseable unclosed [QUESTIONS] marker');
+    return{clean:clean,questions:[]};
+  }
   var clean=(reply||'').replace(/\s*\[QUESTIONS\][\s\S]*?\[\/QUESTIONS\]/i,'').trim();
   var qs=m[1].split('|').map(function(q){return q.trim().replace(/\s*\.\.\.\[truncated\]/gi,'');}).filter(function(q){return q.length>0;});
   return{clean:clean,questions:qs};
@@ -2122,7 +2338,18 @@ function attachHandle(file){
   if(isImg)reader.readAsDataURL(file);else reader.readAsText(file);
 }
 
+function _lockSend(){
+  _sendPending=true;
+  var b=document.querySelector('.cin-row .sbtn');
+  if(b){b.disabled=true;b.style.opacity='0.45';}
+}
+function _unlockSend(){
+  _sendPending=false;
+  var b=document.querySelector('.cin-row .sbtn');
+  if(b){b.disabled=false;b.style.opacity='';}
+}
 function send(){
+  if(_sendPending)return;
   var inp=document.getElementById('chat-in');
   var t=inp.value.trim();if(!t&&!attachData)return;
   var msgs=document.getElementById('chat-msgs');
@@ -2163,52 +2390,68 @@ function send(){
   if(_ft)fetchBody.forceTest=true;
   if(chatFieldMode)console.log('[test-trigger] count='+_flTeachCount+' forceTest='+_ft);
   if(attSnap)fetchBody.attachment={type:attSnap.type,name:attSnap.name,mimeType:attSnap.mimeType,data:attSnap.data};
+  _lockSend();
+  var origChatId=chCurId();
   fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(fetchBody)})
     .then(function(r){return r.json();})
     .then(function(d){
       var ty=document.getElementById('typ');if(ty)ty.remove();
+      var sameChat=chCurId()===origChatId;
       // ── Quiz card: server returned structured test questions ───────────────
       if(d.testQuestions&&d.testQuestions.length>=1){
         var qcId='fl-quiz-card-'+Date.now();
-        chatHistory.push({role:'assistant',content:'[quiz: '+d.testQuestions.join(' | ')+']'});
-        saveChat();chSync();
-        flRenderQuizCard(d.testQuestions,msgs,qcId);
-        if(chatFieldMode){if(_ft&&!d.error){_flTeachCount=0;}flRenderDoubtChips([],msgs);}
-        pvAutoUpdate();return;
+        if(sameChat){
+          chatHistory.push({role:'assistant',content:'[quiz: '+d.testQuestions.join(' | ')+']'});
+          saveChat();chSync();
+          flRenderQuizCard(d.testQuestions,msgs,qcId);
+          if(chatFieldMode){if(_ft&&!d.error){_flTeachCount=0;}flRenderDoubtChips([],msgs);}
+          pvAutoUpdate();
+        }else{
+          chSaveToOrigin(origChatId,{role:'assistant',content:'[quiz: '+d.testQuestions.join(' | ')+']'});
+        }
+        _unlockSend();return;
       }
       var parsed=chatFieldMode?flParseQuestions(d.reply||''):{clean:d.reply||'',questions:[]};
       var _qrParsed=flParseQuickReply(parsed.clean||'');
       parsed.clean=_qrParsed.clean;
       var _reply=parsed.clean||d.error||'';
-      chatHistory.push({role:'assistant',content:_reply});
-      saveChat();chSync();
-      var ai=document.createElement('div');ai.className='msg';
-      var searchBadge=d.searched?'<span style="font-size:10px;padding:2px 7px;border-radius:8px;font-weight:700;background:var(--ibg);color:var(--info);margin-right:4px">🔍 Web search</span>':'';
-      var entBadge=d.enterprise?'<span style="font-size:10px;padding:2px 7px;border-radius:8px;font-weight:700;background:#FFF3CD;color:#9A6E00;margin-right:4px">⚡ Enterprise</span>':'';
-      var badge='<div style="margin-top:5px;display:flex;align-items:center;flex-wrap:wrap;gap:2px">'+searchBadge+entBadge+'<span style="font-size:10px;padding:2px 7px;border-radius:8px;font-weight:700;background:var(--sbg);color:var(--success);margin-right:4px">'+esc(d.model||'AI')+'</span><span style="font-size:10px;color:var(--text3)">'+esc(d.time||'')+'</span></div>';
-      ai.innerHTML='<div class="mav ai">F</div><div><div class="bub">'+formatMarkdown(_reply||'Error')+'</div>'+badge+aiActBar()+'</div>';
-      msgs.appendChild(ai);msgs.scrollTop=msgs.scrollHeight;
-      if(/```/.test(_reply)){
-        var ccId='cc-'+Date.now();
-        _ccStore[ccId]={files:null,fixedFiles:null,lastIssues:[]};
-        var ccWrap=document.createElement('div');ccWrap.className='cc-wrap';ccWrap.id=ccId;
-        ccWrap.innerHTML='<button class="cc-check-btn" onclick="ccRunCheck(\''+ccId+'\')">&#10003; Check &amp; Download ZIP</button>';
-        msgs.appendChild(ccWrap);
+      if(sameChat){
+        chatHistory.push({role:'assistant',content:_reply});
+        saveChat();chSync();
+        var ai=document.createElement('div');ai.className='msg';
+        var searchBadge=d.searched?'<span style="font-size:10px;padding:2px 7px;border-radius:8px;font-weight:700;background:var(--ibg);color:var(--info);margin-right:4px">🔍 Web search</span>':'';
+        var entBadge=d.enterprise?'<span style="font-size:10px;padding:2px 7px;border-radius:8px;font-weight:700;background:#FFF3CD;color:#9A6E00;margin-right:4px">⚡ Enterprise</span>':'';
+        var badge='<div style="margin-top:5px;display:flex;align-items:center;flex-wrap:wrap;gap:2px">'+searchBadge+entBadge+'<span style="font-size:10px;padding:2px 7px;border-radius:8px;font-weight:700;background:var(--sbg);color:var(--success);margin-right:4px">'+esc(d.model||'AI')+'</span><span style="font-size:10px;color:var(--text3)">'+esc(d.time||'')+'</span></div>';
+        ai.innerHTML='<div class="mav ai">F</div><div><div class="bub">'+formatMarkdown(_reply||'Error')+'</div>'+badge+aiActBar()+'</div>';
+        msgs.appendChild(ai);msgs.scrollTop=msgs.scrollHeight;
+        if(/```/.test(_reply)){
+          var ccId='cc-'+Date.now();
+          _ccStore[ccId]={files:null,fixedFiles:null,lastIssues:[]};
+          var ccWrap=document.createElement('div');ccWrap.className='cc-wrap';ccWrap.id=ccId;
+          ccWrap.innerHTML='<button class="cc-check-btn" onclick="ccRunCheck(\''+ccId+'\')">&#10003; Check &amp; Download ZIP</button>';
+          msgs.appendChild(ccWrap);
+        }
+        if(chatFieldMode){
+          if(_ft&&!d.error){_flTeachCount=0;}       // test delivered — reset for next cycle
+          else if(!_ft){_flTeachCount++;}            // teaching exchange — count up
+          // _ft && d.error: server failed, leave count ≥2 so next send retries forceTest
+          flRenderDoubtChips(parsed.questions,msgs);
+        }
+        if(_qrParsed&&_qrParsed.qr)flRenderQuickReply(_qrParsed.qr,msgs);
+        pvAutoUpdate();
+      }else{
+        chSaveToOrigin(origChatId,{role:'assistant',content:_reply});
       }
-      if(chatFieldMode){
-        if(_ft&&!d.error){_flTeachCount=0;}       // test delivered — reset for next cycle
-        else if(!_ft){_flTeachCount++;}            // teaching exchange — count up
-        // _ft && d.error: server failed, leave count ≥2 so next send retries forceTest
-        flRenderDoubtChips(parsed.questions,msgs);
-      }
-      if(_qrParsed&&_qrParsed.qr)flRenderQuickReply(_qrParsed.qr,msgs);
-      pvAutoUpdate();
+      _unlockSend();
     })
     .catch(function(){
       var ty=document.getElementById('typ');if(ty)ty.remove();
-      var ai=document.createElement('div');ai.className='msg';
-      ai.innerHTML='<div class="mav ai">F</div><div><div class="bub" style="color:var(--danger)">Connection error — is the server running?</div>'+aiActBar()+'</div>';
-      msgs.appendChild(ai);msgs.scrollTop=msgs.scrollHeight;
+      if(chCurId()===origChatId){
+        var ai=document.createElement('div');ai.className='msg';
+        ai.innerHTML='<div class="mav ai">F</div><div><div class="bub" style="color:var(--danger)">Connection error — is the server running?</div>'+aiActBar()+'</div>';
+        msgs.appendChild(ai);msgs.scrollTop=msgs.scrollHeight;
+      }
+      _unlockSend();
     });
 }
 function ck(e){if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();send();}}
@@ -2482,19 +2725,72 @@ function runSearch(){
     .catch(function(){area.innerHTML='<div style="color:var(--danger);font-size:12px;padding:12px;background:var(--bg2);border-radius:var(--r)">⚠️ Connection error. Is the server running?</div>';});
 }
 function ccGetFiles(){
-  scanChatFiles();
-  var files=[];
-  if(pvFiles.html)files.push({filename:'index.html',content:pvFiles.html});
-  if(pvFiles.css)files.push({filename:'styles.css',content:pvFiles.css});
-  if(pvFiles.js)files.push({filename:'script.js',content:pvFiles.js});
-  Object.keys(pvFiles.reactNative).forEach(function(fn){files.push({filename:fn,content:pvFiles.reactNative[fn]});});
-  return files;
+  // Language tag → file extension (covers all common AI-generated languages)
+  var _ext={
+    javascript:'js',js:'js',jsx:'jsx',
+    typescript:'ts',ts:'ts',tsx:'tsx',
+    python:'py',py:'py',
+    bash:'sh',shell:'sh',sh:'sh',zsh:'sh',
+    css:'css',scss:'scss',sass:'scss',less:'less',
+    html:'html',htm:'html',
+    json:'json',
+    yaml:'yml',yml:'yml',
+    sql:'sql',
+    java:'java',kotlin:'kt',
+    cpp:'cpp',c:'c','c++':'cpp',
+    go:'go',rust:'rs',
+    php:'php',ruby:'rb',swift:'swift',
+    xml:'xml',markdown:'md',md:'md',
+    toml:'toml',ini:'ini',env:'env'
+  };
+  // Detect filename from first-line comment: // server.js  # config.py  -- schema.sql
+  var _fnRe=/^(?:\/\/|#(?!!)|--|\/\*)\s*([\w.\-/]+\.[\w]+)/;
+  var blocks=[],snipN=0;
+  var re=/```([^\n`]*)\n?([\s\S]*?)```/g,m;
+  for(var i=0;i<chatHistory.length;i++){
+    if(chatHistory[i].role!=='assistant')continue;
+    re.lastIndex=0;
+    while((m=re.exec(chatHistory[i].content||''))!==null){
+      var tag=(m[1]||'').trim().toLowerCase();
+      var raw=(m[2]||'').trimEnd();
+      if(!raw)continue;
+      // Detect non-fixable content before deriving filename
+      var _skipReason=null;
+      if(tag==='text'||tag==='txt'||tag==='plaintext'||tag==='output'){_skipReason='plain text';}
+      else if(raw.indexOf('├')!==-1||raw.indexOf('└')!==-1){_skipReason='directory tree';}
+      // Derive filename
+      var firstLine=(raw.split('\n')[0]||'').trim();
+      var fnHint=_fnRe.exec(firstLine);
+      var filename;
+      if(fnHint){
+        filename=fnHint[1];
+      }else if(tag==='dockerfile'||tag==='docker'){
+        filename='Dockerfile';
+      }else{
+        snipN++;
+        var ext=_ext[tag];
+        filename='snippet-'+snipN+(ext?'.'+ext:tag?'.'+tag:'');
+      }
+      blocks.push({filename:filename,content:raw,skipped:_skipReason||undefined});
+    }
+  }
+  // Deduplicate by filename: if the same filename appears multiple times, keep the last (most recent version)
+  var lastIdx={};
+  for(var j=0;j<blocks.length;j++)lastIdx[blocks[j].filename]=j;
+  return blocks.filter(function(_,idx){return Object.values(lastIdx).indexOf(idx)!==-1;});
 }
 function ccRunCheck(ccId){
   var wrap=document.getElementById(ccId);if(!wrap)return;
-  var files=ccGetFiles();
-  if(!files.length){wrap.innerHTML='<div class="cc-card" style="color:var(--text2)">No code files found in this conversation.</div>';return;}
-  _ccStore[ccId]={files:files,fixedFiles:null,lastIssues:[]};
+  var allFiles=ccGetFiles();
+  var files=allFiles.filter(function(f){return!f.skipped;});
+  var skippedFiles=allFiles.filter(function(f){return f.skipped;});
+  var skippedCount=skippedFiles.length;
+  if(!files.length){
+    var skipNote=skippedCount?' ('+skippedCount+' non-code block'+(skippedCount>1?'s':'')+' skipped: '+skippedFiles.map(function(f){return f.skipped;}).join(', ')+')':'';
+    wrap.innerHTML='<div class="cc-card" style="color:var(--text2)">No code files found in this conversation.'+skipNote+'</div>';
+    return;
+  }
+  _ccStore[ccId]={files:files,fixedFiles:null,lastIssues:[],skippedCount:skippedCount};
   wrap.innerHTML='<div style="font-size:11px;color:var(--text2);padding:4px 0">Checking code...</div>';
   fetch('/api/code-check',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({files:files})})
     .then(function(r){return r.json();})
@@ -2515,6 +2811,10 @@ function ccShowResult(ccId,result,isRecheck){
     wrap.innerHTML='<div class="cc-card">'+note+issueHtml+'<div>'+fixBtn
       +'<button class="cc-btn sec" onclick="ccDownload(\''+ccId+'\')">'+(isRecheck?'Download ZIP':'Download Anyway')+'</button></div></div>';
   }
+  if((st.skippedCount||0)>0){
+    var el=wrap.querySelector('.cc-card');
+    if(el){var sn=document.createElement('div');sn.style.cssText='font-size:11px;color:var(--text2);margin-top:6px;padding-top:6px;border-top:1px solid var(--border)';sn.textContent='Skipped '+st.skippedCount+' non-code block'+(st.skippedCount>1?'s':'')+' (directory tree / plain text)';el.appendChild(sn);}
+  }
 }
 function ccRunFix(ccId){
   var wrap=document.getElementById(ccId);if(!wrap)return;
@@ -2525,12 +2825,22 @@ function ccRunFix(ccId){
   fetch('/api/code-fix',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({files:files,issues:issues})})
     .then(function(r){return r.json();})
     .then(function(d){
+      if(d.busy){
+        wrap.innerHTML='<div class="cc-card"><div style="color:var(--text2);margin-bottom:6px">Auto-fix is busy right now — try again in a minute.</div>'
+          +'<button class="cc-btn prim" onclick="ccRunFix(\''+ccId+'\')">Retry</button></div>';
+        return;
+      }
       if(d.error){
         wrap.innerHTML='<div class="cc-card"><div style="color:var(--danger);margin-bottom:6px">Auto-fix failed — download original files</div>'
           +'<button class="cc-btn sec" onclick="ccDownload(\''+ccId+'\')">Download Anyway</button></div>';
         return;
       }
       _ccStore[ccId].fixedFiles=d.files;
+      if(d.recheck&&d.recheck.status==='check-failed'){
+        wrap.innerHTML='<div class="cc-card"><div style="color:var(--text2);margin-bottom:6px">Fix applied — verification unavailable (model busy). Download to review.</div>'
+          +'<button class="cc-btn prim" onclick="ccDownload(\''+ccId+'\')">Download ZIP</button></div>';
+        return;
+      }
       ccShowResult(ccId,d.recheck,true);
     })
     .catch(function(){
@@ -2738,23 +3048,45 @@ function prjStore(a){try{localStorage.setItem('forgeai_projects',JSON.stringify(
 function appsAll(){try{return JSON.parse(localStorage.getItem('forgeai_apps')||'[]');}catch(e){return[];}}
 function appsStore(a){try{localStorage.setItem('forgeai_apps',JSON.stringify(a));}catch(e){}}
 
-function prjDraw(){
-  var el=document.getElementById('proj-list');
-  if(!el)return;
+function prjShowAll(){
+  window._curProjId=null;
+  var panelActive=(document.getElementById('panel-projects')||{}).classList&&document.getElementById('panel-projects').classList.contains('active');
+  if(panelActive){
+    var pni=document.getElementById('proj-nav-item');if(pni)pni.classList.add('active');
+  }
+  var tt=document.getElementById('proj-panel-title');
+  if(tt)tt.textContent='Projects';
+  var bb=document.getElementById('proj-back-btn');
+  if(bb)bb.style.display='none';
+  var content=document.getElementById('proj-panel-content');
+  if(!content)return;
   var all=prjAll();
   if(!all.length){
-    el.innerHTML='<div style="padding:4px 14px 6px;font-size:11px;color:var(--text3);font-style:italic">No projects yet</div>';
+    content.innerHTML='<div style="text-align:center;padding:40px 20px;color:var(--text3);font-size:13px">No projects yet.<br><br>Click &#8220;+ New&#8221; above to create one.</div>';
     return;
   }
-  el.innerHTML=all.map(function(p){
-    var tx=String(p.name||'Project').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-    var cnt=(p.chatIds||[]).length+(p.appIds||[]).length;
-    return '<div class="proj-item" onclick="prjOpen(\''+p.id+'\')">'+
-      '<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+tx+'</span>'+
-      (cnt?'<span style="font-size:10px;background:var(--ibg);color:var(--info);border-radius:10px;padding:1px 6px;flex-shrink:0">'+cnt+'</span>':'')+
-      '<button onclick="event.stopPropagation();prjDelete(\''+p.id+'\')" style="background:none;border:none;cursor:pointer;font-size:14px;padding:0 2px;flex-shrink:0;line-height:1;color:var(--text3);opacity:0.45" title="Delete project">×</button>'+
-    '</div>';
-  }).join('');
+  var chats=chAll();
+  content.innerHTML='<div style="padding:12px">'+all.map(function(p){
+    var tx=esc(p.name||'Project');
+    var nsCount=chats.filter(function(c){return c.projectId===p.id;}).length;
+    var chatCount=nsCount+(p.chatIds||[]).length;
+    var appCount=(p.appIds||[]).length;
+    var parts=[];
+    if(chatCount)parts.push(chatCount+' chat'+(chatCount>1?'s':''));
+    if(appCount)parts.push(appCount+' app'+(appCount>1?'s':''));
+    var desc=parts.length?parts.join(', '):'Empty';
+    return '<div class="prj-card" onclick="prjOpen(\''+p.id+'\')">'
+      +'<div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">'
+      +'<span style="font-size:18px;flex-shrink:0">&#128193;</span>'
+      +'<span class="prj-card-name">'+tx+'</span>'
+      +'<button class="prj-card-menu" onclick="event.stopPropagation();showPrjMenu(\''+p.id+'\',this)" title="Options">&#8943;</button>'
+      +'</div>'
+      +'<div class="prj-card-desc">'+esc(desc)+'</div>'
+      +'</div>';
+  }).join('')+'</div>';
+}
+function prjDraw(){
+  prjShowAll();
 }
 
 function prjNew(){
@@ -2768,8 +3100,36 @@ function prjNew(){
 
 function prjDelete(id){
   if(!confirm('Delete this project? (Chats and apps are kept — only the grouping is removed)'))return;
+  var chats=chAll();var changed=false;
+  for(var i=0;i<chats.length;i++){if(chats[i].projectId===id){delete chats[i].projectId;changed=true;}}
+  if(changed){chStore(chats);chDraw();}
   prjStore(prjAll().filter(function(p){return p.id!==id;}));
   prjDraw();
+}
+var _prjMenuId=null;
+function showPrjMenu(id,anchorEl){
+  _prjMenuId=id;
+  var mn=document.getElementById('prj-menu');
+  mn.innerHTML='<div class="proj-picker-hd">Project options</div>'
+    +'<div class="proj-picker-item" onclick="document.getElementById(\'prj-menu\').style.display=\'none\';prjRename(\''+id+'\')">Rename</div>'
+    +'<div class="proj-picker-item" style="color:#ef4444" onclick="document.getElementById(\'prj-menu\').style.display=\'none\';prjDelete(\''+id+'\')">Delete</div>';
+  var rect=anchorEl.getBoundingClientRect();
+  mn.style.display='block';
+  var h=Math.min(mn.scrollHeight,200);
+  var top=rect.bottom+4;
+  if(top+h>window.innerHeight-8)top=rect.top-h-4;
+  mn.style.left=Math.min(rect.left,window.innerWidth-170)+'px';
+  mn.style.top=top+'px';
+}
+function prjRename(id){
+  var all=prjAll(),proj=null;
+  for(var i=0;i<all.length;i++){if(all[i].id===id){proj=all[i];break;}}
+  if(!proj)return;
+  var name=(prompt('Rename project:',proj.name)||'').trim();
+  if(!name||name===proj.name)return;
+  proj.name=name;
+  prjStore(all);prjShowAll();
+  notify('Project renamed!');
 }
 
 function prjOpen(id){
@@ -2778,13 +3138,25 @@ function prjOpen(id){
   if(!proj)return;
   window._curProjId=id;
   var chats=chAll(),apps=appsAll();
+  // New-style: chats with projectId === id (sorted starred first)
+  var nsChats=chats.filter(function(c){return c.projectId===id;})
+    .sort(function(a,b){var as=!!a.starred,bs=!!b.starred;if(as!==bs)return as?-1:1;return(b.updatedAt||0)-(a.updatedAt||0);});
+  var newStyleItems=nsChats.map(function(c){
+    var tx=esc(c.title||'New Chat');
+    return '<div onclick="prjLoadChat(\''+c.id+'\')" style="display:flex;align-items:center;padding:9px 12px;background:var(--bg3);border-radius:var(--r);margin-bottom:6px;cursor:pointer;gap:8px;font-size:12px;border:1px solid var(--border)">'+
+      (c.starred?'<span style="color:#f59e0b;font-size:11px;flex-shrink:0">&#9733;</span>':'')+
+      '<span style="font-size:15px;flex-shrink:0">&#128172;</span><span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+tx+'</span>'+
+      '<button onclick="event.stopPropagation();chClearProj(\''+c.id+'\')" title="Remove from project" style="background:none;border:none;cursor:pointer;color:var(--text3);font-size:14px;padding:0;line-height:1;opacity:.5;flex-shrink:0">&#215;</button>'+
+    '</div>';
+  }).join('');
+  // Old-style: chats listed in project.chatIds
   var chatItems=(proj.chatIds||[]).map(function(cid){
     var c=null;for(var j=0;j<chats.length;j++){if(chats[j].id===cid){c=chats[j];break;}}
     if(!c)return '';
     var tx=esc(c.title||'New Chat');
     return '<div onclick="prjLoadChat(\''+cid+'\')" style="display:flex;align-items:center;padding:9px 12px;background:var(--bg3);border-radius:var(--r);margin-bottom:6px;cursor:pointer;gap:8px;font-size:12px;border:1px solid var(--border)">'+
-      '<span style="font-size:15px">💬</span><span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+tx+'</span>'+
-      '<button onclick="event.stopPropagation();prjUnlinkChat(\''+id+'\',\''+cid+'\')" title="Remove from project" style="background:none;border:none;cursor:pointer;color:var(--text3);font-size:14px;padding:0;line-height:1;opacity:.5;flex-shrink:0">×</button>'+
+      '<span style="font-size:15px">&#128172;</span><span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+tx+'</span>'+
+      '<button onclick="event.stopPropagation();prjUnlinkChat(\''+id+'\',\''+cid+'\')" title="Remove from project" style="background:none;border:none;cursor:pointer;color:var(--text3);font-size:14px;padding:0;line-height:1;opacity:.5;flex-shrink:0">&#215;</button>'+
     '</div>';
   }).filter(Boolean).join('');
   var appItems=(proj.appIds||[]).map(function(aid){
@@ -2797,15 +3169,18 @@ function prjOpen(id){
       '<button onclick="event.stopPropagation();prjUnlinkApp(\''+id+'\',\''+aid+'\')" title="Remove from project" style="background:none;border:none;cursor:pointer;color:var(--text3);font-size:14px;padding:0;line-height:1;opacity:.5;flex-shrink:0">×</button>'+
     '</div>';
   }).filter(Boolean).join('');
+  var allChatItems=newStyleItems+chatItems;
   var content=
-    (chatItems?'<div style="font-size:10px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">Chats</div>'+chatItems:'')+
-    (appItems?'<div style="font-size:10px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;margin:'+(chatItems?'14':'0')+'px 0 8px">Generated Apps</div>'+appItems:'');
+    (allChatItems?'<div style="font-size:10px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">Chats</div>'+allChatItems:'')+
+    (appItems?'<div style="font-size:10px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;margin:'+(allChatItems?'14':'0')+'px 0 8px">Generated Apps</div>'+appItems:'');
   document.getElementById('proj-panel-content').innerHTML=
-    content||'<div style="text-align:center;padding:28px 14px;color:var(--text3);font-size:12px">No items yet.<br><br>Click 📁 on a chat in RECENT to add it,<br>or use "Save to Project" after generating an app.</div>';
+    content||'<div style="text-align:center;padding:28px 14px;color:var(--text3);font-size:12px">No items yet.<br><br>Click &#8942; on a chat in RECENT and choose &#8220;Move to project&#8221;,<br>or use &#8220;Save to Project&#8221; after generating an app.</div>';
   document.getElementById('proj-panel-title').textContent=proj.name;
+  var bb=document.getElementById('proj-back-btn');if(bb)bb.style.display='';
   panels.forEach(function(p){var el=document.getElementById('panel-'+p);if(el)el.classList.remove('active');});
   var pp=document.getElementById('panel-projects');if(pp)pp.classList.add('active');
   document.querySelectorAll('.ni').forEach(function(n){n.classList.remove('active');});
+  var pni=document.getElementById('proj-nav-item');if(pni)pni.classList.add('active');
   document.getElementById('tb-title').textContent=proj.name;
   document.getElementById('tb-badge').textContent='Project';
 }
@@ -3142,17 +3517,31 @@ function initPageAll(){
     if(pk&&pk.style.display!=='none'&&!pk.contains(e.target)){
       pk.style.display='none';_pickerCb=null;
     }
+    var mn=document.getElementById('ch-more-menu');
+    if(mn&&mn.style.display!=='none'&&!mn.contains(e.target)){
+      mn.style.display='none';
+    }
+    var pm=document.getElementById('prj-menu');
+    if(pm&&pm.style.display!=='none'&&!pm.contains(e.target)){
+      pm.style.display='none';
+    }
   });
 
   // Wire RECENT list click delegation (runs here, after DOM + functions ready)
   var chEl=document.getElementById('ch-list');
   if(chEl){
     chEl.addEventListener('click',function(e){
-      // Walk up from click target to find data-del or data-id
+      // Walk up from click target to find data-del, data-star, data-more, or data-id
       var node=e.target;
       while(node&&node!==chEl){
         if(node.getAttribute&&node.getAttribute('data-del')){
           e.stopPropagation();chRemove(node.getAttribute('data-del'));return;
+        }
+        if(node.getAttribute&&node.getAttribute('data-star')){
+          e.stopPropagation();chToggleStar(node.getAttribute('data-star'));return;
+        }
+        if(node.getAttribute&&node.getAttribute('data-more')){
+          e.stopPropagation();showChMoreMenu(node.getAttribute('data-more'),node);return;
         }
         if(node.getAttribute&&node.getAttribute('data-id')){
           chOpen(node.getAttribute('data-id'));return;
@@ -3198,6 +3587,7 @@ function initPageAll(){
   var st=localStorage.getItem(_thKey());
   if(st){try{tamilHistory=JSON.parse(st);var tm=document.getElementById('tamil-msgs');tamilHistory.forEach(function(m){var div=document.createElement('div');if(m.role==='user'){div.className='msg u';div.innerHTML='<div class="mav u">'+userInitials()+'</div><div><div class="bub">'+esc(m.content)+'</div></div>';}else{div.className='msg';div.innerHTML='<div class="mav ai" style="background:#FF6B35">AI</div><div><div class="bub" style="font-size:12px">'+formatMarkdown(m.content)+'</div>'+cpyBtn+'</div>';}tm.appendChild(div);});tm.scrollTop=tm.scrollHeight;}catch(e){localStorage.removeItem(_thKey());}}
 }
+_applyFeatureFlags();
 // Auth check on page load — drives everything
 (function(){
   fetch('/api/auth/me')

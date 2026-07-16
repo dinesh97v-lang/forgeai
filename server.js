@@ -209,8 +209,8 @@ MENTOR MODE — When a user's request is VAGUE or BROAD (like "build software", 
 2. Offer 3-4 concrete example directions they could take (as a numbered list) so they can pick easily
 3. Once they clarify, give a clear vision: recommended approach, tech stack, key features, and first steps
 4. Be encouraging and strategic, like a mentor guiding a founder — think about real-world practicality, market fit, and what will actually succeed
-5. Only give full code AFTER the direction is clear
-BUT: if the user's request is already SPECIFIC (e.g. "write a Python function to reverse a string", "fix this bug", "create a login form with email and password"), answer directly with code — do NOT ask unnecessary clarifying questions.
+5. Once the direction is clear, output a visual HTML mockup FIRST before writing any code (see APP MOCKUP FIRST rule). Only generate the full code after the user approves the mockup
+BUT: if the user's request is already SPECIFIC (e.g. "write a Python function to reverse a string", "fix this bug", "create a login form with email and password"), answer directly with code — do NOT ask unnecessary clarifying questions, and skip the mockup step.
 
 When the user asks about an idea, plan, decision, or a "will this work?" type question, respond as a thoughtful strategic advisor:
 - Give a balanced analysis with clear POSITIVES (strengths, opportunities) and NEGATIVES (risks, challenges)
@@ -375,7 +375,8 @@ function detectLanguage(prompt) {
 function detectIntent(userMessage) {
   const devKeywords = ['build', 'create app', 'code for', 'website',
                        'function', 'script', 'app develop', 'api',
-                       'login page', 'pannunga', 'write', 'generate'];
+                       'login page', 'pannunga', 'write', 'generate',
+                       'fix', 'debug'];
   const isDevRequest = devKeywords.some(kw =>
     userMessage.toLowerCase().includes(kw));
   return isDevRequest ? 'app_dev' : 'casual_chat';
@@ -387,15 +388,22 @@ function detectIntent(userMessage) {
 function needsSearch(prompt) {
   const p = prompt.toLowerCase();
 
-  // Year-based triggers
+  // Year-based triggers — always apply
   if (/\b(2024|2025|2026)\b/.test(p)) return true;
 
-  // Word-boundary check prevents false positives like 'now' matching inside 'know',
-  // 'rate' inside 'separate', 'match' inside 'dispatch', etc.
+  // Code context: skip broad-term check entirely — coding vocabulary overlaps too heavily
+  // with search terms ('match', 'result', 'rate', etc.) causing unnecessary searches.
+  if (isCodeRequest(prompt)) return false;
+
+  // Single-word broad terms removed ('match','result','now','rate','current','latest','score')
+  // — replaced with multi-word phrases and hard real-time nouns only.
   const searchTerms = [
-    'today','current','latest','now','news','price','rate','recent',
+    'latest news','latest update',
+    'current price','current rate',
+    'as of today',
+    'today','news','price','recent',
     'who is','chief minister','president','prime minister','ceo','chairman',
-    'stock','weather','score','match','election','winner','result',
+    'stock','weather','election','breaking','winner',
     // Thanglish equivalents
     'indraiku','ipo','ippo','ippa','evlo','thandha','velai',
     'mudalvar','mudhalvar'
@@ -956,6 +964,7 @@ LANGUAGE RULE (STRICT): Detect the language of the user's most recent message. I
       : (lang === 'tamil' || lang === 'thanglish') ? TAMIL_CODING_IDENTITY
       : CODING_IDENTITY;
     sysPrompt = identity + '\n\n' + systemPrompts[intent] + '\n\n' + langInstructions[lang];
+    sysPrompt += '\n\nAPP MOCKUP FIRST — MANDATORY FOR NEW APP BUILDS:\nWhen the user wants to BUILD a new multi-screen app (not a bug fix, not a single function/component, not editing existing code, not Enterprise Mode):\n\nPHASE 1 — MOCKUP: Your very next response once requirements are understood must be ONE self-contained HTML mockup inside a ```html code block. It must:\n• Be a single file with all CSS inside a <style> tag — no external files or CDN stylesheets\n• Show the actual screens the user described with realistic placeholder data — use THEIR app name, THEIR feature names, THEIR language for all UI labels and button text (English/Tamil/Thanglish as appropriate)\n• Be mobile-friendly: max-width 430px centred, proper padding, readable font sizes\n• Cover 3–5 sections: a home/landing screen plus the key feature screens they requested\n• Buttons can call alert() or be visual-only — no real backend logic needed\n• Use a proper colour scheme and clear visual hierarchy — not a blank white page\n\nPHASE 2 — APPROVAL MESSAGE: Immediately after the ```html block, write 1–2 sentences in the user\'s language saying the app will look roughly like this and asking if they want to proceed. Then output a <<QUICK_REPLY>> block with these three options translated into the user\'s language: "Build it" | "Change design" | "Add features"\n\nPHASE 3 — CODE: Only after the user chooses "Build it" (or equivalent approval), start generating the full working code — one file at a time, following the ONE FILE PER RESPONSE rule.\n\nDoes NOT apply to: bug fixes, small snippets, single functions, adding one feature to existing code, or Enterprise Mode.';
     sysPrompt += '\n\nQUICK REPLY BLOCKS — MANDATORY: Whenever you ask the user to choose between options (topic selection, yes/no confirmation, next-step choice, architecture choice, etc.), you MUST output the structured quick_reply block instead of a plain-text question. Never ask a choice question as plain text.\n\nFormat (place at the very end of your response):\n<<QUICK_REPLY>>{"type":"quick_reply","question":"Your question?","options":["Option 1","Option 2","Option 3"]}<<END_QUICK_REPLY>>\n\nWRONG — plain-text choice question (never do this):\n"Would you like to use Monolithic or Microservices architecture?"\n\nCORRECT — same question as a quick_reply block:\nHere\'s a quick breakdown of both. Before I go deeper, let me know which direction you\'re leaning:\n<<QUICK_REPLY>>{"type":"quick_reply","question":"Which architecture fits your project?","options":["Monolithic","Microservices","Not sure yet"]}<<END_QUICK_REPLY>>\n\nRules: Maximum 4 options. Each option maximum 5 words. ONE quick_reply block per response only. Use ONLY for genuine choice moments — regular answers stay as plain text.';
     isEnterprise = !!(enterpriseMode && isCodeRequest(prompt));
     if (isEnterprise) {
@@ -1440,23 +1449,42 @@ app.post('/api/code-fix', requireAuth, async (req, res) => {
   try {
     const content = files.map(f => `=== ${f.filename} ===\n${f.content}`).join('\n\n').slice(0, 8000);
     const issueList = (Array.isArray(issues) ? issues : []).join('\n');
-    const resp = await axios.post(
-      'https://api.groq.com/openai/v1/chat/completions',
-      {
-        model: MODELS.GROQ_70B,
-        messages: [
-          { role: 'system', content: 'You are a code fixer. Fix ONLY the listed issues. Do not refactor, rename, or change anything else. Return ONLY valid JSON: { "files": [{ "filename": "...", "content": "...full corrected file content..." }] }' },
-          { role: 'user', content: `Issues to fix:\n${issueList}\n\nFiles:\n${content}` }
-        ],
-        max_tokens: 4000,
-        temperature: 0
-      },
-      { headers: { Authorization: `Bearer ${GROQ_KEY}` }, timeout: 30000 }
-    );
-    const raw = resp.data?.choices?.[0]?.message?.content || '';
+    const fixSys  = 'You are a code fixer. Fix ONLY the listed issues. Do not refactor, rename, or change anything else. Return ONLY valid JSON: { "files": [{ "filename": "...", "content": "...full corrected file content..." }] }';
+    const fixUser = `Issues to fix:\n${issueList}\n\nFiles:\n${content}`;
+
+    let raw = null;
+
+    // Try GROQ_70B first
+    try {
+      const resp = await axios.post(
+        'https://api.groq.com/openai/v1/chat/completions',
+        { model: MODELS.GROQ_70B, messages: [{ role: 'system', content: fixSys }, { role: 'user', content: fixUser }], max_tokens: 4000, temperature: 0 },
+        { headers: { Authorization: `Bearer ${GROQ_KEY}` }, timeout: 30000 }
+      );
+      raw = resp.data?.choices?.[0]?.message?.content || '';
+    } catch (groqErr) {
+      if (groqErr.response?.status !== 429) throw groqErr; // non-429 → outer catch
+      console.log('[code-fix] 70B rate-limited (429) — trying Gemini Flash fallback');
+      // Fallback: Gemini Flash only — never downgrade to 8B for code fixing
+      try {
+        raw = await callGeminiModel(MODELS.GEM_FLASH, fixUser, fixSys, [], 4000);
+      } catch (gemErr) {
+        console.log('[code-fix] Gemini fallback also failed:', gemErr.message);
+        return res.json({ busy: true });
+      }
+    }
+
     const parsed = extractFirstJson(raw);
     if (!parsed || !Array.isArray(parsed.files)) return res.json({ error: true });
-    const recheck = await runCodeCheck(parsed.files);
+    let recheck;
+    try {
+      recheck = await runCodeCheck(parsed.files);
+    } catch (recheckErr) {
+      // Fix succeeded but post-fix verification call failed (e.g. 429 on second Groq call).
+      // Return the corrected files anyway so they aren't silently discarded.
+      console.log('[code-fix] recheck failed after successful fix:', recheckErr.message);
+      return res.json({ files: parsed.files, recheck: { status: 'check-failed' } });
+    }
     res.json({ files: parsed.files, recheck });
   } catch (err) {
     console.error('[code-fix]', err.message);
