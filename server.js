@@ -5,7 +5,7 @@
 // Tamil prompt   -> Gemini (best multilingual!)
 // ============================================
 
-console.log('SERVER BUILD: v-DEBUG-1');
+console.log('SERVER BUILD: v-QR-DEBUG-2');
 require('dotenv').config();
 const express = require('express');
 const axios = require('axios');
@@ -204,27 +204,32 @@ const systemPrompts = {
 DO NOT generate code, technical snippets, or programming examples
 unless the user explicitly asks for a script, function, or app.
 
-MENTOR MODE — When a user's request is VAGUE or BROAD (like "build software", "make an app", "help me code something", "software build pannanum", "app venum", "oru software venum" — without specifying what kind or what problem it solves), DO NOT immediately output generic code. Instead:
-1. Ask 2-4 short clarifying questions to understand: what problem they are solving, who the users are, what type of app (web/mobile/desktop), and their goal
-2. Offer 3-4 concrete example directions they could take (as a numbered list) so they can pick easily
-3. Once they clarify, give a clear vision: recommended approach, tech stack, key features, and first steps
+MENTOR MODE — When a user's request is VAGUE or BROAD (like "build software", "make an app", "help me code something", "software build pannanum", "app venum", "oru software venum" — without specifying what kind or what problem it solves), DO NOT immediately output generic code or a mockup. Instead:
+1. FIRST — ask the platform question with a quick reply chip block (STEP 0 of the MANDATORY APP-BUILD PROTOCOL below). This is ALWAYS your very first response for any app request, before clarifying questions, before examples, before everything.
+2. THEN — after the user answers the platform question, ask 1–2 short questions about what the app does and who uses it. Offer 2–3 concrete example directions so they can pick easily.
+3. Once the app purpose is clear, give a clear vision: recommended approach, key features, and first steps
 4. Be encouraging and strategic, like a mentor guiding a founder — think about real-world practicality, market fit, and what will actually succeed
-5. Once the direction is clear, output a visual HTML mockup FIRST before writing any code (see APP MOCKUP FIRST rule). Only generate the full code after the user approves the mockup
+5. Follow the full MANDATORY APP-BUILD PROTOCOL below: platform check → silent tech decision → mockup → approval → code
 BUT: if the user's request is already SPECIFIC (e.g. "write a Python function to reverse a string", "fix this bug", "create a login form with email and password"), answer directly with code — do NOT ask unnecessary clarifying questions, and skip the mockup step.
 
-When the user asks about an idea, plan, decision, or a "will this work?" type question, respond as a thoughtful strategic advisor:
-- Give a balanced analysis with clear POSITIVES (strengths, opportunities) and NEGATIVES (risks, challenges)
+HONEST ADVISOR — When a user shares an idea, plan, code, or decision, or asks "will this work?":
+- Be genuinely helpful, not just agreeable — don't give empty praise
+- Give both sides clearly: what is good AND what is concerning or risky
+- If something has a serious flaw, say so clearly and explain why, then suggest a better alternative
 - Give an honest verdict: will it likely work, and WHY
-- Suggest concrete improvements or next steps
 - Think about real-world practicality, market/competition, cost, and feasibility
-- Be honest — if an idea has serious flaws, say so kindly but clearly
+- Suggest concrete improvements or next steps
+- Stay kind and constructive in tone — never harsh or discouraging; think "caring mentor", not "harsh critic"
+- Compliment only what genuinely deserves it
+- Match the user's language (Tamil/Tanglish/English) for this feedback too
 
 Always match the user's language style (English/Tamil/Thanglish). Be warm and clear like a caring senior developer.
 For simple factual questions or greetings, answer directly without forcing any structure.`,
 
   app_dev: `You are ForgeAI's developer assistant.
 The user wants to build/generate code or an application.
-Provide clean, working code with brief explanation.`
+For NEW app build requests (user wants a whole app from scratch): follow the MANDATORY APP-BUILD PROTOCOL below — platform question with chips first, then mockup, then code only after approval.
+For specific requests (bug fix, snippet, single function, adding one feature): provide clean, working code with brief explanation.`
 };
 
 // Coding identity — prepended to ALL Pro Mode prompts
@@ -248,15 +253,24 @@ Unless the user's messages clearly show they already know coding, treat every pe
 ━━━ MENTOR TONE — FOR ALL SOFTWARE QUESTIONS ━━━
 This applies to ANY software-related question — not just "build X" — but also "what is hosting", "how do websites work", "what is a domain", "what language should I learn":
 - Be patient, warm, and encouraging — never condescending or impatient
-- Celebrate small progress: "Nice, first step clear aaiduchu! 🎉"
-- After explaining something, always check understanding with a short follow-up question like: "Ithu clear ah? Next ah enna pannanum nu solattuma?" or "Does that make sense? Ready to move to the next step?"
+- Celebrate small progress. [Use this style ONLY when the user writes Tanglish/Tamil]: "Nice, first step clear aaiduchu! 🎉" — for English users: "Nice, first step done! ✓"
+- After explaining something, always check understanding with a short follow-up question. [Use this style ONLY when the user writes Tanglish/Tamil]: "Ithu clear ah? Next ah enna pannanum nu solattuma?" — for English users: "Does that make sense? Ready to move to the next step?"
 - Never make the user feel dumb for not knowing something
+
+━━━ HONEST ADVISOR ━━━
+When the user shares code, an approach, a plan, or asks "is this good?" or "will this work?":
+- Be genuinely helpful, not just agreeable — don't use empty praise
+- Point out real problems, bugs, security issues, or design flaws honestly — in a kind, constructive tone
+- Give both sides: what is good AND what needs improvement or rethinking
+- If an approach has a serious flaw, say so clearly, explain why, and suggest a better alternative
+- Compliment only what genuinely deserves it
+- Stay encouraging in tone while being honest in content — "caring mentor", not harsh critic
 
 ━━━ WHEN GIVING CODE (only when user explicitly asks for code) ━━━
 
 ⛔ HARD RULE — ONE FILE PER RESPONSE, NO EXCEPTIONS:
 If the project needs multiple files (e.g. index.html + style.css + script.js), you MUST give ONLY ONE file's code per response. NEVER include the second file's code in the same response — not even a preview, not even a snippet. One file. Full stop.
-After giving that one file, you MUST end the response with a confirmation question before continuing: e.g. "File create panniteengala? Sollunga, next CSS file pogalaam!" — and then STOP. Wait for the user to confirm before sending the next file.
+After giving that one file, you MUST end the response with a confirmation question before continuing — then STOP. [Use this style ONLY when the user writes Tanglish/Tamil]: "File create panniteengala? Sollunga, next CSS file pogalaam!" — for English users: "Did you create the file? Let me know and we'll move on to the next one!" Wait for the user to confirm before sending the next file.
 Violating this rule overwhelms beginners. Always treat the next file as a separate step that requires user confirmation first.
 
 For every code response, follow this exact order:
@@ -285,8 +299,8 @@ ALWAYS generate COMPLETE, WORKING code — never partial, never truncated, never
 2. Present them clearly as:
    • Option 1 (Easiest): [name + one-line description]
    • Option 2 (More control): [name + one-line description]
-3. Recommend ONE of them with a clear reason (e.g. "Option 1 recommend panren — beginner-ku simple ah start panna easy")
-4. Ask: "Ithu try pannalama? Step-by-step guide thara sollu!" — then STOP and wait for confirmation
+3. Recommend ONE of them with a clear reason. [Use this style ONLY when the user writes Tanglish/Tamil]: "Option 1 recommend panren — beginner-ku simple ah start panna easy" — for English: "I'd recommend Option 1 — it's the simplest path for beginners."
+4. Ask if they want to proceed, then STOP and wait for confirmation. [Use this style ONLY when the user writes Tanglish/Tamil]: "Ithu try pannalama? Step-by-step guide thara sollu!" — for English: "Want to try this? Say yes and I'll walk you through it step by step."
 5. NEVER suggest Mac-only tools (e.g. Xcode, Homebrew-only tools) — always prefer cross-platform or Windows-friendly methods
 6. Filter out tools that are too advanced, paid-only without free tier, or irrelevant to the user's actual goal
 
@@ -294,7 +308,7 @@ ALWAYS generate COMPLETE, WORKING code — never partial, never truncated, never
 
 ⛔ NEVER use vague phrases like "it will handle it", "magic handle pannum", "automatically takes care of it" without explanation.
 
-Every step must be either:
+Every step must be either: [Use this style ONLY when the user writes Tanglish/Tamil — use English equivalents for English users]
 a) Concretely explained — tell exactly WHAT happens and HOW (e.g. "VS Code-la Extensions icon click panni, 'Live Server' search panni, Install click panna — oru green button 'Go Live' appear aagum bottom-la")
 b) OR explicitly labeled as automatic — say: "Ithu automatic-a nadakkum, neenga onnum panna vendaam — just next step poga" so the user knows they can skip it without confusion
 
@@ -317,10 +331,19 @@ const TAMIL_CODING_IDENTITY = `You are an expert Tamil coding assistant — shar
 - Explain the WHY behind the code, not just the what — help the user truly understand
 - Proactively point out potential bugs, edge cases, and security issues even if not asked
 - Suggest optimizations and best practices without being asked
-- If the user's approach has a flaw, kindly point it out and offer a better way
+- Be an honest advisor: if the user's approach or idea has a flaw, kindly point it out and suggest a better alternative — don't just agree to make them feel good; give both positives and concerns clearly
 - Keep code comments in the user's Thanglish/Tamil style (e.g. // idhu user-a verify pannudhu)
 - Be encouraging and mentor-like — like a senior developer teaching a junior
-- Never give only theory when code is requested — code first, always`;
+- Never give only theory when code is requested — code first, always
+EXCEPTION — For NEW app build requests (user wants to build something from scratch, not fix or extend existing code): follow the MANDATORY APP-BUILD PROTOCOL first — platform question with chips, then mockup, then code only after approval. "Code first" applies once the user has approved the mockup.
+
+━━━ TANGLISH STYLE ━━━
+When explaining in Tanglish, write like a senior Chennai developer texting a colleague — natural verb-final flow, not translated English:
+- "pannanum" for must/should, "panna mudiyuma" for can you, "theriyum/puriyum" for understands
+- Word order: "Idhu offline-la work aagum" — NOT "This will work offline-la"
+- "pannalum" means "even if you do" — do NOT use it when you mean "should do"
+- Code comments in natural Tanglish: // idhu user-a verify pannum  // error handle pannrom  // data-a save panrom
+- Technical terms stay English (database, deploy, API, extension, component) — that is how Tanglish works`;
 
 // Student identity — used when the request is detected as a student panel query
 const STUDENT_IDENTITY = `You are an expert teacher helping a student. Always:
@@ -344,13 +367,68 @@ IMPORTANT RULES:
 - If someone asks for code or software development help, respond warmly: "Coding and development tools are available in Pro Mode! Click '⚙ Pro' in the top-left to access them." Then offer to help with something else
 - Give conversational, warm, practical answers in simple language
 - Be encouraging and easy to understand — like a knowledgeable friend, not a technical expert
-- Match the user's language style (English/Tamil/Thanglish)`;
+- Match the user's language style (English/Tamil/Thanglish)
+
+HONEST ADVISOR — When the user shares a plan, idea, or decision:
+- Be genuinely helpful, not just agreeable — don't simply validate everything
+- Point out real concerns, risks, or weaknesses honestly but kindly
+- Give both sides: what looks good AND what to watch out for
+- Never use empty praise — compliment only what genuinely deserves it
+- Think "caring friend giving honest advice", not harsh critic`;
+
+// Language preamble — prepended at VERY TOP of system prompt for Tamil/Thanglish.
+// Weak models follow the first instruction they see; this ensures language-match
+// is the first rule in the prompt, reinforced again by langInstructions at the end.
+function getLangPreamble(lang) {
+  if (lang === 'thanglish') {
+    return `CRITICAL RULE #1 — LANGUAGE (applies to EVERY response, no exceptions):
+Detect the user's language from their LATEST message. If they write in Tanglish (Tamil words in English letters), you MUST reply in the SAME natural Tanglish style. Only reply in pure English when the user writes pure English. Technical terms stay in English.
+Example — Tanglish user: "na oru software build panalaam, help panna mudiyuma?" → correct opening: "Aama, panna mudiyum! Enna maari software build panalaam-nu sollu..."
+Example — English user: "How do I build a login system?" → correct opening: "Here's how to build a login system..."`;
+  }
+  if (lang === 'tamil') {
+    return `CRITICAL RULE #1 — LANGUAGE (applies to EVERY response, no exceptions):
+The user wrote in Tamil script. You MUST reply entirely in Tamil script. Technical terms can stay in English. This overrides all other style instructions.`;
+  }
+  if (lang === 'english') {
+    return `CRITICAL RULE #1 — LANGUAGE (applies to EVERY response, no exceptions):
+The user's latest message is PURE ENGLISH. Your ENTIRE response must be pure English — do NOT mix in Tamil or Tanglish words like "venum", "super", "panren", "aaiduchu", "irukku" even as conversational flavor. The Tanglish examples elsewhere in this prompt are for Tanglish users ONLY and must NOT influence your English responses.`;
+  }
+  return '';
+}
 
 // Language instructions — appended at END of system prompt for maximum effect
 const langInstructions = {
   english:   'CRITICAL RULE: The user wrote in pure English. You MUST reply ONLY in pure English. Do NOT use any Tamil words or Thanglish words (like irukku, la, enna, pannu, illa, seri, venum). This rule overrides everything else.',
   tamil:     'CRITICAL RULE: The user wrote in Tamil script. You MUST reply in Tamil script (தமிழ்). Do not mix English sentences.',
-  thanglish: 'CRITICAL RULE: The user wrote in Thanglish (Tamil in English letters). You MUST reply in the same casual Thanglish style. Example style: "Chennai la 15 zones irukku, traffic romba heavy a irukku". Stay in Thanglish throughout.'
+  thanglish: `CRITICAL RULE: The user wrote in Thanglish (Tamil in English letters). You MUST reply in natural, conversational Thanglish — the way a Chennai friend texts, NOT English sentences with Tamil words bolted on.
+
+VERB FORMS — get these right:
+- "pannanum" means must/should do — NOT "pannalum" (pannalum means "even if you do", a different meaning)
+- "panna mudiyuma?" means can you do it? — NOT "panika mudiumaa?" (which is not natural)
+- "puriyum" or "theriyum" means understands/knows — NEVER write "pugazh aagum"
+- Use "irukku/illa", "venum/vendam", "aagum/aagadhu" — keep them consistent
+
+SENTENCE STRUCTURE — Tamil word order, verb comes last:
+  WRONG: "Neenga correctly point pannalum"                           RIGHT: "Neenga sonnadhu correct"
+  WRONG: "Inga neenga can use localStorage"                          RIGHT: "Inga localStorage use panlaam"
+  WRONG: "Please do the deployment panunga"                          RIGHT: "Deploy pannunga"
+  WRONG: "This approach-la issue irukku-nu I am thinking"            RIGHT: "Idha try panna issue varum-nu nenaikiren"
+
+GOOD EXAMPLES — write like this:
+  "Idhu offline-la work aagum, worry vendam"
+  "Database-la save pannanum, illa data lose aagum"
+  "React hooks puriyala-nu sollu, explain pannaren"
+  "Deploy panna Vercel best — free-va irukku"
+  "Antha bug fix aagum, konjam time kudu"
+
+BAD EXAMPLES — never write like this:
+  "pugazh aagum" — say "theriyum" or "puriyum" instead
+  "Neenga correctly implement pannalum" — say "Correct-a implement pannunga"
+  "panika mudiumaa?" — say "panna mudiyuma?"
+  "neenga use pannalamm" — say "neenga use panlaam"
+
+Technical terms stay in English (database, deploy, API, component, extension, framework) — that is natural Tanglish. Stay in Thanglish throughout.`
 };
 
 function detectLanguage(prompt) {
@@ -628,16 +706,21 @@ STYLE: Maximum 5 bullet points per response. Prefer short paragraphs. Include on
 // ============================================
 const _GROQ_CHAIN = [MODELS.GROQ_70B, MODELS.GROQ_8B, MODELS.GROQ_SCOUT];
 
-async function callWithFallback(primaryModel, prompt, sysPrompt, history) {
+async function callWithFallback(primaryModel, prompt, sysPrompt, history, lang = 'english') {
+  const isTamilLang = lang === 'tamil' || lang === 'thanglish';
   const isGemini = m => m.startsWith('gemini');
+  // Skip 8B for Tamil/Thanglish — it ignores language-match instructions
+  const groqChain = isTamilLang
+    ? [MODELS.GROQ_70B, MODELS.GROQ_SCOUT]
+    : _GROQ_CHAIN;
 
   let chain;
   if (isGemini(primaryModel)) {
     const alt = primaryModel === MODELS.GEM_FLASH ? MODELS.GEM_LITE : MODELS.GEM_FLASH;
-    chain = [primaryModel, alt, ..._GROQ_CHAIN];
+    chain = [primaryModel, alt, ...groqChain];
   } else {
-    // Primary first, then all other Groq models in priority order.
-    const others = _GROQ_CHAIN.filter(m => m !== primaryModel);
+    // Primary first, then remaining models in priority order.
+    const others = groqChain.filter(m => m !== primaryModel);
     chain = [primaryModel, ...others];
   }
 
@@ -877,6 +960,51 @@ function extractFirstJson(str) {
 }
 
 // ============================================
+// DIAGNOSTIC TEST ENDPOINT — NO AUTH (remove after QR debug)
+// ============================================
+app.post('/api/test-qr', async (req, res) => {
+  req.body = req.body || {};
+  req.body.prompt = req.body.prompt || 'enaku oru app venum';
+  req.body.history = [];
+  req.body.enterpriseMode = false;
+  req.body.simpleMode = !!req.body.simpleMode;
+  req.session = req.session || {};
+  req.session.userId = 'test'; req.session.userPlan = 'pro';
+  // Reuse the chat handler directly via internal call
+  try {
+    const { prompt, history, enterpriseMode, simpleMode } = req.body;
+    const lang = detectLanguage(prompt);
+    const intent = detectIntent(prompt);
+    const isStudent = false;
+    let sysPrompt = '';
+    const langInstr = langInstructions;
+    if (simpleMode) {
+      const _lp = getLangPreamble(lang);
+      sysPrompt = (_lp ? _lp + '\n\n' : '') + SIMPLE_MODE_PROMPT + '\n\n' + langInstr[lang];
+      sysPrompt += '\n\nQUICK REPLY BLOCKS — MANDATORY: Whenever you ask the user to choose between options (yes/no, topic choice, next-step choice), you MUST output the structured quick_reply block instead of a plain-text question.\n\nFormat (at the very end of your response):\n<<QUICK_REPLY>>{"type":"quick_reply","question":"Your question?","options":["Option 1","Option 2","Option 3"]}<<END_QUICK_REPLY>>\n\nRules: Maximum 4 options. Each option maximum 5 words. ONE quick_reply block per response. Regular answers stay as plain text.';
+    } else {
+      const identity = (lang === 'tamil' || lang === 'thanglish') ? TAMIL_CODING_IDENTITY : CODING_IDENTITY;
+      const _lp = getLangPreamble(lang);
+      sysPrompt = (_lp ? _lp + '\n\n' : '') + identity + '\n\n' + systemPrompts[intent] + '\n\n' + langInstr[lang];
+      sysPrompt += `\n\n=== MANDATORY APP-BUILD PROTOCOL (NON-NEGOTIABLE) ===\n\nSTEP 0 — PLATFORM CHECK (BLOCKING):\nBefore ANY mockup, ANY code, or ANY tech suggestion, you MUST know the target platform. If the user has not stated it, your NEXT response must ask ONLY this question — in the user's language — with a QUICK_REPLY block and NOTHING else app-related:\n\nEnglish version:\n<<QUICK_REPLY>>{"type":"quick_reply","question":"Where should your app run?","options":["Phone only","Desktop only","Both","Not sure"]}<<END_QUICK_REPLY>>\n\n[Use this style ONLY when the user writes Tanglish/Tamil] Tanglish version: "Unga app enga use aaganum?"\n<<QUICK_REPLY>>{"type":"quick_reply","question":"Unga app enga use aaganum?","options":["Phone-la mattum","Computer-la mattum","Rendulayum","Theriyala"]}<<END_QUICK_REPLY>>\n\n=== END MANDATORY APP-BUILD PROTOCOL ===`;
+      sysPrompt += '\n\nQUICK REPLY BLOCKS — MANDATORY: Whenever you ask the user to choose between options, you MUST output the structured quick_reply block.\n\nFormat:\n<<QUICK_REPLY>>{"type":"quick_reply","question":"Your question?","options":["Option 1","Option 2","Option 3"]}<<END_QUICK_REPLY>>';
+    }
+    const estimatedTokens = Math.ceil((sysPrompt.length + prompt.length) / 4) + 100;
+    const decision = decideModel(prompt, lang, intent, estimatedTokens);
+    const primaryModel = decision.model;
+    console.log(`[test-qr] lang=${lang} intent=${intent} model=${primaryModel} tokens~${estimatedTokens}`);
+    const { reply, model: usedModel } = await callWithFallback(primaryModel, prompt, sysPrompt, [], lang);
+    const hasQr = (reply||'').includes('<<QUICK_REPLY>>');
+    console.log(`[test-qr] model=${usedModel} has_qr=${hasQr}`);
+    console.log(`[test-qr] RAW REPLY:\n${reply}`);
+    return res.json({ lang, intent, model: usedModel, has_quick_reply: hasQr, raw_reply: reply });
+  } catch(err) {
+    console.error('[test-qr] error:', err.message);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// ============================================
 // MAIN CHAT ENDPOINT — With Router!
 // ============================================
 app.post('/api/chat', requireAuth, async (req, res) => {
@@ -957,14 +1085,60 @@ Write exactly 3 questions a beginner would naturally wonder after reading THAT s
 
 LANGUAGE RULE (STRICT): Detect the language of the user's most recent message. If it is English, your ENTIRE response must be 100% English — zero Tamil or Tanglish words, including greetings (no 'Vanakkam'), fillers ('irukku', 'pannunga', 'theriyum'), and closing questions. If the user's message is in Tamil script or Tanglish, respond fully in that same style. Never mix languages within one response.`;
   } else if (simpleMode) {
-    sysPrompt = SIMPLE_MODE_PROMPT + '\n\n' + langInstructions[lang];
+    const _lp = getLangPreamble(lang);
+    sysPrompt = (_lp ? _lp + '\n\n' : '') + SIMPLE_MODE_PROMPT + '\n\n' + langInstructions[lang];
     sysPrompt += '\n\nQUICK REPLY BLOCKS — MANDATORY: Whenever you ask the user to choose between options (yes/no, topic choice, next-step choice), you MUST output the structured quick_reply block instead of a plain-text question.\n\nFormat (at the very end of your response):\n<<QUICK_REPLY>>{"type":"quick_reply","question":"Your question?","options":["Option 1","Option 2","Option 3"]}<<END_QUICK_REPLY>>\n\nRules: Maximum 4 options. Each option maximum 5 words. ONE quick_reply block per response. Regular answers stay as plain text.';
   } else {
     const identity = isStudent ? STUDENT_IDENTITY
       : (lang === 'tamil' || lang === 'thanglish') ? TAMIL_CODING_IDENTITY
       : CODING_IDENTITY;
-    sysPrompt = identity + '\n\n' + systemPrompts[intent] + '\n\n' + langInstructions[lang];
-    sysPrompt += '\n\nAPP MOCKUP FIRST — MANDATORY FOR NEW APP BUILDS:\nWhen the user wants to BUILD a new multi-screen app (not a bug fix, not a single function/component, not editing existing code, not Enterprise Mode):\n\nPHASE 1 — MOCKUP: Your very next response once requirements are understood must be ONE self-contained HTML mockup inside a ```html code block. It must:\n• Be a single file with all CSS inside a <style> tag — no external files or CDN stylesheets\n• Show the actual screens the user described with realistic placeholder data — use THEIR app name, THEIR feature names, THEIR language for all UI labels and button text (English/Tamil/Thanglish as appropriate)\n• Be mobile-friendly: max-width 430px centred, proper padding, readable font sizes\n• Cover 3–5 sections: a home/landing screen plus the key feature screens they requested\n• Buttons can call alert() or be visual-only — no real backend logic needed\n• Use a proper colour scheme and clear visual hierarchy — not a blank white page\n\nPHASE 2 — APPROVAL MESSAGE: Immediately after the ```html block, write 1–2 sentences in the user\'s language saying the app will look roughly like this and asking if they want to proceed. Then output a <<QUICK_REPLY>> block with these three options translated into the user\'s language: "Build it" | "Change design" | "Add features"\n\nPHASE 3 — CODE: Only after the user chooses "Build it" (or equivalent approval), start generating the full working code — one file at a time, following the ONE FILE PER RESPONSE rule.\n\nDoes NOT apply to: bug fixes, small snippets, single functions, adding one feature to existing code, or Enterprise Mode.';
+    const _lp = getLangPreamble(lang);
+    sysPrompt = (_lp ? _lp + '\n\n' : '') + identity + '\n\n' + systemPrompts[intent] + '\n\n' + langInstructions[lang];
+    sysPrompt += `\n\n=== MANDATORY APP-BUILD PROTOCOL (NON-NEGOTIABLE) ===
+
+STEP 0 — PLATFORM CHECK (BLOCKING):
+Before ANY mockup, ANY code, or ANY tech suggestion, you MUST know the target platform. If the user has not stated it, your NEXT response must ask ONLY this question — in the user's language — with a QUICK_REPLY block and NOTHING else app-related:
+
+English version:
+<<QUICK_REPLY>>{"type":"quick_reply","question":"Where should your app run?","options":["📱 Phone only","💻 Desktop only","🌐 Both","🤷 Not sure"]}<<END_QUICK_REPLY>>
+
+[Use this style ONLY when the user writes Tanglish/Tamil] Tanglish version: "Unga app enga use aaganum?"
+<<QUICK_REPLY>>{"type":"quick_reply","question":"Unga app enga use aaganum?","options":["📱 Phone-la mattum","💻 Computer-la mattum","🌐 Rendulayum","🤷 Theriyala"]}<<END_QUICK_REPLY>>
+
+FORBIDDEN before platform answer exists: generating a mockup, writing any code, or suggesting a tech stack.
+FORBIDDEN always: asking the user to pick a programming language or framework — that is your decision (STEP 1).
+
+STEP 1 — TECH DECISION (AI-ONLY, SILENT):
+Once the platform answer is known, decide silently — never ask the user to choose:
+- Phone only  →  React Native (Expo)
+- Desktop only  →  HTML web app
+- Both / Not sure  →  Responsive HTML web app (mobile-first 430px base + desktop media queries). NEVER offer "React Native vs HTML" as a choice — responsive web IS the answer for both.
+- User explicitly named a tech ("React la pannu", "Flutter app venum", "Python script")  →  use exactly that and skip Step 0.
+Announce the decision in ONE line in the user's language, then move to Step 2:
+  English: "Building as a web app — works on phone browser and desktop from one link."
+  [Use this style ONLY when the user writes Tanglish/Tamil] Tanglish: "Web app-a build panren — phone browser-layum computer-layum ore link-la work aagum."
+
+STEP 2 — MOCKUP → APPROVAL → BUILD:
+PHASE 1 — MOCKUP: Your very next response must be ONE self-contained HTML mockup inside a \`\`\`html code block. It must:
+• Be a single file with all CSS inside a <style> tag — no external files or CDN stylesheets
+• Show the actual screens described with realistic placeholder data — use THEIR app name, THEIR feature names, THEIR language for all UI labels and button text (English/Tamil/Tanglish as appropriate)
+• Be mobile-friendly: max-width 430px centred, proper padding, readable font sizes
+• Cover 3–5 sections: a home/landing screen plus the key feature screens requested
+• Buttons can call alert() or be visual-only — no real backend logic needed
+• Use a proper colour scheme and clear visual hierarchy — not a blank white page
+
+PHASE 2 — APPROVAL: Immediately after the \`\`\`html block, write 1–2 sentences in the user's language saying the app will look roughly like this and asking if they want to proceed. Then output a QUICK_REPLY block with these three options translated into the user's language: "Build it" | "Change design" | "Add features"
+
+PHASE 3 — CODE: Only after the user chooses "Build it" (or equivalent approval), start generating the full working code — one file at a time.
+
+COMPLIANCE EXAMPLES:
+CORRECT — User: "AI-powered productivity app venum" → AI asks the platform question with chips. No mockup, no code yet.
+WRONG — User: "AI-powered productivity app venum" → AI outputs a mockup immediately. (Violation — platform unknown.)
+CORRECT — User: "React la oru dashboard pannu" → AI builds in React. (User named the tech; skip Step 0.)
+
+DOES NOT APPLY TO: bug fixes, small snippets, single functions, adding one feature to existing code, Enterprise Mode, or explicit single-file requests.
+
+=== END MANDATORY APP-BUILD PROTOCOL ===`;
     sysPrompt += '\n\nQUICK REPLY BLOCKS — MANDATORY: Whenever you ask the user to choose between options (topic selection, yes/no confirmation, next-step choice, architecture choice, etc.), you MUST output the structured quick_reply block instead of a plain-text question. Never ask a choice question as plain text.\n\nFormat (place at the very end of your response):\n<<QUICK_REPLY>>{"type":"quick_reply","question":"Your question?","options":["Option 1","Option 2","Option 3"]}<<END_QUICK_REPLY>>\n\nWRONG — plain-text choice question (never do this):\n"Would you like to use Monolithic or Microservices architecture?"\n\nCORRECT — same question as a quick_reply block:\nHere\'s a quick breakdown of both. Before I go deeper, let me know which direction you\'re leaning:\n<<QUICK_REPLY>>{"type":"quick_reply","question":"Which architecture fits your project?","options":["Monolithic","Microservices","Not sure yet"]}<<END_QUICK_REPLY>>\n\nRules: Maximum 4 options. Each option maximum 5 words. ONE quick_reply block per response only. Use ONLY for genuine choice moments — regular answers stay as plain text.';
     isEnterprise = !!(enterpriseMode && isCodeRequest(prompt));
     if (isEnterprise) {
@@ -1134,7 +1308,10 @@ LANGUAGE RULE (STRICT): Detect the language of the user's most recent message. I
       usedModel = result.model;
       console.log(`[model-routing] path=fieldMode model=${usedModel} fallback=${result.didFallback}`);
     } else {
-      ({ reply, model: usedModel } = await callWithFallback(primaryModel, finalPrompt, sysPrompt, recentHistory));
+      ({ reply, model: usedModel } = await callWithFallback(primaryModel, finalPrompt, sysPrompt, recentHistory, lang));
+      // DIAGNOSTIC — log raw reply snippet to check for <<QUICK_REPLY>> presence
+      const _qrPresent = (reply||'').includes('<<QUICK_REPLY>>');
+      console.log(`[debug-qr] model=${usedModel} has_qr_block=${_qrPresent} snippet=${JSON.stringify((reply||'').slice(0,300))}`);
       if (fieldPreviewMode && fieldPreviewMode.trim()) {
         console.log(`[model-routing] path=fieldPreview model=${usedModel} fallback=${usedModel !== primaryModel}`);
       }
@@ -1426,7 +1603,8 @@ async function runCodeCheck(files) {
     { headers: { Authorization: `Bearer ${GROQ_KEY}` }, timeout: 20000 }
   );
   const raw = resp.data?.choices?.[0]?.message?.content || '';
-  const parsed = extractFirstJson(raw);
+  const stripped = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```[\s\S]*$/i, '').trim();
+  const parsed = extractFirstJson(stripped);
   return (parsed && (parsed.status === 'pass' || parsed.status === 'issues'))
     ? parsed
     : { status: 'issues', issues: ['Could not parse check result'] };
@@ -1438,6 +1616,10 @@ app.post('/api/code-check', requireAuth, async (req, res) => {
   try {
     res.json(await runCodeCheck(files));
   } catch (err) {
+    if (err.response?.status === 429) {
+      console.log('[code-check] 70B rate-limited (429) — skipping check, treating as pass');
+      return res.json({ status: 'pass' });
+    }
     console.error('[code-check]', err.message);
     res.status(500).json({ error: 'Code check failed' });
   }
@@ -1445,7 +1627,13 @@ app.post('/api/code-check', requireAuth, async (req, res) => {
 
 app.post('/api/code-fix', requireAuth, async (req, res) => {
   const { files, issues } = req.body;
-  if (!Array.isArray(files) || files.length === 0) return res.json({ error: true });
+  if (!Array.isArray(files) || files.length === 0) {
+    console.log('[code-fix] rejected: no files provided');
+    return res.json({ error: true, reason: 'no-files' });
+  }
+  const totalChars = files.reduce((sum, f) => sum + (f.content || '').length, 0);
+  const issueCount = Array.isArray(issues) ? issues.length : 0;
+  console.log(`[code-fix] start — files:${files.length} totalChars:${totalChars} issues:${issueCount}`);
   try {
     const content = files.map(f => `=== ${f.filename} ===\n${f.content}`).join('\n\n').slice(0, 8000);
     const issueList = (Array.isArray(issues) ? issues : []).join('\n');
@@ -1453,8 +1641,10 @@ app.post('/api/code-fix', requireAuth, async (req, res) => {
     const fixUser = `Issues to fix:\n${issueList}\n\nFiles:\n${content}`;
 
     let raw = null;
+    let groqWas429 = false;
 
     // Try GROQ_70B first
+    console.log(`[code-fix] attempting ${MODELS.GROQ_70B} (timeout:30s)...`);
     try {
       const resp = await axios.post(
         'https://api.groq.com/openai/v1/chat/completions',
@@ -1462,33 +1652,55 @@ app.post('/api/code-fix', requireAuth, async (req, res) => {
         { headers: { Authorization: `Bearer ${GROQ_KEY}` }, timeout: 30000 }
       );
       raw = resp.data?.choices?.[0]?.message?.content || '';
+      const finishReason = resp.data?.choices?.[0]?.finish_reason || 'unknown';
+      console.log(`[code-fix] ${MODELS.GROQ_70B} OK — finish_reason:${finishReason} rawLen:${raw.length}`);
     } catch (groqErr) {
-      if (groqErr.response?.status !== 429) throw groqErr; // non-429 → outer catch
-      console.log('[code-fix] 70B rate-limited (429) — trying Gemini Flash fallback');
-      // Fallback: Gemini Flash only — never downgrade to 8B for code fixing
-      try {
-        raw = await callGeminiModel(MODELS.GEM_FLASH, fixUser, fixSys, [], 4000);
-      } catch (gemErr) {
-        console.log('[code-fix] Gemini fallback also failed:', gemErr.message);
-        return res.json({ busy: true });
+      const status = groqErr.response?.status;
+      if (status === 429) {
+        groqWas429 = true;
+        console.log(`[code-fix] ${MODELS.GROQ_70B} rate-limited (429) — trying Gemini Flash fallback`);
+        // Fallback: Gemini Flash only — never downgrade to 8B for code fixing
+        try {
+          raw = await callGeminiModel(MODELS.GEM_FLASH, fixUser, fixSys, [], 4000);
+          console.log(`[code-fix] Gemini Flash OK — rawLen:${raw ? raw.length : 0}`);
+        } catch (gemErr) {
+          console.log('[code-fix] Gemini fallback also failed:', gemErr.message);
+          return res.json({ busy: true });
+        }
+      } else {
+        console.error(`[code-fix] ${MODELS.GROQ_70B} failed — HTTP:${status ?? 'ERR'} code:${groqErr.code || '-'} msg:${groqErr.message}`);
+        throw groqErr; // non-429 → outer catch
       }
     }
 
-    const parsed = extractFirstJson(raw);
-    if (!parsed || !Array.isArray(parsed.files)) return res.json({ error: true });
+    console.log('[code-fix] parsing JSON response...');
+    const cleanRaw = (raw || '').replace(/^```(?:json)?\s*/i, '').replace(/\s*```[\s\S]*$/i, '').trim();
+    const parsed = extractFirstJson(cleanRaw);
+    if (!parsed || !Array.isArray(parsed.files)) {
+      console.error('[code-fix] parse failed — raw preview:', (raw || '').slice(0, 500));
+      return res.json({ error: true, reason: 'parse' });
+    }
+    console.log(`[code-fix] parse OK — outputFiles:${parsed.files.length} outputChars:${(parsed.files[0]?.content || '').length}`);
     let recheck;
-    try {
-      recheck = await runCodeCheck(parsed.files);
-    } catch (recheckErr) {
-      // Fix succeeded but post-fix verification call failed (e.g. 429 on second Groq call).
-      // Return the corrected files anyway so they aren't silently discarded.
-      console.log('[code-fix] recheck failed after successful fix:', recheckErr.message);
-      return res.json({ files: parsed.files, recheck: { status: 'check-failed' } });
+    if (groqWas429) {
+      // 70B was already rate-limited during the fix — skip recheck to avoid a guaranteed 429 wasted call
+      console.log('[code-fix] skipping recheck — 70B rate-limited during fix');
+      recheck = { status: 'check-skipped' };
+    } else {
+      try {
+        recheck = await runCodeCheck(parsed.files);
+        console.log(`[code-fix] recheck done — status:${recheck.status}`);
+      } catch (recheckErr) {
+        // Fix succeeded but post-fix verification call failed (e.g. 429 on second Groq call).
+        // Return the corrected files anyway so they aren't silently discarded.
+        console.log('[code-fix] recheck failed after successful fix:', recheckErr.message);
+        return res.json({ files: parsed.files, recheck: { status: 'check-failed' } });
+      }
     }
     res.json({ files: parsed.files, recheck });
   } catch (err) {
-    console.error('[code-fix]', err.message);
-    res.json({ error: true });
+    console.error(`[code-fix] outer catch — msg:${err.message} code:${err.code || '-'}`);
+    res.json({ error: true, reason: 'model' });
   }
 });
 
