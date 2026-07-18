@@ -748,7 +748,10 @@ async function callWithFallback(primaryModel, prompt, sysPrompt, history, lang =
       const status = err.response?.status;
       console.log(`[fallback] ${model} -> HTTP ${status ?? err.code}: ${JSON.stringify(err.response?.data || err.message).slice(0, 120)}`);
       if (status === 401) throw err; // bad API key — stop immediately
-      lastError = err;               // 429 / 413 / 400 / 5xx -> try next in chain
+      // Preserve a more informative error — don't let a 404 (dead/inaccessible model) clobber a prior 429 (rate limit)
+      if (!(lastError?.response?.status === 429 && status === 404)) {
+        lastError = err;             // 429 / 413 / 400 / 5xx -> try next in chain
+      }
     }
   }
   throw lastError || new Error('All models in fallback chain exhausted');
@@ -1850,6 +1853,9 @@ app.listen(PORT, () => {
           if (status === 400 && msg.includes('decommissioned')) {
             deadModels.add(model);
             console.warn(`[startup] ✗ ${model} — DECOMMISSIONED, auto-skipping in fallback chain`);
+          } else if (status === 404) {
+            deadModels.add(model);
+            console.warn(`[startup] ✗ ${model} — NOT FOUND (no access), auto-skipping in fallback chain`);
           } else if (status === 429) {
             console.warn(`[startup] ~ ${model} — rate-limited at startup (model is alive, will retry at request time)`);
           } else {
