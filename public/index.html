@@ -1289,9 +1289,9 @@ function clearTamil(){
   document.getElementById('tamil-msgs').innerHTML='<div class="msg"><div class="mav ai" style="background:#FF6B35">AI</div><div><div class="bub">Vanakkam! I am Tamil AI Coding Assistant. Ask me anything in Tamil or English — I will write code, fix bugs, and deploy apps. World\'s first Tamil coding AI!</div></div></div>';
 }
 // ── Chat history – multi-session ───────────────────────────────────────────
-function chAll(){try{return JSON.parse(localStorage.getItem(_chKey())||'[]');}catch(e){return[];}}
+function chAll(){if(!currentUser){console.warn('[ch] chAll called before auth');return[];}try{return JSON.parse(localStorage.getItem(_chKey())||'[]');}catch(e){return[];}}
 function chCurId(){return localStorage.getItem(_acKey())||'';}
-function chStore(a){try{localStorage.setItem(_chKey(),JSON.stringify(a));}catch(e){console.error('[ch] store failed',e);}}
+function chStore(a){if(!currentUser)return;try{localStorage.setItem(_chKey(),JSON.stringify(a));}catch(e){console.error('[ch] store failed',e);}}
 function chMakeTitle(txt){var s=String(txt||'').trim().split(/\s+/).slice(0,6).join(' ');return s?(s.length>44?s.slice(0,44)+'…':s):'New Chat';}
 function chDraw(){
   var el=document.getElementById('ch-list');
