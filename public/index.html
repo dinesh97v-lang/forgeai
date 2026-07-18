@@ -1165,7 +1165,8 @@ const FEATURES={
   vercel:false,
   railway:false,
   docker:false,
-  razorpay:false
+  razorpay:false,
+  appBuilder:true
 };
 var _featureRoutes={deploy:'deploy',test:'testing',memory:'memory',api:'apiStudio',database:'database',monitor:'monitor',tamil:'tamilAI',whatsapp:'whatsapp',privacy:'privacy'};
 var panels=['chat','search','deploy','test','memory','api','database','monitor','oneprompt','tamil','whatsapp','privacy','student','finance','shop','travel','health','govt','business','projects','coming-soon'];
@@ -1410,6 +1411,7 @@ function chNewChat(){
   chatHistory=[];localStorage.removeItem('forgeai_chat_history');
   localStorage.removeItem(_acKey());
   chatFieldMode=null;fieldModeUpdate();
+  _abState=null;
   document.getElementById('chat-msgs').innerHTML=welcomeHTML();
   chDraw();
   var ni=document.querySelector((isSimple()?'#simple-nav':'#pro-nav')+' .ni');if(ni)go('chat',ni);
@@ -1420,6 +1422,7 @@ function chOpen(id){
   for(var i=0;i<all.length;i++){if(all[i].id===id){sess=all[i];break;}}
   if(!sess){console.warn('[chOpen] not found:',id);return;}
   localStorage.setItem(_acKey(),id);
+  _abState=null;
   chatHistory=(Array.isArray(sess.messages)?sess.messages:[]).slice();
   chatFieldMode=sess.fieldMode||null;fieldModeUpdate();
   var cm=document.getElementById('chat-msgs');
@@ -2018,7 +2021,50 @@ function fieldModeSave(field){var id=chCurId(),all=chAll();for(var i=0;i<all.len
 var _flPreviewField=null;
 var _flTeachCount=0;
 var _flTestPending=false;
+var _abState=null;
 function _flTamilInput(s){return /[஀-௿]/.test(s);}
+// ── App Builder Flow (Phase 1) ────────────────────────────────────────────────
+function _abDetectIntent(text){var t=(text||'').toLowerCase();return /\b(build|create|make|develop|design)\b/.test(t)&&/\b(app|application|website|tool|system)\b/.test(t);}
+function _abAsk(question,options){var msgs=document.getElementById('chat-msgs');var div=document.createElement('div');div.className='msg';div.innerHTML='<div class="mav ai">F</div><div><div class="bub">'+esc(question)+'</div></div>';msgs.appendChild(div);flRenderQuickReply({options:options},msgs);msgs.scrollTop=msgs.scrollHeight;}
+function _abHandleAnswer(t){
+  if(!_abState)return false;
+  if(_abState.step===1){_abState.platform=t;_abState.step=2;_abAsk('Which tech stack do you prefer?',['Simple HTML/CSS/JS','React']);return true;}
+  if(_abState.step===2){_abState.techStack=t;_abState.step=3;_abRenderFeatureSelect();return true;}
+  if(_abState.step===3){if(_abState.features.indexOf(t)===-1)_abState.features.push(t);_abState.step=4;_abAsk('What design style do you prefer?',['Minimal','Colorful','Professional']);return true;}
+  if(_abState.step===4){_abState.designStyle=t;_abState.step=5;console.log('[appBuilder] collected state:',JSON.stringify(_abState));return true;}
+  return false;
+}
+function _abRenderFeatureSelect(){
+  var msgs=document.getElementById('chat-msgs');
+  var div=document.createElement('div');div.className='msg';
+  div.innerHTML='<div class="mav ai">F</div><div><div class="bub">'+esc('Which features do you need? Pick one or more, then tap Done.')+'</div></div>';
+  msgs.appendChild(div);
+  var opts=['User Login','Data Storage','Search','Notifications','Payment','Maps','Charts','Chat'];
+  var bar=document.createElement('div');bar.className='fl-qr-bar';bar.id='ab-feat-bar';
+  bar.innerHTML=opts.map(function(o){return '<button class="fl-qr-btn" onclick="_abToggleFeature(this)" data-opt="'+esc(o)+'">'+esc(o)+'</button>';}).join('')+'<button class="fl-qr-btn" style="background:var(--accent);color:#fff;border-color:var(--accent)" onclick="_abFeatureDone()">Done &rarr;</button>';
+  msgs.appendChild(bar);msgs.scrollTop=msgs.scrollHeight;
+}
+function _abToggleFeature(btn){
+  if(!_abState||_abState.step!==3)return;
+  var opt=btn.dataset.opt;
+  var idx=_abState.features.indexOf(opt);
+  if(idx===-1){_abState.features.push(opt);btn.style.background='var(--accent)';btn.style.color='#fff';}
+  else{_abState.features.splice(idx,1);btn.style.background='';btn.style.color='';}
+}
+function _abFeatureDone(){
+  if(!_abState||_abState.step!==3)return;
+  var bar=document.getElementById('ab-feat-bar');
+  if(bar)bar.querySelectorAll('button').forEach(function(b){b.disabled=true;});
+  var label=_abState.features.length?_abState.features.join(', '):'(no features selected)';
+  var msgs=document.getElementById('chat-msgs');
+  var u=document.createElement('div');u.className='msg u';
+  u.innerHTML=renderUserBub({content:label});
+  msgs.appendChild(u);msgs.scrollTop=msgs.scrollHeight;
+  chatHistory.push({role:'user',content:label});
+  saveChat();chSync();
+  _abState.step=4;
+  _abAsk('What design style do you prefer?',['Minimal','Colorful','Professional']);
+}
 function flParseQuickReply(text){
   // Normalize all known close-tag variants to canonical <<END_QUICK_REPLY>>
   var normalized=(text||'')
@@ -2396,6 +2442,19 @@ function send(){
   if(_sendPending)return;
   var inp=document.getElementById('chat-in');
   var t=inp.value.trim();if(!t&&!attachData)return;
+  console.log('[ab-diag] appBuilder='+FEATURES.appBuilder+' simple='+isSimple()+' _abState='+JSON.stringify(_abState)+' detectIntent='+_abDetectIntent(t));
+  if(FEATURES.appBuilder&&!isSimple()){
+    var _abFa=_abState&&_abState.step<=4,_abNi=!_abState&&_abDetectIntent(t);
+    if(_abFa||_abNi){
+      var _abM=document.getElementById('chat-msgs'),_abU=document.createElement('div');
+      _abU.className='msg u';_abU.innerHTML=renderUserBub({content:t});
+      _abM.appendChild(_abU);inp.value='';rsz(inp);_abM.scrollTop=_abM.scrollHeight;
+      chatHistory.push({role:'user',content:t});saveChat();chSync();
+      if(_abNi){_abState={step:1,platform:'',techStack:'',features:[],designStyle:''};_abAsk('Where should your app run?',['Phone only','Desktop only','Both']);}
+      else{_abHandleAnswer(t);}
+      return;
+    }
+  }
   var msgs=document.getElementById('chat-msgs');
   var qtSnap=qtText;
   var attSnap=attachData; // snapshot before clearing
