@@ -2033,11 +2033,34 @@ function _abHandleAnswer(t){
   if(_abState.step===3){if(_abState.features.indexOf(t)===-1)_abState.features.push(t);_abState.step=4;_abAsk('What design style do you prefer?',['Minimal','Colorful','Professional']);return true;}
   if(_abState.step===4){_abState.designStyle=t;_abState.step=5;_abRenderPlanCard();return true;}
   if(_abState.step===5){
-    if(t==='Start over'){_abState={step:1,platform:'',techStack:'',features:[],designStyle:''};_abAsk('Where should your app run?',['Phone only','Desktop only','Both']);}
-    else{console.log('[appBuilder] BUILD TRIGGERED with state:',_abState);}
+    if(t==='Start over'){var _abPrevIntent=_abState.intentText;_abState={step:1,platform:'',techStack:'',features:[],designStyle:'',intentText:_abPrevIntent};_abAsk('Where should your app run?',['Phone only','Desktop only','Both']);}
+    else{_abTriggerBuild();}
     return true;
   }
   return false;
+}
+function _abTriggerBuild(){
+  _abState.step=6;
+  var msgs=document.getElementById('chat-msgs');
+  var buildingContent='Building your app… ⏳';
+  chatHistory.push({role:'assistant',content:buildingContent});
+  saveChat();chSync();
+  var div=document.createElement('div');div.className='msg';
+  div.innerHTML='<div class="mav ai">F</div><div><div class="bub">'+esc(buildingContent)+'</div></div>';
+  msgs.appendChild(div);msgs.scrollTop=msgs.scrollHeight;
+  var s=_abState;
+  var styleGuide=s.designStyle==='Minimal'?'clean white layout, few colors, flat elements':s.designStyle==='Colorful'?'vibrant palette, gradients, rounded corners':s.designStyle==='Professional'?'navy/grey business palette, structured layout':'';
+  var feat=s.features.length?s.features.join(', '):'none';
+  var prompt='Build a complete app.\nApp idea: '+(s.intentText||'')+'\nPlatform: '+s.platform+'\nTech stack: '+s.techStack+'\nFeatures: '+feat+'\nDesign style: '+s.designStyle+' — '+styleGuide+'.\n';
+  if(s.techStack==='React'){
+    prompt+='Generate a SINGLE HTML file that uses React via CDN script tags (react, react-dom, and babel-standalone for in-browser JSX) so it runs directly in an iframe preview with no build step. Return the full file in one ```html code block.';
+  }else{
+    prompt+='Generate plain HTML/CSS/JS as a single HTML file. Return the full file in one ```html code block.';
+  }
+  prompt+='\nDo not give setup instructions or ask the user to create files. End the response with a one-line summary of what the app does.';
+  var inp=document.getElementById('chat-in');
+  inp.value=prompt;
+  send();
 }
 function _abRenderPlanCard(){
   var s=_abState;
@@ -2471,7 +2494,7 @@ function send(){
       _abU.className='msg u';_abU.innerHTML=renderUserBub({content:t});
       _abM.appendChild(_abU);inp.value='';rsz(inp);_abM.scrollTop=_abM.scrollHeight;
       chatHistory.push({role:'user',content:t});saveChat();chSync();
-      if(_abNi){_abState={step:1,platform:'',techStack:'',features:[],designStyle:''};_abAsk('Where should your app run?',['Phone only','Desktop only','Both']);}
+      if(_abNi){_abState={step:1,platform:'',techStack:'',features:[],designStyle:'',intentText:t};_abAsk('Where should your app run?',['Phone only','Desktop only','Both']);}
       else{_abHandleAnswer(t);}
       return;
     }
@@ -2506,6 +2529,7 @@ function send(){
   chatHistory.push(msgObj);
   saveChat();chSync();
   var fetchBody={prompt:apiPrompt||'',history:histForApi,enterpriseMode:enterpriseMode,simpleMode:isSimple()};
+  if(_abState&&_abState.step===6)fetchBody.maxTokensOverride=8000;
   if(chatFieldMode){fetchBody.fieldMode=chatFieldMode;fetchBody.learnLang=_learnLang;}
   if(_pendingSourceUrl){fetchBody.sourceUrl=_pendingSourceUrl;_pendingSourceUrl=null;}
   // Closure-local flag: captures test intent at send-time, not as mutable module state.
@@ -2567,6 +2591,7 @@ function send(){
         }
         if(_qrParsed&&_qrParsed.qr)flRenderQuickReply(_qrParsed.qr,msgs);
         pvAutoUpdate();
+        if(_abState&&_abState.step===6)_abState=null;
       }else{
         chSaveToOrigin(origChatId,{role:'assistant',content:_reply});
       }

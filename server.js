@@ -706,7 +706,7 @@ STYLE: Maximum 5 bullet points per response. Prefer short paragraphs. Include on
 // ============================================
 const _GROQ_CHAIN = [MODELS.GROQ_70B, MODELS.GROQ_8B, MODELS.GROQ_SCOUT];
 
-async function callWithFallback(primaryModel, prompt, sysPrompt, history, lang = 'english') {
+async function callWithFallback(primaryModel, prompt, sysPrompt, history, lang = 'english', maxTokensOverride = null) {
   const isTamilLang = lang === 'tamil' || lang === 'thanglish';
   const isGemini = m => m.startsWith('gemini');
   // Skip 8B for Tamil/Thanglish — it ignores language-match instructions
@@ -741,8 +741,8 @@ async function callWithFallback(primaryModel, prompt, sysPrompt, history, lang =
         : fitHistory(history, sysPrompt, prompt, MODEL_INPUT_LIMITS[model] ?? 4000);
 
       const reply = isGemini(model)
-        ? await callGeminiModel(model, prompt, sysPrompt, safeHistory)
-        : await callGroqModel(model, prompt, sysPrompt, safeHistory);
+        ? await callGeminiModel(model, prompt, sysPrompt, safeHistory, maxTokensOverride)
+        : await callGroqModel(model, prompt, sysPrompt, safeHistory, maxTokensOverride);
       return { reply, model };
     } catch (err) {
       const status = err.response?.status;
@@ -1012,7 +1012,7 @@ app.post('/api/chat', requireAuth, async (req, res) => {
     return res.status(429).json({ error: 'Innikku 100 messages limit mudinjuchu — naaliku continue pannunga!' });
   }
 
-  const { prompt, history, enterpriseMode, simpleMode, attachment, fieldMode, fieldPreviewMode, forceTest, evaluateTest, sourceUrl, learnLang } = req.body;
+  const { prompt, history, enterpriseMode, simpleMode, attachment, fieldMode, fieldPreviewMode, forceTest, evaluateTest, sourceUrl, learnLang, maxTokensOverride } = req.body;
   if (!attachment && (!prompt || !prompt.trim())) {
     return res.status(400).json({ error: 'Prompt is empty!' });
   }
@@ -1308,7 +1308,7 @@ DOES NOT APPLY TO: bug fixes, small snippets, single functions, adding one featu
       usedModel = result.model;
       console.log(`[model-routing] path=fieldMode model=${usedModel} fallback=${result.didFallback}`);
     } else {
-      ({ reply, model: usedModel } = await callWithFallback(primaryModel, finalPrompt, sysPrompt, recentHistory, lang));
+      ({ reply, model: usedModel } = await callWithFallback(primaryModel, finalPrompt, sysPrompt, recentHistory, lang, maxTokensOverride));
       // DIAGNOSTIC — log raw reply snippet to check for <<QUICK_REPLY>> presence
       const _qrPresent = (reply||'').includes('<<QUICK_REPLY>>');
       console.log(`[debug-qr] model=${usedModel} has_qr_block=${_qrPresent} snippet=${JSON.stringify((reply||'').slice(0,300))}`);

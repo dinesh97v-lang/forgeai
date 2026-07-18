@@ -1,1 +1,8 @@
 [startup] ? meta-llama/llama-4-scout-17b-16e-instruct — HTTP 404: The model `meta-llama/llama-4-scout-17b-16e-instruct` does not exist or you do not have access to it
+[code-fix] parse failed — raw preview: ```json
+{
+    "files": [
+        {
+            "filename": "snippet-1.html",
+            "content": "<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n    <meta charset=\"UTF-8\">\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n    <title>Todo App</title>\n    <style>\n        /* Navy/Grey business palette */\n        :root {\n            --navy: #2f4f7f;\n            --grey: #646464;\n            --light-grey: #f7f7f7;\n        }\n        
+        \n        body {\n 
