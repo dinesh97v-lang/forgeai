@@ -2025,14 +2025,33 @@ var _abState=null;
 function _flTamilInput(s){return /[஀-௿]/.test(s);}
 // ── App Builder Flow (Phase 1) ────────────────────────────────────────────────
 function _abDetectIntent(text){var t=(text||'').toLowerCase();return /\b(build|create|make|develop|design)\b/.test(t)&&/\b(app|application|website|tool|system)\b/.test(t);}
-function _abAsk(question,options){var msgs=document.getElementById('chat-msgs');var div=document.createElement('div');div.className='msg';div.innerHTML='<div class="mav ai">F</div><div><div class="bub">'+esc(question)+'</div></div>';msgs.appendChild(div);flRenderQuickReply({options:options},msgs);msgs.scrollTop=msgs.scrollHeight;}
+function _abAsk(question,options){var msgs=document.getElementById('chat-msgs');var div=document.createElement('div');div.className='msg';div.innerHTML='<div class="mav ai">F</div><div><div class="bub">'+esc(question)+'</div></div>';msgs.appendChild(div);flRenderQuickReply({options:options},msgs);msgs.scrollTop=msgs.scrollHeight;chatHistory.push({role:'assistant',content:question,qrOptions:options});saveChat();chSync();}
 function _abHandleAnswer(t){
   if(!_abState)return false;
   if(_abState.step===1){_abState.platform=t;_abState.step=2;_abAsk('Which tech stack do you prefer?',['Simple HTML/CSS/JS','React']);return true;}
   if(_abState.step===2){_abState.techStack=t;_abState.step=3;_abRenderFeatureSelect();return true;}
   if(_abState.step===3){if(_abState.features.indexOf(t)===-1)_abState.features.push(t);_abState.step=4;_abAsk('What design style do you prefer?',['Minimal','Colorful','Professional']);return true;}
-  if(_abState.step===4){_abState.designStyle=t;_abState.step=5;console.log('[appBuilder] collected state:',JSON.stringify(_abState));return true;}
+  if(_abState.step===4){_abState.designStyle=t;_abState.step=5;_abRenderPlanCard();return true;}
+  if(_abState.step===5){
+    if(t==='Start over'){_abState={step:1,platform:'',techStack:'',features:[],designStyle:''};_abAsk('Where should your app run?',['Phone only','Desktop only','Both']);}
+    else{console.log('[appBuilder] BUILD TRIGGERED with state:',_abState);}
+    return true;
+  }
   return false;
+}
+function _abRenderPlanCard(){
+  var s=_abState;
+  var feat=s.features.length?s.features.join(', '):'(none)';
+  var content='Here\'s your app plan:\n📱 Platform: '+s.platform+'\n⚙️ Stack: '+s.techStack+'\n✨ Features: '+feat+'\n🎨 Style: '+s.designStyle+'\nReady to build?';
+  var qrOptions=['Build it 🚀','Start over'];
+  chatHistory.push({role:'assistant',content:content,qrOptions:qrOptions});
+  saveChat();chSync();
+  var msgs=document.getElementById('chat-msgs');
+  var div=document.createElement('div');div.className='msg';
+  div.innerHTML='<div class="mav ai">F</div><div><div class="bub">'+formatMarkdown(content)+'</div></div>';
+  msgs.appendChild(div);
+  flRenderQuickReply({options:qrOptions},msgs);
+  msgs.scrollTop=msgs.scrollHeight;
 }
 function _abRenderFeatureSelect(){
   var msgs=document.getElementById('chat-msgs');
@@ -2043,6 +2062,8 @@ function _abRenderFeatureSelect(){
   var bar=document.createElement('div');bar.className='fl-qr-bar';bar.id='ab-feat-bar';
   bar.innerHTML=opts.map(function(o){return '<button class="fl-qr-btn" onclick="_abToggleFeature(this)" data-opt="'+esc(o)+'">'+esc(o)+'</button>';}).join('')+'<button class="fl-qr-btn" style="background:var(--accent);color:#fff;border-color:var(--accent)" onclick="_abFeatureDone()">Done &rarr;</button>';
   msgs.appendChild(bar);msgs.scrollTop=msgs.scrollHeight;
+  chatHistory.push({role:'assistant',content:'Which features do you need? Pick one or more, then tap Done.',qrOptions:opts});
+  saveChat();chSync();
 }
 function _abToggleFeature(btn){
   if(!_abState||_abState.step!==3)return;
@@ -2444,7 +2465,7 @@ function send(){
   var t=inp.value.trim();if(!t&&!attachData)return;
   console.log('[ab-diag] appBuilder='+FEATURES.appBuilder+' simple='+isSimple()+' _abState='+JSON.stringify(_abState)+' detectIntent='+_abDetectIntent(t));
   if(FEATURES.appBuilder&&!isSimple()){
-    var _abFa=_abState&&_abState.step<=4,_abNi=!_abState&&_abDetectIntent(t);
+    var _abFa=_abState&&_abState.step<=5,_abNi=!_abState&&_abDetectIntent(t);
     if(_abFa||_abNi){
       var _abM=document.getElementById('chat-msgs'),_abU=document.createElement('div');
       _abU.className='msg u';_abU.innerHTML=renderUserBub({content:t});
