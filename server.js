@@ -1015,7 +1015,7 @@ app.post('/api/chat', requireAuth, async (req, res) => {
     return res.status(429).json({ error: 'Innikku 100 messages limit mudinjuchu — naaliku continue pannunga!' });
   }
 
-  const { prompt, history, enterpriseMode, simpleMode, attachment, fieldMode, fieldPreviewMode, forceTest, evaluateTest, sourceUrl, learnLang, maxTokensOverride } = req.body;
+  const { prompt, history, enterpriseMode, simpleMode, attachment, fieldMode, fieldPreviewMode, forceTest, evaluateTest, sourceUrl, learnLang, maxTokensOverride, appBuilderBuild } = req.body;
   if (!attachment && (!prompt || !prompt.trim())) {
     return res.status(400).json({ error: 'Prompt is empty!' });
   }
@@ -1097,6 +1097,9 @@ LANGUAGE RULE (STRICT): Detect the language of the user's most recent message. I
       : CODING_IDENTITY;
     const _lp = getLangPreamble(lang);
     sysPrompt = (_lp ? _lp + '\n\n' : '') + identity + '\n\n' + systemPrompts[intent] + '\n\n' + langInstructions[lang];
+    if (appBuilderBuild === true) {
+      // App Builder's client-side flow already sent a complete build prompt (platform/stack/features/style/DESIGN SYSTEM) — skip the protocol below, it would conflict.
+    } else {
     sysPrompt += `\n\n=== MANDATORY APP-BUILD PROTOCOL (NON-NEGOTIABLE) ===
 
 STEP 0 — PLATFORM CHECK (BLOCKING):
@@ -1142,6 +1145,7 @@ CORRECT — User: "React la oru dashboard pannu" → AI builds in React. (User n
 DOES NOT APPLY TO: bug fixes, small snippets, single functions, adding one feature to existing code, Enterprise Mode, or explicit single-file requests.
 
 === END MANDATORY APP-BUILD PROTOCOL ===`;
+    }
     sysPrompt += '\n\nQUICK REPLY BLOCKS — MANDATORY: Whenever you ask the user to choose between options (topic selection, yes/no confirmation, next-step choice, architecture choice, etc.), you MUST output the structured quick_reply block instead of a plain-text question. Never ask a choice question as plain text.\n\nFormat (place at the very end of your response):\n<<QUICK_REPLY>>{"type":"quick_reply","question":"Your question?","options":["Option 1","Option 2","Option 3"]}<<END_QUICK_REPLY>>\n\nWRONG — plain-text choice question (never do this):\n"Would you like to use Monolithic or Microservices architecture?"\n\nCORRECT — same question as a quick_reply block:\nHere\'s a quick breakdown of both. Before I go deeper, let me know which direction you\'re leaning:\n<<QUICK_REPLY>>{"type":"quick_reply","question":"Which architecture fits your project?","options":["Monolithic","Microservices","Not sure yet"]}<<END_QUICK_REPLY>>\n\nRules: Maximum 4 options. Each option maximum 5 words. ONE quick_reply block per response only. Use ONLY for genuine choice moments — regular answers stay as plain text.';
     isEnterprise = !!(enterpriseMode && isCodeRequest(prompt));
     if (isEnterprise) {
