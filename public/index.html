@@ -1621,11 +1621,20 @@ function resendMsg(btn){
   var text=ta?ta.value.trim():(bub.innerText||bub.textContent).trim();
   if(!text)return;
   var msgIdx=Array.from(msgs.children).indexOf(msgDiv);
-  while(msgs.children.length>msgIdx){msgs.removeChild(msgs.children[msgIdx]);}
   var hasWelcome=!!document.getElementById('welcome-bub');
   var histIdx=msgIdx-(hasWelcome?1:0);
+  var origMsg=chatHistory[histIdx];
+  while(msgs.children.length>msgIdx){msgs.removeChild(msgs.children[msgIdx]);}
   chatHistory=chatHistory.slice(0,histIdx);
   saveChat();
+  // App Builder build-trigger message: replay the stored full prompt, not the short displayed label —
+  // and bridge through _abState so send() attaches maxTokensOverride/appBuilderBuild without re-running intent detection.
+  if(origMsg&&origMsg.isBuilderBuild&&origMsg.fullPrompt){
+    _abState={step:6,intentText:(origMsg.content||'').replace(/^🚀 Build: /,'')};
+    document.getElementById('chat-in').value=origMsg.fullPrompt;
+    send();
+    return;
+  }
   document.getElementById('chat-in').value=text;
   send();
 }
@@ -2531,6 +2540,8 @@ function send(){
   if(qtSnap)msgObj.quotedText=qtSnap;
   // Store placeholder only (no base64 image data in localStorage)
   if(attSnap)msgObj.attachment={type:attSnap.type,name:attSnap.name};
+  // App Builder build-trigger message: keep the full prompt so Resend can replay it instead of the short label
+  if(_abState&&_abState.step===6){msgObj.fullPrompt=apiPrompt;msgObj.isBuilderBuild=true;}
   chatHistory.push(msgObj);
   saveChat();chSync();
   var fetchBody={prompt:apiPrompt||'',history:histForApi,enterpriseMode:enterpriseMode,simpleMode:isSimple()};

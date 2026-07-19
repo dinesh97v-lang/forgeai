@@ -705,6 +705,9 @@ STYLE: Maximum 5 bullet points per response. Prefer short paragraphs. Include on
 // Throws only when entire chain is exhausted.
 // ============================================
 const _GROQ_CHAIN = [MODELS.GROQ_70B, MODELS.GROQ_8B, MODELS.GROQ_SCOUT];
+// Per-model safe output budget — caps a caller-supplied maxTokensOverride so it can't
+// request more output than a smaller model's TPM budget can hold alongside input tokens.
+const _MODEL_OUTPUT_BUDGET = { [MODELS.GROQ_70B]: 8000, [MODELS.GROQ_8B]: 2000 };
 
 async function callWithFallback(primaryModel, prompt, sysPrompt, history, lang = 'english', maxTokensOverride = null) {
   const isTamilLang = lang === 'tamil' || lang === 'thanglish';
@@ -734,6 +737,15 @@ async function callWithFallback(primaryModel, prompt, sysPrompt, history, lang =
       console.log(`[fallback] Skip ${model} — < 5% quota`);
       continue;
     }
+    // Cap a caller-supplied override to this model's safe output budget (Gemini unaffected)
+    let effectiveMaxTokens = maxTokensOverride;
+    if (!isGemini(model) && maxTokensOverride != null && _MODEL_OUTPUT_BUDGET[model] != null) {
+      effectiveMaxTokens = Math.min(maxTokensOverride, _MODEL_OUTPUT_BUDGET[model]);
+      if (effectiveMaxTokens < 1000) {
+        console.log(`[fallback] Skip ${model} — effective output budget ${effectiveMaxTokens} too small for this request`);
+        continue;
+      }
+    }
     try {
       // Fit history to this model's safe input budget before calling
       const safeHistory = isGemini(model)
@@ -742,14 +754,14 @@ async function callWithFallback(primaryModel, prompt, sysPrompt, history, lang =
 
       const reply = isGemini(model)
         ? await callGeminiModel(model, prompt, sysPrompt, safeHistory, maxTokensOverride)
-        : await callGroqModel(model, prompt, sysPrompt, safeHistory, maxTokensOverride);
+        : await callGroqModel(model, prompt, sysPrompt, safeHistory, effectiveMaxTokens);
       return { reply, model };
     } catch (err) {
       const status = err.response?.status;
       console.log(`[fallback] ${model} -> HTTP ${status ?? err.code}: ${JSON.stringify(err.response?.data || err.message).slice(0, 120)}`);
       if (status === 401) throw err; // bad API key — stop immediately
-      // Preserve a more informative error — don't let a 404 (dead/inaccessible model) clobber a prior 429 (rate limit)
-      if (!(lastError?.response?.status === 429 && status === 404)) {
+      // Preserve a more informative error — don't let a 404 (dead/inaccessible model) or 413 (request too large) clobber a prior 429 (rate limit)
+      if (!(lastError?.response?.status === 429 && (status === 404 || status === 413))) {
         lastError = err;             // 429 / 413 / 400 / 5xx -> try next in chain
       }
     }
@@ -1460,14 +1472,18 @@ DOES NOT APPLY TO: bug fixes, small snippets, single functions, adding one featu
     console.error('[chat-error] stack:', error.stack || error);
     console.error('[chat-error] response:', JSON.stringify(error.response?.data ?? null));
     let errorMsg = 'Something went wrong. Please try again.';
+    let statusCode = 500;
     if (error.response?.status === 401) {
       errorMsg = 'API key wrong! Check your .env file.';
     } else if (error.response?.status === 429) {
       errorMsg = 'AI service quota mudinjuchu — konjam neram kalichu try pannunga';
+    } else if (error.response?.status === 413) {
+      errorMsg = 'Request romba periya irukku — konjam chinna app idea try pannunga, illa konjam neram kalichu try pannunga.';
+      statusCode = 413;
     } else if (error.code === 'ECONNABORTED' || error.message?.includes('timeout')) {
       errorMsg = 'Connection issue. Please try again.';
     }
-    res.status(500).json({ error: errorMsg });
+    res.status(statusCode).json({ error: errorMsg });
   }
 });
 
