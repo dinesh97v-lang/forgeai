@@ -1680,9 +1680,10 @@ function pvDetectLang(rawLang, code){
 function pvBuild(){
   var h=pvFiles.html; if(!h) return '';
   console.log('[pvBuild] html='+h.length+'ch css='+pvFiles.css.length+'ch js='+pvFiles.js.length+'ch');
-  // External refs fail silently in srcdoc — strip them; we inject inline below
-  h=h.replace(/<link\b[^>]*>/gi,'');
-  h=h.replace(/<script\b[^>]*\bsrc\s*=\s*["'][^"']*["'][^>]*>\s*<\/script>/gi,'');
+  // Local refs fail silently in srcdoc — strip them; we inject inline below.
+  // CDN refs (https://, http://, protocol-relative //) load fine in srcdoc — keep those.
+  h=h.replace(/<link\b(?![^>]*\bhref\s*=\s*["'](?:https?:)?\/\/)[^>]*>/gi,'');
+  h=h.replace(/<script\b(?![^>]*\bsrc\s*=\s*["'](?:https?:)?\/\/)[^>]*\bsrc\s*=\s*["'][^"']*["'][^>]*>\s*<\/script>/gi,'');
   var css=pvFiles.css, js=pvFiles.js;
   if(css){
     var st='<style>\n'+css+'\n</style>';
@@ -2049,9 +2050,11 @@ function _abTriggerBuild(){
   div.innerHTML='<div class="mav ai">F</div><div><div class="bub">'+esc(buildingContent)+'</div></div>';
   msgs.appendChild(div);msgs.scrollTop=msgs.scrollHeight;
   var s=_abState;
-  var styleGuide=s.designStyle==='Minimal'?'clean white layout, few colors, flat elements':s.designStyle==='Colorful'?'vibrant palette, gradients, rounded corners':s.designStyle==='Professional'?'navy/grey business palette, structured layout':'';
+  var styleGuide=s.designStyle==='Minimal'?'DESIGN SYSTEM (mandatory):\n- Include Tailwind CSS via CDN: <script src="https://cdn.tailwindcss.com"><\/script>\n- Layout: max-w-4xl mx-auto container, card-based sections with bg-white rounded-xl shadow-lg p-6, page background #F8FAFC, clean white cards, subtle shadows (shadow-md), no gradients\n- Header: flat solid header (primary #0F172A slate-900) with white text, text-2xl font-bold, rounded-t-xl\n- Buttons: rounded-lg px-4 py-2 font-medium, hover state darkening, transition-all duration-200\n- Inputs: rounded-lg border border-gray-300 px-4 py-2 focus:ring-2 focus:outline-none, ring color accent #334155 slate-700\n- All interactive elements need hover/focus states with transition-all duration-200\n- Use inline SVG icons (not emojis) for add/delete/edit/check actions\n- Empty states: centered muted message with icon when lists are empty\n- Progress indicators (bars/percentages) where relevant\n- Mobile responsive: stacked on small screens, grid/flex-row on md+\n- Typography: text-2xl font-bold titles, text-sm text-gray-500 secondary text'
+    :s.designStyle==='Colorful'?'DESIGN SYSTEM (mandatory):\n- Include Tailwind CSS via CDN: <script src="https://cdn.tailwindcss.com"><\/script>\n- Layout: max-w-4xl mx-auto container, card-based sections with bg-white rounded-xl shadow-lg p-6, page background light gray/white\n- Header: gradient header (indigo-600 to purple-600) with white text, text-2xl font-bold, rounded-t-xl\n- Buttons: rounded-lg px-4 py-2 font-medium, hover state darkening, transition-all duration-200\n- Inputs: rounded-lg border border-gray-300 px-4 py-2 focus:ring-2 focus:outline-none, ring color indigo-500\n- All interactive elements need hover/focus states with transition-all duration-200\n- Use inline SVG icons (not emojis) for add/delete/edit/check actions\n- Empty states: centered muted message with icon when lists are empty\n- Progress indicators (bars/percentages) where relevant\n- Mobile responsive: stacked on small screens, grid/flex-row on md+\n- Typography: text-2xl font-bold titles, text-sm text-gray-500 secondary text'
+    :'DESIGN SYSTEM (mandatory):\n- Include Tailwind CSS via CDN: <script src="https://cdn.tailwindcss.com"><\/script>\n- Layout: max-w-4xl mx-auto container, card-based sections with bg-white rounded-xl shadow-lg p-6, page background #F9FAFB\n- Header: gradient header (from-slate-800 to-blue-900, primary #1E3A5F navy) with white text, text-2xl font-bold, rounded-t-xl\n- Buttons: rounded-lg px-4 py-2 font-medium, hover state darkening, transition-all duration-200\n- Inputs: rounded-lg border border-gray-300 px-4 py-2 focus:ring-2 focus:outline-none, ring color accent #3B82F6 blue-500\n- All interactive elements need hover/focus states with transition-all duration-200\n- Use inline SVG icons (not emojis) for add/delete/edit/check actions\n- Empty states: centered muted message with icon when lists are empty\n- Progress indicators (bars/percentages) where relevant\n- Mobile responsive: stacked on small screens, grid/flex-row on md+\n- Typography: text-2xl font-bold titles, text-sm text-gray-500 secondary text';
   var feat=s.features.length?s.features.join(', '):'none';
-  var prompt='Build a complete app.\nApp idea: '+(s.intentText||'')+'\nPlatform: '+s.platform+'\nTech stack: '+s.techStack+'\nFeatures: '+feat+'\nDesign style: '+s.designStyle+' — '+styleGuide+'.\n';
+  var prompt='Build a complete app.\nApp idea: '+(s.intentText||'')+'\nPlatform: '+s.platform+'\nTech stack: '+s.techStack+'\nFeatures: '+feat+'\nDesign style: '+s.designStyle+'\n'+styleGuide+'\n';
   if(s.techStack==='React'){
     prompt+='Generate a SINGLE HTML file that uses React via CDN script tags (react, react-dom, and babel-standalone for in-browser JSX) so it runs directly in an iframe preview with no build step. Return the full file in one ```html code block.';
   }else{
