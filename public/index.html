@@ -2034,7 +2034,7 @@ var _flTestPending=false;
 var _abState=null;
 function _flTamilInput(s){return /[஀-௿]/.test(s);}
 // ── App Builder Flow (Phase 1) ────────────────────────────────────────────────
-function _abDetectIntent(text){var t=(text||'').toLowerCase();return /\b(build|create|make|develop|design)\b/.test(t)&&/\b(app|application|website|tool|system)\b/.test(t);}
+function _abDetectIntent(text){var t=(text||'').toLowerCase();return /\b(build|create|make|develop|design|venum|pannu|pannanum|seyyanum|vendiyathu)\b/.test(t)&&/\b(app|application|website|tool|system)\b/.test(t);}
 function _abAsk(question,options){var msgs=document.getElementById('chat-msgs');var div=document.createElement('div');div.className='msg';div.innerHTML='<div class="mav ai">F</div><div><div class="bub">'+esc(question)+'</div></div>';msgs.appendChild(div);flRenderQuickReply({options:options},msgs);msgs.scrollTop=msgs.scrollHeight;chatHistory.push({role:'assistant',content:question,qrOptions:options});saveChat();chSync();}
 function _abHandleAnswer(t){
   if(!_abState)return false;
@@ -2620,6 +2620,7 @@ function send(){
         ai.innerHTML='<div class="mav ai">F</div><div><div class="bub" style="color:var(--danger)">Connection error — is the server running?</div>'+aiActBar()+'</div>';
         msgs.appendChild(ai);msgs.scrollTop=msgs.scrollHeight;
       }
+      if(_abState&&_abState.step===6)_abState=null;
       _unlockSend();
     });
 }
@@ -3466,6 +3467,11 @@ function ccRunFix(ccId){
       _ccStore[ccId].fixedFiles=d.files;
       if(d.recheck&&d.recheck.status==='check-failed'){
         wrap.innerHTML='<div class="cc-card"><div style="color:var(--text2);margin-bottom:6px">Fix applied — verification unavailable (model busy). Download to review.</div>'
+          +'<button class="cc-btn prim" onclick="ccDownload(\''+ccId+'\')">Download ZIP</button></div>';
+        return;
+      }
+      if(d.recheck&&d.recheck.status==='check-skipped'){
+        wrap.innerHTML='<div class="cc-card"><div style="color:var(--text2);margin-bottom:6px">Fix applied — couldn\'t auto-verify right now, download to review.</div>'
           +'<button class="cc-btn prim" onclick="ccDownload(\''+ccId+'\')">Download ZIP</button></div>';
         return;
       }

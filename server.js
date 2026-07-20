@@ -1633,22 +1633,28 @@ app.get('/api/preview', requireAuth, async (req, res) => {
 // ============================================
 // CODE PIPELINE — check / fix / zip
 // ============================================
-async function runCodeCheck(files) {
+async function runCodeCheck(files, model = MODELS.GROQ_70B) {
   const content = files.map(f => `=== ${f.filename} ===\n${f.content}`).join('\n\n').slice(0, 8000);
-  const resp = await axios.post(
-    'https://api.groq.com/openai/v1/chat/completions',
-    {
-      model: MODELS.GROQ_70B,
-      messages: [
-        { role: 'system', content: 'You are a code reviewer. Check the following files for syntax errors, obvious bugs, missing dependencies, and security issues (hardcoded secrets, eval). Respond in this exact JSON format only: { "status": "pass" or "issues", "issues": ["issue 1", "issue 2"] }. If code is fine, status is pass with empty issues array.' },
-        { role: 'user', content: content }
-      ],
-      max_tokens: 800,
-      temperature: 0
-    },
-    { headers: { Authorization: `Bearer ${GROQ_KEY}` }, timeout: 20000 }
-  );
-  const raw = resp.data?.choices?.[0]?.message?.content || '';
+  const sysMsg = 'You are a code reviewer. Check the following files for syntax errors, obvious bugs, missing dependencies, and security issues (hardcoded secrets, eval). Respond in this exact JSON format only: { "status": "pass" or "issues", "issues": ["issue 1", "issue 2"] }. If code is fine, status is pass with empty issues array.';
+  let raw;
+  if (model.startsWith('gemini')) {
+    raw = await callGeminiModel(model, content, sysMsg, [], 800);
+  } else {
+    const resp = await axios.post(
+      'https://api.groq.com/openai/v1/chat/completions',
+      {
+        model,
+        messages: [
+          { role: 'system', content: sysMsg },
+          { role: 'user', content: content }
+        ],
+        max_tokens: 800,
+        temperature: 0
+      },
+      { headers: { Authorization: `Bearer ${GROQ_KEY}` }, timeout: 20000 }
+    );
+    raw = resp.data?.choices?.[0]?.message?.content || '';
+  }
   const stripped = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```[\s\S]*$/i, '').trim();
   const parsed = extractFirstJson(stripped);
   return (parsed && (parsed.status === 'pass' || parsed.status === 'issues'))
@@ -1737,10 +1743,29 @@ app.post('/api/code-fix', requireAuth, async (req, res) => {
         recheck = await runCodeCheck(parsed.files);
         console.log(`[code-fix] recheck done — status:${recheck.status}`);
       } catch (recheckErr) {
-        // Fix succeeded but post-fix verification call failed (e.g. 429 on second Groq call).
-        // Return the corrected files anyway so they aren't silently discarded.
-        console.log('[code-fix] recheck failed after successful fix:', recheckErr.message);
-        return res.json({ files: parsed.files, recheck: { status: 'check-failed' } });
+        if (recheckErr.response?.status === 429) {
+          console.log('[code-fix] recheck 70B rate-limited (429) — trying Gemini Flash for verification');
+          const _lim = GEMINI_DAILY_LIMITS[MODELS.GEM_FLASH];
+          const _c = geminiCounters[MODELS.GEM_FLASH];
+          const _today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
+          const _used = (_c && _c.date === _today) ? _c.count : 0;
+          if (_lim && _used >= _lim) {
+            console.log(`[code-fix] Gemini Flash daily quota exhausted (${_used}/${_lim}) — skipping recheck fallback`);
+            return res.json({ files: parsed.files, recheck: { status: 'check-failed' } });
+          }
+          try {
+            recheck = await runCodeCheck(parsed.files, MODELS.GEM_FLASH);
+            console.log(`[code-fix] recheck via Gemini Flash done — status:${recheck.status}`);
+          } catch (gemRecheckErr) {
+            console.log('[code-fix] Gemini Flash recheck also failed:', gemRecheckErr.message);
+            return res.json({ files: parsed.files, recheck: { status: 'check-failed' } });
+          }
+        } else {
+          // Fix succeeded but post-fix verification call failed (e.g. non-429 error on the Groq recheck call).
+          // Return the corrected files anyway so they aren't silently discarded.
+          console.log('[code-fix] recheck failed after successful fix:', recheckErr.message);
+          return res.json({ files: parsed.files, recheck: { status: 'check-failed' } });
+        }
       }
     }
     res.json({ files: parsed.files, recheck });
