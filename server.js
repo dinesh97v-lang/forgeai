@@ -766,6 +766,29 @@ async function callWithFallback(primaryModel, prompt, sysPrompt, history, lang =
       }
     }
   }
+  // Groq chain exhausted. If Gemini wasn't already part of this attempt (primary wasn't Gemini),
+  // try it as a final fallback — regardless of language — before giving up. Uses Gemini's own
+  // default output cap (not the Groq-calibrated maxTokensOverride/budget), and respects the
+  // existing geminiCounters daily-quota tracking so an exhausted Gemini model is skipped, not called.
+  if (GEMINI_KEY && !chain.some(isGemini)) {
+    for (const model of [MODELS.GEM_FLASH, MODELS.GEM_LITE]) {
+      const _lim = GEMINI_DAILY_LIMITS[model];
+      const _c = geminiCounters[model];
+      const _today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
+      const _used = (_c && _c.date === _today) ? _c.count : 0;
+      if (_lim && _used >= _lim) {
+        console.log(`[fallback] Skip ${model} — daily quota exhausted (${_used}/${_lim})`);
+        continue;
+      }
+      try {
+        const reply = await callGeminiModel(model, prompt, sysPrompt, history);
+        return { reply, model };
+      } catch (err) {
+        console.log(`[fallback] ${model} -> HTTP ${err.response?.status ?? err.code}: ${JSON.stringify(err.response?.data || err.message).slice(0, 120)}`);
+        lastError = err;
+      }
+    }
+  }
   throw lastError || new Error('All models in fallback chain exhausted');
 }
 
