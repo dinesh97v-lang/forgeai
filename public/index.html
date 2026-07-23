@@ -1290,6 +1290,7 @@ function saveChat(){chatHistory=chatHistory.slice(-50);localStorage.setItem('for
 function saveTamilChat(){tamilHistory=tamilHistory.slice(-50);localStorage.setItem(_thKey(),JSON.stringify(tamilHistory));}
 function clearChat(){
   chatHistory=[];localStorage.removeItem('forgeai_chat_history');
+  _abState=null;_abClearState();_abLiveBar=null;
   var cid=chCurId();
   if(cid){var a=chAll();for(var i=0;i<a.length;i++){if(a[i].id===cid){a[i].messages=[];a[i].title='New Chat';break;}}chStore(a);chDraw();}
   document.getElementById('chat-msgs').innerHTML=welcomeHTML();
@@ -1470,7 +1471,7 @@ function chRemove(id){
   if(chCurId()===id){
     localStorage.removeItem(_acKey());chatHistory=[];localStorage.removeItem('forgeai_chat_history');
     if(all.length){chOpen(all[0].id);}
-    else{document.getElementById('chat-msgs').innerHTML=welcomeHTML();chDraw();}
+    else{_abState=null;_abClearState();_abLiveBar=null;document.getElementById('chat-msgs').innerHTML=welcomeHTML();chDraw();}
   }else{chDraw();}
 }
 function isSimple(){return document.getElementById('simple-btn').classList.contains('active')}
@@ -1545,36 +1546,93 @@ function _abFenceOpenUnclosed(text){
   if(!tm)return null;
   return {before:s.slice(0,lastEnd),lang:tm[1]||'',code:tm[2]||''};
 }
+// Finds the longest suffix of `tail` that matches a prefix of `cont` and drops it from `cont` —
+// models often restate a few trailing lines/tokens as a continuation starts, despite being told
+// not to. Capped search length and a minimum match length avoid both wasted work and false
+// positives on trivial short coincidental matches.
+function _abStripOverlap(tail,cont){
+  var maxLen=Math.min(tail.length,cont.length,300);
+  for(var len=maxLen;len>=8;len--){
+    if(tail.slice(-len)===cont.slice(0,len))return cont.slice(len);
+  }
+  return cont;
+}
+// A continuation is only trustworthy as "complete" if it (a) actually contains a closing fence
+// and (b) that fence is at/near the very end of what the model returned — a ``` appearing mid-
+// continuation (a stray fence, or a markdown example embedded in the model's own output) is NOT
+// the model signalling completion, it's content that would otherwise get silently cut off there.
+function _abContinuationVerdict(cont){
+  var idx=cont.indexOf('```');
+  if(idx===-1)return{code:cont,done:false};
+  var after=cont.slice(idx+3).trim();
+  return{code:cont.slice(0,idx),done:after.length===0};
+}
+// Sanity-check before ever trusting a "done" verdict: our build prompts always request a single
+// HTML file (even the React path is one HTML file with CDN scripts), so a genuinely complete
+// result should be a plausible length and end with a closing </html> tag.
+function _abLooksComplete(code){
+  var trimmed=(code||'').trim();
+  if(trimmed.length<200)return false;
+  return /<\/html>/i.test(trimmed.slice(-300));
+}
+// Upgrades the generic "cut off" warning formatMarkdown() already renders for an unclosed fence
+// into a specific one once we know an automatic continuation was attempted and failed, instead of
+// leaving the user with no sign a retry ever happened.
+function _abMarkContinuationFailed(aiDiv,reason){
+  console.log('[_abContinueBuild] automatic continuation failed: '+reason);
+  var bub=aiDiv&&aiDiv.querySelector('.bub');
+  var warn=bub&&bub.querySelector('div[style*="d97706"]');
+  if(warn)warn.textContent='⚠️ code was cut off; automatic continuation failed ('+reason+')';
+}
 // Guided-flow build step only: if the generated file got cut off (model hit its output-token
 // limit before writing the closing fence), automatically ask it to continue from exactly where
 // it stopped and stitch the result into the SAME message, so the user ends up with one complete
 // file instead of a truncated one. Capped at a few attempts so a persistently-oversized app can't
-// loop forever — after the cap, the existing "cut off" notice in formatMarkdown() stays visible.
+// loop forever. Holds the send lock for the ENTIRE sequence (all rounds) — released on every
+// terminal path (done, cap reached, empty reply, or a request error) so the UI can never be left
+// stuck locked.
 var _abContinueCap=3;
 function _abContinueBuild(msgs,aiDiv,attempt){
   var lastMsg=chatHistory[chatHistory.length-1];
-  if(!lastMsg||lastMsg.role!=='assistant')return;
+  if(!lastMsg||lastMsg.role!=='assistant'){_unlockSend();return;}
   var info=_abFenceOpenUnclosed(lastMsg.content||'');
-  if(!info)return;
-  if(attempt>_abContinueCap)return;
+  if(!info){_unlockSend();return;} // already complete — nothing to do
+  if(attempt>_abContinueCap){
+    _abMarkContinuationFailed(aiDiv,'reached the automatic-continuation limit');
+    _unlockSend();
+    return;
+  }
   var snippet=info.code.slice(-500);
   var contPrompt='The previous response was cut off mid-file because it hit a length limit. Continue writing the EXACT same file, starting immediately after the snippet below — do NOT repeat it, do NOT restate any earlier code, do NOT add any explanation or markdown fence markers of your own. Output raw code only. If the file is now fully complete, end your output with a line containing only three backticks.\n\nLast part of the file so far:\n'+snippet;
   var histForApi=chatHistory.slice(-10).map(function(m){return{role:m.role,content:m.content};});
   fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt:contPrompt,history:histForApi,simpleMode:false,enterpriseMode:false,maxTokensOverride:8192,appBuilderBuild:true,appBuilderClientOwns:true})})
     .then(function(r){return r.json();})
     .then(function(d){
-      var cont=(d.reply||'').replace(/^\s*```[^\n]*\n?/,'').trim();
-      if(!cont)return;
-      var newCode=info.code+'\n'+cont;
-      var newContent=info.before+'```'+info.lang+'\n'+newCode;
+      var raw=d.reply||'';
+      if(!raw.trim()){
+        _abMarkContinuationFailed(aiDiv,d.error||'empty response');
+        _unlockSend();
+        return;
+      }
+      var cont=raw.replace(/^\s*```[^\n]*\n?/,''); // strip a stray opening fence of its own
+      cont=_abStripOverlap(snippet,cont);
+      var verdict=_abContinuationVerdict(cont);
+      var newCode=(info.code+'\n'+verdict.code).trim();
+      var done=verdict.done&&_abLooksComplete(newCode);
+      if(verdict.done&&!done)console.log('[_abContinueBuild] fence closed but content failed the completeness sanity check — treating as still cut off');
+      var newContent=info.before+'```'+info.lang+'\n'+newCode+(done?'\n```':'');
       lastMsg.content=newContent;
       saveChat();chSync();
       var bub=aiDiv&&aiDiv.querySelector('.bub');
       if(bub)bub.innerHTML=formatMarkdown(newContent);
       pvAutoUpdate();
-      if(_abFenceOpenUnclosed(newContent))_abContinueBuild(msgs,aiDiv,attempt+1);
+      if(done)_unlockSend();
+      else _abContinueBuild(msgs,aiDiv,attempt+1);
     })
-    .catch(function(){/* leave the cut-off notice showing — a network error here isn't worth surfacing separately */});
+    .catch(function(){
+      _abMarkContinuationFailed(aiDiv,'connection error');
+      _unlockSend();
+    });
 }
 function copyCode(id){
   var el=document.getElementById(id);if(!el)return;
@@ -1709,6 +1767,22 @@ function resendMsg(btn){
   var hasWelcome=!!document.getElementById('welcome-bub');
   var histIdx=msgIdx-(hasWelcome?1:0);
   var origMsg=chatHistory[histIdx];
+  // A DIFFERENT, newer guided flow (steps 1-5) may already be in progress further down this
+  // same chat — this check MUST run before any destructive truncation below, or refusing here
+  // would still have already deleted that newer flow's own messages/cards out from under it.
+  // Refuse and leave everything untouched: there's no way to know whether the user actually
+  // wants to abandon the newer flow, and it's already resumable/restartable via the Back/Start
+  // over controls added on its own card.
+  if(origMsg&&origMsg.isBuilderBuild&&origMsg.fullPrompt&&_abState&&_abState.step<=5){
+    console.log('[resendMsg] refusing build-resend — a newer guided flow (step '+_abState.step+') is active, leaving it untouched');
+    var isTa=_abDetectLang(_abState.intentText||'')!=='english';
+    var notice=isTa?'Ippo nee oru pudhu app-build flow-la irukka 🙏 Adha mudichitu (illa adhoda card-la 🔄 Start over podunga), appuram indha pazhaya build-a resend pannunga.':'You\'re in the middle of a newer app-build flow right now 🙏 Please finish it (or tap 🔄 Start over on its card) before resending this older build.';
+    var _rfu=document.createElement('div');_rfu.className='msg';
+    _rfu.innerHTML='<div class="mav ai">F</div><div><div class="bub">'+esc(notice)+'</div></div>';
+    msgs.appendChild(_rfu);msgs.scrollTop=msgs.scrollHeight;
+    chatHistory.push({role:'assistant',content:notice});saveChat();chSync();
+    return;
+  }
   while(msgs.children.length>msgIdx){msgs.removeChild(msgs.children[msgIdx]);}
   chatHistory=chatHistory.slice(0,histIdx);
   saveChat();
@@ -2261,7 +2335,10 @@ function _abStartWithIntro(t){
   Promise.race([fetchP,timeoutP]).then(function(d){
     var ty=document.getElementById('ab-intro-typ');if(ty)ty.remove();
     if(_abState!==_abSession){console.log('[_abStartWithIntro] stale session — discarding intro response, not persisting');return;}
-    var _cleanIntro=d&&d.intro?_abStripScaffold(d.intro):'';
+    var _rawIntro=d&&d.intro?d.intro:'';
+    console.log('[_abStartWithIntro] raw intro reply — length='+_rawIntro.length+' text='+JSON.stringify(_rawIntro));
+    var _cleanIntro=_rawIntro?_abStripScaffold(_rawIntro):'';
+    console.log('[_abStartWithIntro] after scaffold-strip — length='+_cleanIntro.length+' text='+JSON.stringify(_cleanIntro));
     if(_cleanIntro){
       var div=document.createElement('div');div.className='msg';
       div.innerHTML='<div class="mav ai">F</div><div><div class="bub">'+formatMarkdown(_cleanIntro)+'</div></div>';
@@ -2973,6 +3050,16 @@ function send(){
   var t=inp.value.trim();if(!t&&!attachData)return;
   console.log('[ab-diag] appBuilder='+FEATURES.appBuilder+' simple='+isSimple()+' _abState='+JSON.stringify(_abState)+' detectIntent='+_abDetectIntent(t)+' specificBuildRequest='+_abIsSpecificBuildRequest(t));
   if(FEATURES.appBuilder&&!isSimple()){
+    // Belt-and-braces: if _abState is active but the chat's last assistant message isn't
+    // genuinely the pending guided-flow question (or the chat is empty), it belongs to a
+    // DIFFERENT context that something forgot to clear — discard it here too, not just at page
+    // load, so this new message is treated as fresh input instead of a stale-step "answer".
+    var _abLast=chatHistory.length?chatHistory[chatHistory.length-1]:null;
+    var _abPending=_abLast&&_abLast.role==='assistant'&&Array.isArray(_abLast.qrOptions)&&_abLast.qrOptions.length>=2;
+    if(_abState&&!_abPending){
+      console.log('[send] discarding stale _abState — no pending guided-flow question in this chat');
+      _abState=null;_abClearState();_abLiveBar=null;
+    }
     var _abFa=_abState&&_abState.step<=5,_abNi=!_abState&&_abIsSpecificBuildRequest(t);
     if(_abFa||_abNi){
       var _abM=document.getElementById('chat-msgs'),_abU=document.createElement('div');
@@ -3058,6 +3145,7 @@ function send(){
       var _qrParsed=flParseQuickReply(parsed.clean||'');
       parsed.clean=_qrParsed.clean;
       var _reply=parsed.clean||d.error||'';
+      var _abWillContinue=false; // set below if a build response needs auto-continuation — keeps the send lock held across the whole sequence instead of releasing it at the end of this handler
       if(sameChat){
         var _histMsg={role:'assistant',content:_reply};
         if(d.model)_histMsg.model=d.model;
@@ -3088,12 +3176,14 @@ function send(){
         pvAutoUpdate();
         // Guided-flow build response cut off mid-file (hit the output-token limit) — automatically
         // continue and stitch, so the user gets one complete file instead of a truncated one.
-        if(fetchBody.appBuilderBuild&&_abFenceOpenUnclosed(_reply))_abContinueBuild(msgs,ai,1);
+        // _abContinueBuild takes over the send lock from here — do NOT unlock below in this case.
+        _abWillContinue=!!(fetchBody.appBuilderBuild&&_abFenceOpenUnclosed(_reply));
+        if(_abWillContinue)_abContinueBuild(msgs,ai,1);
         if(_abState&&_abState.step===6){_abState=null;_abClearState();}
       }else{
         chSaveToOrigin(origChatId,{role:'assistant',content:_reply});
       }
-      _unlockSend();
+      if(!_abWillContinue)_unlockSend();
     })
     .catch(function(){
       var ty=document.getElementById('typ');if(ty)ty.remove();

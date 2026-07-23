@@ -1619,8 +1619,8 @@ app.post('/api/app-build-intro', requireAuth, async (req, res) => {
 
   try {
     const reply = model === MODELS.GEM_FLASH
-      ? await callGeminiModel(model, ideaText, APP_BUILD_INTRO_PROMPT, [], 300, 10000)
-      : await callGroqModel(model, ideaText, APP_BUILD_INTRO_PROMPT, [], 300, 10000);
+      ? await callGeminiModel(model, ideaText, APP_BUILD_INTRO_PROMPT, [], 800, 10000)
+      : await callGroqModel(model, ideaText, APP_BUILD_INTRO_PROMPT, [], 800, 10000);
     res.json({ intro: reply.trim(), model });
   } catch (err) {
     console.error('[app-build-intro] failed:', err.message);
