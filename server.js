@@ -205,11 +205,12 @@ DO NOT generate code, technical snippets, or programming examples
 unless the user explicitly asks for a script, function, or app.
 
 MENTOR MODE — When a user's request is VAGUE or BROAD (like "build software", "make an app", "help me code something", "software build pannanum", "app venum", "oru software venum" — without specifying what kind or what problem it solves), DO NOT immediately output generic code or a mockup. Instead:
-1. FIRST — ask the platform question with a quick reply chip block (STEP 0 of the MANDATORY APP-BUILD PROTOCOL below). This is ALWAYS your very first response for any app request, before clarifying questions, before examples, before everything.
-2. THEN — after the user answers the platform question, ask 1–2 short questions about what the app does and who uses it. Offer 2–3 concrete example directions so they can pick easily.
+1. FIRST — before anything else, find out where their app needs to run (phone, desktop, or both) with a short, friendly question and a few clickable choices.
+2. THEN — after they answer, ask 1–2 short questions about what the app does and who uses it. Offer 2–3 concrete example directions so they can pick easily.
 3. Once the app purpose is clear, give a clear vision: recommended approach, key features, and first steps
 4. Be encouraging and strategic, like a mentor guiding a founder — think about real-world practicality, market fit, and what will actually succeed
-5. Follow the full MANDATORY APP-BUILD PROTOCOL below: platform check → silent tech decision → mockup → approval → code
+5. Then move things forward in order: confirm the platform, pick a sensible tech approach yourself without turning it into a question, sketch a mockup, get their approval, then write the code
+6. GUIDED-FLOW HANDOFF — once the platform is known AND you have a rough sense of what the app is (even a one-line idea), you may offer a structured, feature-by-feature guided builder as an alternative to continuing in chat. To do this, include this exact extra option, unmodified and untranslated, alongside your other quick-reply options: "🛠️ Guide me step-by-step". Only offer it once — don't repeat it every message.
 BUT: if the user's request is already SPECIFIC (e.g. "write a Python function to reverse a string", "fix this bug", "create a login form with email and password"), answer directly with code — do NOT ask unnecessary clarifying questions, and skip the mockup step.
 
 HONEST ADVISOR — When a user shares an idea, plan, code, or decision, or asks "will this work?":
@@ -392,16 +393,16 @@ The user wrote in Tamil script. You MUST reply entirely in Tamil script. Technic
   }
   if (lang === 'english') {
     return `CRITICAL RULE #1 — LANGUAGE (applies to EVERY response, no exceptions):
-The user's latest message is PURE ENGLISH. Your ENTIRE response must be pure English — do NOT mix in Tamil or Tanglish words like "venum", "super", "panren", "aaiduchu", "irukku" even as conversational flavor. The Tanglish examples elsewhere in this prompt are for Tanglish users ONLY and must NOT influence your English responses.`;
+The user's latest message is PURE ENGLISH. Your ENTIRE response must be pure English — do NOT mix in Tamil or Tanglish words like "venum", "super", "panren", "aaiduchu", "irukku" even as conversational flavor. The Tanglish examples elsewhere in this prompt are for Tanglish users ONLY and must NOT influence your English responses. Never mention, explain, or narrate this language rule (no "let me correct myself", no "rewritten in English") — just write the response in English directly.`;
   }
   return '';
 }
 
 // Language instructions — appended at END of system prompt for maximum effect
 const langInstructions = {
-  english:   'CRITICAL RULE: The user wrote in pure English. You MUST reply ONLY in pure English. Do NOT use any Tamil words or Thanglish words (like irukku, la, enna, pannu, illa, seri, venum). This rule overrides everything else.',
-  tamil:     'CRITICAL RULE: The user wrote in Tamil script. You MUST reply in Tamil script (தமிழ்). Do not mix English sentences.',
-  thanglish: `CRITICAL RULE: The user wrote in Thanglish (Tamil in English letters). You MUST reply in natural, conversational Thanglish — the way a Chennai friend texts, NOT English sentences with Tamil words bolted on.
+  english:   'CRITICAL RULE: The user wrote in pure English. You MUST reply ONLY in pure English. Do NOT use any Tamil words or Thanglish words (like irukku, la, enna, pannu, illa, seri, venum). This rule overrides everything else. Never mention, explain, or apologize for this language rule, and never describe "correcting" or "rewriting" your response — just answer directly in English from the first word, with no narration about the language choice.',
+  tamil:     'CRITICAL RULE: The user wrote in Tamil script. You MUST reply in Tamil script (தமிழ்). Do not mix English sentences. Never mention or explain this language rule in your reply — just answer directly in Tamil from the first word.',
+  thanglish: `CRITICAL RULE: The user wrote in Thanglish (Tamil in English letters). You MUST reply in natural, conversational Thanglish — the way a Chennai friend texts, NOT English sentences with Tamil words bolted on. Never mention, explain, or describe this language rule in your reply — just answer directly in Thanglish from the first word.
 
 VERB FORMS — get these right:
 - "pannanum" means must/should do — NOT "pannalum" (pannalum means "even if you do", a different meaning)
@@ -439,7 +440,7 @@ function detectLanguage(prompt) {
   }
 
   // Thanglish — check with word boundaries to avoid false matches
-  const thanglishPattern = /\b(enna|epdi|eppadi|irukku|iruka|panu|pannu|panra|venum|sollu|kudu|illa|seri|aagum|mudiyum|evlo|ethna|yaru|yenna|ooda|ipo|ippo|indha|andha|romba|konjam|theriyum|vanakkam|nandri|solla|panunga|kuduga|mattum|avanga|pakalam|mudila|mudiyadu|therila|puriyla|sollunga|parunga)\b/i;
+  const thanglishPattern = /\b(enna|epdi|eppadi|irukku|iruka|iruku|panu|pannu|panra|pana|pandriya|pandra|panren|pananum|pannanum|panalam|venum|vendam|sollu|kudu|illa|seri|aagum|mudiyum|evlo|ethna|yaru|yenna|ooda|ipo|ippo|indha|andha|romba|konjam|theriyum|vanakkam|nandri|solla|panunga|kuduga|mattum|avanga|pakalam|mudila|mudiyadu|therila|puriyla|sollunga|parunga|atha|pathi|pesalama|pesalam|podu|rendulayum|rendume)\b/i;
   // Also catch standalone particles like "la" and "ku" only when next to Tamil-context words
   const hasStrongThanglish = thanglishPattern.test(prompt);
   // "la" / "ku" alone are too ambiguous — only count them if a strong word is also present
@@ -584,7 +585,7 @@ async function rewriteSearchQuery(userPrompt, history) {
 // ============================================
 // GROQ API — parameterized model
 // ============================================
-async function callGroqModel(model, prompt, sysPrompt, history = [], maxTokensOverride = null) {
+async function callGroqModel(model, prompt, sysPrompt, history = [], maxTokensOverride = null, timeoutMs = 30000) {
   const MAX_OUT = { [MODELS.GROQ_8B]: 1500, [MODELS.GROQ_70B]: 4096, [MODELS.GROQ_SCOUT]: 8192 };
   const maxTok = maxTokensOverride ?? MAX_OUT[model] ?? 2048;
   const response = await axios.post(
@@ -600,7 +601,7 @@ async function callGroqModel(model, prompt, sysPrompt, history = [], maxTokensOv
     },
     {
       headers: { 'Authorization': `Bearer ${GROQ_KEY}`, 'Content-Type': 'application/json' },
-      timeout: 30000
+      timeout: timeoutMs
     }
   );
   try { updateGroqQuota(model, response.headers); } catch (e) { console.warn('[quota-track]', e.message); }
@@ -610,7 +611,7 @@ async function callGroqModel(model, prompt, sysPrompt, history = [], maxTokensOv
 // ============================================
 // GEMINI API — parameterized model
 // ============================================
-async function callGeminiModel(model, prompt, sysPrompt, history = [], maxTokensOverride = null) {
+async function callGeminiModel(model, prompt, sysPrompt, history = [], maxTokensOverride = null, timeoutMs = 60000) {
   const contents = history.map(msg => ({
     role: msg.role === 'assistant' ? 'model' : 'user',
     parts: [{ text: msg.content }]
@@ -624,7 +625,7 @@ async function callGeminiModel(model, prompt, sysPrompt, history = [], maxTokens
       contents,
       generationConfig: { maxOutputTokens: maxTokensOverride ?? 8192 }
     },
-    { timeout: 60000 }
+    { timeout: timeoutMs }
   );
   try { trackGeminiUsage(model); } catch (e) { console.warn('[gemini-track]', e.message); }
   const candidate = response.data.candidates?.[0];
@@ -654,7 +655,7 @@ async function callGeminiWithImage(model, prompt, sysPrompt, history, attachment
       contents,
       generationConfig: { maxOutputTokens: 8192 }
     },
-    { timeout: 60000 }
+    { timeout: 120000 }
   );
   try { trackGeminiUsage(model); } catch (e) { console.warn('[gemini-track]', e.message); }
   const candidate = response.data.candidates?.[0];
@@ -709,7 +710,7 @@ const _GROQ_CHAIN = [MODELS.GROQ_70B, MODELS.GROQ_8B, MODELS.GROQ_SCOUT];
 // request more output than a smaller model's TPM budget can hold alongside input tokens.
 const _MODEL_OUTPUT_BUDGET = { [MODELS.GROQ_70B]: 8000, [MODELS.GROQ_8B]: 2000 };
 
-async function callWithFallback(primaryModel, prompt, sysPrompt, history, lang = 'english', maxTokensOverride = null) {
+async function callWithFallback(primaryModel, prompt, sysPrompt, history, lang = 'english', maxTokensOverride = null, appBuilderBuild = false) {
   const isTamilLang = lang === 'tamil' || lang === 'thanglish';
   const isGemini = m => m.startsWith('gemini');
   // Skip 8B for Tamil/Thanglish — it ignores language-match instructions
@@ -721,6 +722,13 @@ async function callWithFallback(primaryModel, prompt, sysPrompt, history, lang =
   if (isGemini(primaryModel)) {
     const alt = primaryModel === MODELS.GEM_FLASH ? MODELS.GEM_LITE : MODELS.GEM_FLASH;
     chain = [primaryModel, alt, ...groqChain];
+  } else if (appBuilderBuild === true) {
+    // App-build requests: try Gemini before falling back to 8B, so the budget-capped 8B
+    // (see below) is a last resort rather than a mid-priority fallback.
+    const others = groqChain.filter(m => m !== primaryModel);
+    const has8B = others.includes(MODELS.GROQ_8B);
+    const othersNo8B = others.filter(m => m !== MODELS.GROQ_8B);
+    chain = [primaryModel, ...(GEMINI_KEY ? [MODELS.GEM_FLASH] : []), ...othersNo8B, ...(has8B ? [MODELS.GROQ_8B] : [])];
   } else {
     // Primary first, then remaining models in priority order.
     const others = groqChain.filter(m => m !== primaryModel);
@@ -751,6 +759,16 @@ async function callWithFallback(primaryModel, prompt, sysPrompt, history, lang =
       const safeHistory = isGemini(model)
         ? history
         : fitHistory(history, sysPrompt, prompt, MODEL_INPUT_LIMITS[model] ?? 4000);
+
+      // App-build requests: 8B's default 2000-token budget is too tight to generate a full
+      // multi-feature app — raise it to 4000, but only if input+4000 still fits 8B's ~6000 TPM safely.
+      if (appBuilderBuild === true && model === MODELS.GROQ_8B) {
+        const _estInputTok = Math.ceil(((sysPrompt || '').length + (prompt || '').length + safeHistory.reduce((s, m) => s + (m.content || '').length, 0)) / 4);
+        const _appBuild8BBudget = 4000;
+        if (_estInputTok + _appBuild8BBudget <= 6000) {
+          effectiveMaxTokens = maxTokensOverride != null ? Math.min(maxTokensOverride, _appBuild8BBudget) : _appBuild8BBudget;
+        }
+      }
 
       const reply = isGemini(model)
         ? await callGeminiModel(model, prompt, sysPrompt, safeHistory, maxTokensOverride)
@@ -1050,15 +1068,30 @@ app.post('/api/chat', requireAuth, async (req, res) => {
     return res.status(429).json({ error: 'Innikku 100 messages limit mudinjuchu — naaliku continue pannunga!' });
   }
 
-  const { prompt, history, enterpriseMode, simpleMode, attachment, fieldMode, fieldPreviewMode, forceTest, evaluateTest, sourceUrl, learnLang, maxTokensOverride, appBuilderBuild } = req.body;
+  const { prompt, history, enterpriseMode, simpleMode, attachment, fieldMode, fieldPreviewMode, forceTest, evaluateTest, sourceUrl, learnLang, maxTokensOverride, appBuilderBuild, awaitingApproval, appBuilderClientOwns } = req.body;
   if (!attachment && (!prompt || !prompt.trim())) {
     return res.status(400).json({ error: 'Prompt is empty!' });
   }
 
   const recentHistory = (Array.isArray(history) ? history : []).slice(-10);
 
+  // App-build protocol continuation detection — if the previous assistant turn was the
+  // protocol's platform question, or the client flagged that it was the mockup/approval
+  // step (via the hidden <<APP_BUILD_STEP:AWAITING_APPROVAL>> marker), treat this reply as
+  // a continuation of that flow regardless of what keywords the short reply itself contains.
+  const _lastAssistantMsg = [...recentHistory].reverse().find(m => m.role === 'assistant');
+  const _lastMsgText = (_lastAssistantMsg && _lastAssistantMsg.content) || '';
+  const _lastWasPlatformQuestion = /where\s+should\s+your\s+app\s+run/i.test(_lastMsgText)
+    || /unga\s+app\s+enga|app\s+enga\s+use\s+aaganum/i.test(_lastMsgText);
+  // appBuilderClientOwns === true means the client's App Builder feature is active and owns
+  // build flows entirely (its own guided _abState machine, with intro/features/design steps
+  // this old server protocol never had) — the server's own MANDATORY APP-BUILD PROTOCOL must
+  // never take over in that case, or the two mechanisms fight over the same conversation.
+  const isProtocolContinuation = appBuilderBuild !== true && appBuilderClientOwns !== true && (awaitingApproval === true || _lastWasPlatformQuestion);
+
   const startTime  = Date.now();
-  const intent     = detectIntent(prompt);
+  let intent       = detectIntent(prompt);
+  if (isProtocolContinuation) intent = 'app_dev';
   const lang       = detectLanguage(prompt);
   const isStudent  = isStudentRequest(prompt);
   const tDetect    = Date.now() - startTime;
@@ -1132,8 +1165,10 @@ LANGUAGE RULE (STRICT): Detect the language of the user's most recent message. I
       : CODING_IDENTITY;
     const _lp = getLangPreamble(lang);
     sysPrompt = (_lp ? _lp + '\n\n' : '') + identity + '\n\n' + systemPrompts[intent] + '\n\n' + langInstructions[lang];
-    if (appBuilderBuild === true) {
-      // App Builder's client-side flow already sent a complete build prompt (platform/stack/features/style/DESIGN SYSTEM) — skip the protocol below, it would conflict.
+    if (appBuilderBuild === true || appBuilderClientOwns === true) {
+      // Either the client already sent a complete build prompt (platform/stack/features/style/
+      // DESIGN SYSTEM), or the client's App Builder feature owns build flows entirely via its
+      // own guided _abState machine — either way, this rigid server-only protocol would conflict.
     } else {
     sysPrompt += `\n\n=== MANDATORY APP-BUILD PROTOCOL (NON-NEGOTIABLE) ===
 
@@ -1149,15 +1184,16 @@ English version:
 FORBIDDEN before platform answer exists: generating a mockup, writing any code, or suggesting a tech stack.
 FORBIDDEN always: asking the user to pick a programming language or framework — that is your decision (STEP 1).
 
-STEP 1 — TECH DECISION (AI-ONLY, SILENT):
-Once the platform answer is known, decide silently — never ask the user to choose:
+STEP 1 — TECH DECISION (INTERNAL — NEVER DESCRIBE THIS STEP TO THE USER):
+Pick the tech stack yourself using this table. Do not ask the user to choose, and do NOT say anything in your reply about "deciding", "choosing", "silently", "internally", or any other description of this decision-making process — the user must never see any reference to how or why you picked it:
 - Phone only  →  React Native (Expo)
 - Desktop only  →  HTML web app
 - Both / Not sure  →  Responsive HTML web app (mobile-first 430px base + desktop media queries). NEVER offer "React Native vs HTML" as a choice — responsive web IS the answer for both.
 - User explicitly named a tech ("React la pannu", "Flutter app venum", "Python script")  →  use exactly that and skip Step 0.
-Announce the decision in ONE line in the user's language, then move to Step 2:
+Your entire reply for this step must be ONLY the one-line announcement below, adapted to the user's language — nothing else, no explanation of the choice:
   English: "Building as a web app — works on phone browser and desktop from one link."
   [Use this style ONLY when the user writes Tanglish/Tamil] Tanglish: "Web app-a build panren — phone browser-layum computer-layum ore link-la work aagum."
+Then move to Step 2.
 
 STEP 2 — MOCKUP → APPROVAL → BUILD:
 PHASE 1 — MOCKUP: Your very next response must be ONE self-contained HTML mockup inside a \`\`\`html code block. It must:
@@ -1168,7 +1204,7 @@ PHASE 1 — MOCKUP: Your very next response must be ONE self-contained HTML mock
 • Buttons can call alert() or be visual-only — no real backend logic needed
 • Use a proper colour scheme and clear visual hierarchy — not a blank white page
 
-PHASE 2 — APPROVAL: Immediately after the \`\`\`html block, write 1–2 sentences in the user's language saying the app will look roughly like this and asking if they want to proceed. Then output a QUICK_REPLY block with these three options translated into the user's language: "Build it" | "Change design" | "Add features"
+PHASE 2 — APPROVAL: Immediately after the \`\`\`html block, write 1–2 sentences in the user's language saying the app will look roughly like this and asking if they want to proceed. Then output a QUICK_REPLY block with these three options translated into the user's language: "Build it" | "Change design" | "Add features". Immediately after the QUICK_REPLY block, on its own line, output this exact marker unmodified (do not translate it, do not explain it): <<APP_BUILD_STEP:AWAITING_APPROVAL>>
 
 PHASE 3 — CODE: Only after the user chooses "Build it" (or equivalent approval), start generating the full working code — one file at a time.
 
@@ -1226,16 +1262,37 @@ DOES NOT APPLY TO: bug fixes, small snippets, single functions, adding one featu
   if (attachment?.type === 'image') {
     const imgPrompt = (prompt || '').trim() || 'Describe this image in detail.';
     console.log(`[attachment] Image "${attachment.name}" (${attachment.mimeType}) → ${MODELS.GEM_FLASH}`);
+    const isOverloadErr = e => e.response?.status === 503 || e.code === 'ECONNABORTED' || (e.message || '').includes('timeout');
+    let reply, usedImgModel;
     try {
-      const reply = await callGeminiWithImage(MODELS.GEM_FLASH, imgPrompt, sysPrompt, recentHistory, attachment);
+      try {
+        reply = await callGeminiWithImage(MODELS.GEM_FLASH, imgPrompt, sysPrompt, recentHistory, attachment);
+        usedImgModel = MODELS.GEM_FLASH;
+      } catch (err1) {
+        if (!isOverloadErr(err1)) throw err1;
+        console.log(`[attachment] ${MODELS.GEM_FLASH} vision overloaded (${err1.response?.status || err1.code}) — retrying once after short backoff`);
+        await new Promise(r => setTimeout(r, 1500));
+        try {
+          reply = await callGeminiWithImage(MODELS.GEM_FLASH, imgPrompt, sysPrompt, recentHistory, attachment);
+          usedImgModel = MODELS.GEM_FLASH;
+        } catch (err2) {
+          if (!isOverloadErr(err2)) throw err2;
+          console.log(`[attachment] ${MODELS.GEM_FLASH} retry also failed — falling back to ${MODELS.GEM_LITE}`);
+          reply = await callGeminiWithImage(MODELS.GEM_LITE, imgPrompt, sysPrompt, recentHistory, attachment);
+          usedImgModel = MODELS.GEM_LITE;
+        }
+      }
       const timeTaken = ((Date.now() - startTime) / 1000).toFixed(2);
-      return res.json({ reply, model: MODELS.GEM_FLASH, time: timeTaken + 's', searched: false, enterprise: false });
+      return res.json({ reply, model: usedImgModel, time: timeTaken + 's', searched: false, enterprise: false });
     } catch (err) {
       console.error('[attachment-image-error]', err.message);
-      const msg = err.response?.status === 429
-        ? 'Image analysis ku Gemini quota mudinjuchu — konjam neram kalichu try pannunga'
-        : 'Image analysis la error achu — please try again.';
-      return res.status(500).json({ error: msg });
+      if (err.response?.status === 429) {
+        return res.status(429).json({ error: 'Image analysis ku Gemini quota mudinjuchu — konjam neram kalichu try pannunga' });
+      }
+      if (isOverloadErr(err)) {
+        return res.status(503).json({ error: 'Gemini is temporarily overloaded, try again in a moment' });
+      }
+      return res.status(500).json({ error: 'Image analysis la error achu — please try again.' });
     }
   }
 
@@ -1350,12 +1407,25 @@ DOES NOT APPLY TO: bug fixes, small snippets, single functions, adding one featu
       usedModel = result.model;
       console.log(`[model-routing] path=fieldMode model=${usedModel} fallback=${result.didFallback}`);
     } else {
-      ({ reply, model: usedModel } = await callWithFallback(primaryModel, finalPrompt, sysPrompt, recentHistory, lang, maxTokensOverride));
+      ({ reply, model: usedModel } = await callWithFallback(primaryModel, finalPrompt, sysPrompt, recentHistory, lang, maxTokensOverride, appBuilderBuild || isProtocolContinuation));
       // DIAGNOSTIC — log raw reply snippet to check for <<QUICK_REPLY>> presence
       const _qrPresent = (reply||'').includes('<<QUICK_REPLY>>');
       console.log(`[debug-qr] model=${usedModel} has_qr_block=${_qrPresent} snippet=${JSON.stringify((reply||'').slice(0,300))}`);
       if (fieldPreviewMode && fieldPreviewMode.trim()) {
         console.log(`[model-routing] path=fieldPreview model=${usedModel} fallback=${usedModel !== primaryModel}`);
+      }
+      // Deterministic platform-question quick-reply injection — the MANDATORY APP-BUILD PROTOCOL
+      // requires this question with a <<QUICK_REPLY>> marker, but weaker/fallback models sometimes
+      // ask it in plain text with no marker at all. Inject the fixed, known options so the buttons
+      // always render client-side, regardless of which model answered.
+      if (!appBuilderBuild && !appBuilderClientOwns && !simpleMode && !fieldMode && !fieldPreviewMode && !evaluateTest && !_qrPresent) {
+        if (/where\s+should\s+your\s+app\s+run/i.test(reply)) {
+          reply = reply.trimEnd() + '\n<<QUICK_REPLY>>{"type":"quick_reply","question":"Where should your app run?","options":["Phone only","Desktop only","Both","Not sure"]}<<END_QUICK_REPLY>>';
+          console.log('[qr-inject] injected deterministic platform quick-reply (English)');
+        } else if (/unga\s+app\s+enga|app\s+enga\s+use\s+aaganum/i.test(reply)) {
+          reply = reply.trimEnd() + '\n<<QUICK_REPLY>>{"type":"quick_reply","question":"Unga app enga use aaganum?","options":["Phone-la mattum","Computer-la mattum","Rendulayum","Theriyala"]}<<END_QUICK_REPLY>>';
+          console.log('[qr-inject] injected deterministic platform quick-reply (Tanglish)');
+        }
       }
     }
 
@@ -1500,6 +1570,7 @@ DOES NOT APPLY TO: bug fixes, small snippets, single functions, adding one featu
       errorMsg = 'API key wrong! Check your .env file.';
     } else if (error.response?.status === 429) {
       errorMsg = 'AI service quota mudinjuchu — konjam neram kalichu try pannunga';
+      statusCode = 429;
     } else if (error.response?.status === 413) {
       errorMsg = 'Request romba periya irukku — konjam chinna app idea try pannunga, illa konjam neram kalichu try pannunga.';
       statusCode = 413;
@@ -1507,6 +1578,53 @@ DOES NOT APPLY TO: bug fixes, small snippets, single functions, adding one featu
       errorMsg = 'Connection issue. Please try again.';
     }
     res.status(statusCode).json({ error: errorMsg });
+  }
+});
+
+
+// ============================================
+// APP BUILDER — conversational intro before the guided-flow platform card
+// One pinned call (never GEM_LITE, never 8B): Gemini Flash for Tamil/Thanglish,
+// 70B for English. Short timeout — this is a warm-up line, not a full generation;
+// the client falls back to the plain platform card if this fails or is slow.
+// ============================================
+const APP_BUILD_INTRO_PROMPT = `You are a warm, encouraging startup mentor talking to a non-coder who just said they want to build an app. Reply in the SAME language/style the user wrote in (Tanglish/Tamil in, Tanglish/Tamil out; English in, English out — never mix, never switch).
+
+Your reply must:
+1. Warmly acknowledge their SPECIFIC app idea by name — reference what they actually said, never generic filler.
+2. Give a short, genuinely useful take in 2-4 sentences: who this app is likely for, which 1-2 features matter most for a first version, and one practical tip a real mentor would give.
+3. End with exactly ONE natural, energetic transition line into starting the build (e.g. "Let's get started — first, where should it run?"), translated into the user's language/style.
+
+Rules:
+- Do NOT write any code, mockup, or technical detail.
+- Do NOT ask more than one question total (the transition line IS that one question).
+- Do NOT output any quick-reply/button markup — plain conversational text only.
+- Keep the whole reply under 80 words.
+
+Example (Tanglish input "supermarket inventory app build panannum"):
+"Super idea! Supermarket-ku fresh stock, expiry dates track panradhu konjam kashtama irukum — idha automate pannuna nalla time & money mudhalum. Low-stock alerts oda barcode scan feature first version-ku romba useful-a irukum. Start pannalam — indha app enga run aganum?"
+
+Example (English input "I want to build a supermarket inventory app"):
+"Nice one! Inventory tracking is one of those things that quietly eats hours every week for small shops — getting it right early saves a lot of pain later. For a first version, I'd focus on stock levels and low-stock alerts rather than everything at once. Let's get started — where should this run?"`;
+
+app.post('/api/app-build-intro', requireAuth, async (req, res) => {
+  if (rlCheck(req.session.userId, req.session.userPlan)) {
+    return res.status(429).json({ error: 'rate limited' });
+  }
+  const { ideaText } = req.body;
+  if (!ideaText || !ideaText.trim()) return res.status(400).json({ error: 'ideaText required' });
+
+  const lang = detectLanguage(ideaText);
+  const model = (lang === 'tamil' || lang === 'thanglish') ? MODELS.GEM_FLASH : MODELS.GROQ_70B;
+
+  try {
+    const reply = model === MODELS.GEM_FLASH
+      ? await callGeminiModel(model, ideaText, APP_BUILD_INTRO_PROMPT, [], 300, 10000)
+      : await callGroqModel(model, ideaText, APP_BUILD_INTRO_PROMPT, [], 300, 10000);
+    res.json({ intro: reply.trim(), model });
+  } catch (err) {
+    console.error('[app-build-intro] failed:', err.message);
+    res.status(503).json({ error: 'intro unavailable' });
   }
 });
 

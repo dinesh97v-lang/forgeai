@@ -141,6 +141,13 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .msg:hover .msg-acts{opacity:1}
 @media(max-width:600px){.msg-acts{opacity:1}}
 .msg.u .msg-acts{justify-content:flex-end}
+/* While a guided App Builder flow is active, resend/edit/regenerate on ANY message
+   (including the flow-starting one, rendered before _abState existed) must not be
+   tappable — an accidental tap there should not silently reset the flow mid-way.
+   Copy is left visible/tappable since it can't affect the flow. */
+body.ab-flow-active .mac[onclick^="resendMsg"],
+body.ab-flow-active .mac[onclick^="editMsg"],
+body.ab-flow-active .mac[onclick^="regenMsg"]{display:none!important}
 .mac{background:none;border:none;cursor:pointer;padding:3px 4px;border-radius:4px;color:var(--text3);display:inline-flex;align-items:center;transition:background .12s,color .12s}
 .mac:hover{background:rgba(0,0,0,.07);color:var(--text)}
 .tag{display:inline-block;background:var(--sbg);color:var(--success);font-size:10px;padding:1px 5px;border-radius:4px;margin:1px;font-weight:700}
@@ -1411,7 +1418,7 @@ function chNewChat(){
   chatHistory=[];localStorage.removeItem('forgeai_chat_history');
   localStorage.removeItem(_acKey());
   chatFieldMode=null;fieldModeUpdate();
-  _abState=null;
+  _abState=null;_abClearState();
   document.getElementById('chat-msgs').innerHTML=welcomeHTML();
   chDraw();
   var ni=document.querySelector((isSimple()?'#simple-nav':'#pro-nav')+' .ni');if(ni)go('chat',ni);
@@ -1422,7 +1429,7 @@ function chOpen(id){
   for(var i=0;i<all.length;i++){if(all[i].id===id){sess=all[i];break;}}
   if(!sess){console.warn('[chOpen] not found:',id);return;}
   localStorage.setItem(_acKey(),id);
-  _abState=null;
+  _abState=null;_abClearState();
   chatHistory=(Array.isArray(sess.messages)?sess.messages:[]).slice();
   chatFieldMode=sess.fieldMode||null;fieldModeUpdate();
   var cm=document.getElementById('chat-msgs');
@@ -1491,6 +1498,27 @@ function formatMarkdown(text){
     blocks.push(html);
     return '\x00BLK'+(blocks.length-1)+'\x00';
   });
+  // 2b. Unterminated code block — the response was cut off (e.g. hit the model's output-token
+  // limit on a large generation) before it ever wrote the closing fence, so step 2's regex
+  // (which requires both fences) found no match at all. Render from the opening fence to the
+  // end as a code block anyway, instead of leaving the raw ```lang marker visible as plain text.
+  s=s.replace(/```([^\n`]*)\n?([\s\S]*)$/,function(m,lang,code){
+    var id='cb'+Math.random().toString(36).slice(2,10);
+    var label=lang?'<div style="font-size:10px;color:#888;padding:6px 12px 2px;font-family:monospace">'+lang+'</div>':'';
+    var fileKey=pvDetectLang(lang,code);
+    if(fileKey==='rn'){pvStoreRn(lang,code.trim());}
+    else if(fileKey){pvStore(fileKey,code.trim());}
+    var pvBtn=fileKey?'<button onclick="pvOpen(\''+id+'\',\''+fileKey+'\')" style="position:absolute;top:6px;right:60px;font-size:10px;padding:2px 8px;border-radius:4px;border:1px solid #6366f1;background:rgba(99,102,241,.15);color:#a5b4fc;cursor:pointer;font-family:inherit">▶ Preview</button>':'';
+    var html='<div style="background:#1e1e1e;border-radius:8px;margin:8px 0;overflow:hidden;position:relative">'
+      +label
+      +'<button onclick="copyCode(\''+id+'\')" style="position:absolute;top:6px;right:8px;font-size:10px;padding:2px 8px;border-radius:4px;border:1px solid #555;background:#2d2d2d;color:#aaa;cursor:pointer;font-family:inherit">Copy</button>'
+      +pvBtn
+      +'<pre id="'+id+'" style="margin:0;padding:12px;overflow-x:auto;font-family:monospace;font-size:12px;color:#d4d4d4;white-space:pre">'+code.trim()+'</pre>'
+      +'<div style="font-size:10px;color:#d97706;padding:2px 12px 6px;font-family:monospace">⚠ response was cut off — code may be incomplete</div>'
+      +'</div>';
+    blocks.push(html);
+    return '\x00BLK'+(blocks.length-1)+'\x00';
+  });
   // 3. Inline code: `code` → styled span
   s=s.replace(/`([^`\n]+)`/g,'<code style="background:#f0f0f0;color:#c7254e;padding:1px 5px;border-radius:3px;font-family:monospace;font-size:11px">$1</code>');
   // 4. Bold: **text** → <strong>
@@ -1500,6 +1528,49 @@ function formatMarkdown(text){
   // 6. Restore code blocks
   s=s.replace(/\x00BLK(\d+)\x00/g,function(m,i){return blocks[+i];});
   return s;
+}
+// Detects a code fence that was opened but never closed (response cut off before the model
+// finished). Returns null when complete, or {before,lang,code} split at the last COMPLETE
+// fence pair so a caller can rebuild the message with more code appended to the open fence.
+function _abFenceOpenUnclosed(text){
+  var s=text||'';
+  var re=/```([^\n`]*)\n?([\s\S]*?)```/g,m,lastEnd=0;
+  while((m=re.exec(s))!==null){lastEnd=re.lastIndex;}
+  var tail=s.slice(lastEnd);
+  var tm=/```([^\n`]*)\n?([\s\S]*)$/.exec(tail);
+  if(!tm)return null;
+  return {before:s.slice(0,lastEnd),lang:tm[1]||'',code:tm[2]||''};
+}
+// Guided-flow build step only: if the generated file got cut off (model hit its output-token
+// limit before writing the closing fence), automatically ask it to continue from exactly where
+// it stopped and stitch the result into the SAME message, so the user ends up with one complete
+// file instead of a truncated one. Capped at a few attempts so a persistently-oversized app can't
+// loop forever — after the cap, the existing "cut off" notice in formatMarkdown() stays visible.
+var _abContinueCap=3;
+function _abContinueBuild(msgs,aiDiv,attempt){
+  var lastMsg=chatHistory[chatHistory.length-1];
+  if(!lastMsg||lastMsg.role!=='assistant')return;
+  var info=_abFenceOpenUnclosed(lastMsg.content||'');
+  if(!info)return;
+  if(attempt>_abContinueCap)return;
+  var snippet=info.code.slice(-500);
+  var contPrompt='The previous response was cut off mid-file because it hit a length limit. Continue writing the EXACT same file, starting immediately after the snippet below — do NOT repeat it, do NOT restate any earlier code, do NOT add any explanation or markdown fence markers of your own. Output raw code only. If the file is now fully complete, end your output with a line containing only three backticks.\n\nLast part of the file so far:\n'+snippet;
+  var histForApi=chatHistory.slice(-10).map(function(m){return{role:m.role,content:m.content};});
+  fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt:contPrompt,history:histForApi,simpleMode:false,enterpriseMode:false,maxTokensOverride:8192,appBuilderBuild:true,appBuilderClientOwns:true})})
+    .then(function(r){return r.json();})
+    .then(function(d){
+      var cont=(d.reply||'').replace(/^\s*```[^\n]*\n?/,'').trim();
+      if(!cont)return;
+      var newCode=info.code+'\n'+cont;
+      var newContent=info.before+'```'+info.lang+'\n'+newCode;
+      lastMsg.content=newContent;
+      saveChat();chSync();
+      var bub=aiDiv&&aiDiv.querySelector('.bub');
+      if(bub)bub.innerHTML=formatMarkdown(newContent);
+      pvAutoUpdate();
+      if(_abFenceOpenUnclosed(newContent))_abContinueBuild(msgs,aiDiv,attempt+1);
+    })
+    .catch(function(){/* leave the cut-off notice showing — a network error here isn't worth surfacing separately */});
 }
 function copyCode(id){
   var el=document.getElementById(id);if(!el)return;
@@ -1549,6 +1620,15 @@ function saveEdit(btn){
   var histIdx=msgIdx-(hasWelcome?1:0);
   chatHistory=chatHistory.slice(0,histIdx);
   saveChat();
+  if(_abState&&_abState.step<=5){
+    console.log('[saveEdit] guided-flow reset branch firing — _abState.step='+_abState.step+' newText='+JSON.stringify(newText));
+    var _seu=document.createElement('div');_seu.className='msg u';
+    _seu.innerHTML=renderUserBub({content:newText});
+    msgs.appendChild(_seu);msgs.scrollTop=msgs.scrollHeight;
+    chatHistory.push({role:'user',content:newText});saveChat();chSync();
+    _abResetWithNotice(newText);
+    return;
+  }
   document.getElementById('chat-in').value=newText;
   send();
 }
@@ -1565,10 +1645,11 @@ function regenMsg(btn){
   var histForApi=chatHistory.slice(0,histIdx-1).slice(-10);
   chatHistory=chatHistory.slice(0,histIdx);
   saveChat();
+  if(_abState&&_abState.step<=5){_abResetWithNotice();return;}
   var typ=document.createElement('div');typ.id='typ';typ.className='msg';
   typ.innerHTML='<div class="mav ai">F</div><div class="bub"><div class="typing"><div class="dot"></div><div class="dot"></div><div class="dot"></div></div></div>';
   msgs.appendChild(typ);msgs.scrollTop=msgs.scrollHeight;
-  fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt:userText,history:histForApi,enterpriseMode:enterpriseMode,simpleMode:isSimple()})})
+  fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(_buildChatFetchBody({prompt:userText,history:histForApi,enterpriseMode:enterpriseMode,simpleMode:isSimple()}))})
     .then(function(r){return r.json();})
     .then(function(d){
       var ty=document.getElementById('typ');if(ty)ty.remove();
@@ -1633,6 +1714,15 @@ function resendMsg(btn){
     _abState={step:6,intentText:(origMsg.content||'').replace(/^🚀 Build: /,'')};
     document.getElementById('chat-in').value=origMsg.fullPrompt;
     send();
+    return;
+  }
+  if(_abState&&_abState.step<=5){
+    console.log('[resendMsg] guided-flow reset branch firing — _abState.step='+_abState.step+' text='+JSON.stringify(text));
+    var _sru=document.createElement('div');_sru.className='msg u';
+    _sru.innerHTML=renderUserBub({content:text});
+    msgs.appendChild(_sru);msgs.scrollTop=msgs.scrollHeight;
+    chatHistory.push({role:'user',content:text});saveChat();chSync();
+    _abResetWithNotice(text);
     return;
   }
   document.getElementById('chat-in').value=text;
@@ -2032,16 +2122,177 @@ var _flPreviewField=null;
 var _flTeachCount=0;
 var _flTestPending=false;
 var _abState=null;
+// _abState is otherwise pure in-memory and does not survive a page reload, unlike chatHistory
+// (which IS persisted). Without this, refreshing mid-guided-flow leaves the rendered card visually
+// in place (rebuilt from persisted chatHistory) but _abState gone — so the next button click falls
+// through to normal chat instead of resuming the guided flow. Persist/restore it alongside chatHistory.
+function _abUILock(){document.body.classList.add('ab-flow-active');}
+function _abUIUnlock(){document.body.classList.remove('ab-flow-active');}
+function _abSaveState(){_abUILock();try{localStorage.setItem('forgeai_ab_state',JSON.stringify(_abState));}catch(e){}}
+function _abClearState(){_abUIUnlock();try{localStorage.removeItem('forgeai_ab_state');}catch(e){}}
+function _abRestoreState(){
+  try{
+    var raw=localStorage.getItem('forgeai_ab_state');
+    if(raw){var parsed=JSON.parse(raw);if(parsed&&typeof parsed.step==='number'&&parsed.step<=5){_abState=parsed;_abUILock();}}
+  }catch(e){console.warn('[_abRestoreState] failed:',e.message);}
+}
+_abRestoreState();
 function _flTamilInput(s){return /[஀-௿]/.test(s);}
 // ── App Builder Flow (Phase 1) ────────────────────────────────────────────────
-function _abDetectIntent(text){var t=(text||'').toLowerCase();return /\b(build|create|make|develop|design|venum|pannu|pannanum|seyyanum|vendiyathu)\b/.test(t)&&/\b(app|application|website|tool|system)\b/.test(t);}
-function _abAsk(question,options){var msgs=document.getElementById('chat-msgs');var div=document.createElement('div');div.className='msg';div.innerHTML='<div class="mav ai">F</div><div><div class="bub">'+esc(question)+'</div></div>';msgs.appendChild(div);flRenderQuickReply({options:options},msgs);msgs.scrollTop=msgs.scrollHeight;chatHistory.push({role:'assistant',content:question,qrOptions:options});saveChat();chSync();}
+function _abDetectIntent(text){var t=(text||'').toLowerCase();return /\b(build|create|make|develop|design|need|venum|pannu|pannanum|pananum|seyyanum|seiyanum|vendiyathu)\b/.test(t)&&/\b(app|application|website|tool|system)\b/.test(t);}
+// Narrower than _abDetectIntent: only fires the guided flow for clearly-specific build requests
+// (contains a descriptive word beyond the trigger pair itself), so ambiguous asks like
+// "can you build an app?" fall through to the server's conversational MENTOR MODE instead.
+function _abIsSpecificBuildRequest(text){
+  var t=(text||'').toLowerCase();
+  if(!/\b(build|create|make|develop|design|need|venum|pannu|pannanum|pananum|seyyanum|seiyanum|vendiyathu)\b/.test(t)) return false;
+  if(!/\b(app|application|website|tool|system)\b/.test(t)) return false;
+  var stop=['build','create','make','develop','design','venum','pannu','pannanum','seyyanum','seiyanum','vendiyathu',
+            'app','application','website','tool','system',
+            'a','an','the','my','me','i','you','can','could','would','please',
+            'for','to','of','some','something','need','want','oru','onnu','ready','mudiyuma','mudiumaa','pana','panra',
+            'panalama','pananum','mudiuma','epdi','enna','u','plz',
+            'pls','wat','wut','hw','wil','cn','ur','pannuma','panuma','pannalama','venuma','aagumaa','agum','aagum',
+            'nama','namma','atha','adhu','idha','pathi','pesalamaa','pesalam','solren','sollu','konjam'];
+  var words=t.replace(/[^a-z0-9\s]/g,' ').split(/\s+/).filter(Boolean);
+  var meaningful=words.filter(function(w){return w.length>1&&stop.indexOf(w)===-1;});
+  return meaningful.length>0;
+}
+function _abAsk(question,options){var msgs=document.getElementById('chat-msgs');var div=document.createElement('div');div.className='msg';div.innerHTML='<div class="mav ai">F</div><div><div class="bub">'+esc(question)+'</div></div>';msgs.appendChild(div);flRenderQuickReply({options:options},msgs);msgs.scrollTop=msgs.scrollHeight;chatHistory.push({role:'assistant',content:question,qrOptions:options});saveChat();chSync();_abSaveState();}
+// Fresh, specific build request: one-time warm conversational intro before the platform card.
+// Always falls through to the same card, with or without the intro (server error, timeout, anything).
+function _abStartWithIntro(t){
+  // _abSession identifies THIS specific flow attempt by object identity. If a reset/restart
+  // (resend, edit, CTA handoff, a fresh build request) replaces _abState with a new object while
+  // this intro fetch is still in flight, _abState!==_abSession becomes true and the stale response
+  // below is discarded entirely — it must never render, persist, or re-ask the platform question
+  // on top of whatever the newer action already established.
+  var _abSession=_abState={step:1,platform:'',techStack:'',features:[],designStyle:'',intentText:t};
+  _abUILock();
+  var msgs=document.getElementById('chat-msgs');
+  var typ=document.createElement('div');typ.id='ab-intro-typ';typ.className='msg';
+  typ.innerHTML='<div class="mav ai">F</div><div class="bub"><div class="typing"><div class="dot"></div><div class="dot"></div><div class="dot"></div></div></div>';
+  msgs.appendChild(typ);msgs.scrollTop=msgs.scrollHeight;
+  var proceedToCard=function(){
+    if(_abState!==_abSession){console.log('[_abStartWithIntro] stale session at proceedToCard — discarding');return;}
+    _abAsk('Where should your app run?',['Phone only','Desktop only','Both']);
+  };
+  var fetchP=fetch('/api/app-build-intro',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ideaText:t})}).then(function(r){return r.json();}).catch(function(){return null;});
+  var timeoutP=new Promise(function(resolve){setTimeout(function(){resolve(null);},12000);});
+  Promise.race([fetchP,timeoutP]).then(function(d){
+    var ty=document.getElementById('ab-intro-typ');if(ty)ty.remove();
+    if(_abState!==_abSession){console.log('[_abStartWithIntro] stale session — discarding intro response, not persisting');return;}
+    if(d&&d.intro){
+      var div=document.createElement('div');div.className='msg';
+      div.innerHTML='<div class="mav ai">F</div><div><div class="bub">'+formatMarkdown(d.intro)+'</div></div>';
+      msgs.appendChild(div);msgs.scrollTop=msgs.scrollHeight;
+      chatHistory.push({role:'assistant',content:d.intro});saveChat();chSync();
+    }
+    proceedToCard();
+  });
+}
+// Short, warm, pre-written acknowledgment lines shown before the next guided-flow card —
+// zero API calls, keyed to the fixed button option just selected, 2-3 variations per language
+// to avoid repetition. Language picked via _abDetectLang() on the conversation's intentText.
+var _abAckLines={
+  platform:{
+    'Phone only':{
+      en:['Nice, mobile-first! 📱 Now, which tech stack do you prefer?','Phone app it is! Great choice — let\'s pick a tech stack next.','Got it — phone only 📱 Now, what tech stack works best?'],
+      ta:['Nice, mobile-first! 📱 Ippo, which tech stack venum?','Phone app-a? Super choice! Let\'s pick a tech stack next.','Got it — phone only 📱 Now, tech stack eppadi irukanum?']
+    },
+    'Desktop only':{
+      en:['Desktop app, solid choice! 💻 Let\'s pick the tech stack next.','Nice, desktop-focused! Now, which tech stack do you prefer?','Got it — desktop only 💻 Next up: tech stack.'],
+      ta:['Desktop app-a, solid choice! 💻 Ippo tech stack pick pannalam.','Nice, desktop-focused! Let\'s decide the tech stack next.','Got it — desktop only 💻 Now for the tech stack...']
+    },
+    'Both':{
+      en:['Great choice! Works everywhere 💪 — now, which tech stack do you prefer?','Both platforms — smart move! 🙌 Now let\'s pick the tech stack.','Nice, maximum reach! 🌐 Next up: tech stack.'],
+      ta:['Nalla choice! Rendu platform-layum use pannalam 💪 — ippo which tech stack?','Both platforms — smart move! 🙌 Now let\'s pick the tech stack.','Great, works everywhere! 🌐 Next up: tech stack.']
+    }
+  },
+  techStack:{
+    'Simple HTML/CSS/JS':{
+      en:['Simple and solid! ⚡ Now, which features do you need?','Nice, lightweight approach! Let\'s pick the features now.','Good call — keeps it fast and simple. Which features matter most?'],
+      ta:['Simple and solid! ⚡ Ippo, which features venum unga app-ku?','Nice, lightweight approach! Let\'s pick the features now.','Good call — keeps it fast and simple. Now, features eppadi irukanum?']
+    },
+    'React':{
+      en:['React — nice, modern choice! ⚛️ Now let\'s pick the features.','Great pick for a dynamic UI! Now let\'s choose the features.','React it is! 🚀 Next: which features do you need?'],
+      ta:['React-a? Nice, modern choice! ⚛️ Ippo features pick pannalam.','Great pick for a dynamic UI! Now let\'s choose the features.','React it is! 🚀 Next: which features do you need?']
+    }
+  },
+  designStyle:{
+    'Minimal':{
+      en:['Clean and minimal — love it! ✨ Let\'s see your app plan...','Nice, less-is-more approach! Here\'s your plan...','Minimal it is! 🤍 Ready to see the summary?'],
+      ta:['Clean and minimal — love it! ✨ Let\'s see your app plan...','Nice, less-is-more approach! Here\'s your plan...','Minimal it is! 🤍 Ready to see the summary?']
+    },
+    'Colorful':{
+      en:['Colorful and vibrant — fun choice! 🎨 Let\'s check your app plan...','Nice, bold and lively! Here\'s your plan...','Love the colorful vibe! 🌈 Here\'s what we\'ve got...'],
+      ta:['Colorful and vibrant — fun choice! 🎨 Let\'s check your app plan...','Nice, bold and lively! Here\'s your plan...','Love the colorful vibe! 🌈 Here\'s what we\'ve got...']
+    },
+    'Professional':{
+      en:['Professional look — solid choice! 💼 Let\'s see your app plan...','Nice, clean business style! Here\'s your plan...','Professional it is! 📊 Ready for the summary...'],
+      ta:['Professional look — solid choice! 💼 Let\'s see your app plan...','Nice, clean business style! Here\'s your plan...','Professional it is! 📊 Ready for the summary...']
+    }
+  }
+};
+function _abPick(arr){return arr[Math.floor(Math.random()*arr.length)];}
+// Client-side mirror of server.js's detectLanguage() — same logic, so guided-flow acknowledgments
+// match the language the user is actually writing in, with zero API calls.
+function _abDetectLang(text){
+  var s=text||'';
+  for(var i=0;i<s.length;i++){
+    var c=s.charCodeAt(i);
+    if(c>=0x0B80&&c<=0x0BFF)return 'tamil';
+  }
+  var thanglishPattern=/\b(enna|epdi|eppadi|irukku|iruka|iruku|panu|pannu|panra|pana|pandriya|pandra|panren|pananum|pannanum|panalam|venum|vendam|sollu|kudu|illa|seri|aagum|mudiyum|evlo|ethna|yaru|yenna|ooda|ipo|ippo|indha|andha|romba|konjam|theriyum|vanakkam|nandri|solla|panunga|kuduga|mattum|avanga|pakalam|mudila|mudiyadu|therila|puriyla|sollunga|parunga|atha|pathi|pesalama|pesalam|podu|rendulayum|rendume)\b/i;
+  var hasStrongThanglish=thanglishPattern.test(s);
+  var hasParticles=/\b(la|ku|oda)\b/i.test(s);
+  if(hasStrongThanglish||(hasParticles&&/\b(tamilnadu|chennai|india|anna|amma|appa|bro|da|di|machan)\b/i.test(s)))return 'thanglish';
+  return 'english';
+}
+function _abAckPick(lookup,option,fallbackText){
+  var entry=lookup[option];
+  if(!entry)return fallbackText;
+  var isTa=_abDetectLang((_abState&&_abState.intentText)||'')!=='english';
+  var arr=isTa?(entry.ta||entry.en):entry.en;
+  return arr&&arr.length?_abPick(arr):fallbackText;
+}
+function _abAck(text){
+  var msgs=document.getElementById('chat-msgs');
+  var div=document.createElement('div');div.className='msg';
+  div.innerHTML='<div class="mav ai">F</div><div><div class="bub">'+esc(text)+'</div></div>';
+  msgs.appendChild(div);msgs.scrollTop=msgs.scrollHeight;
+  chatHistory.push({role:'assistant',content:text});saveChat();chSync();
+}
+function _abFeatureAck(features){
+  var isTa=_abDetectLang((_abState&&_abState.intentText)||'')!=='english';
+  if(features.length===0)return _abPick(isTa?['No extra features, keeping it clean! Ippo, design style eppadi irukanum?','Simple and minimal, got it. Now let\'s pick a design style.']:['No extra features, keeping it clean! Now, which design style do you prefer?','Simple and minimal, got it. Let\'s pick a design style next.']);
+  if(features.length===1)return _abPick(isTa?['Nice, '+features[0]+' — solid pick! Ippo design style venum?','Good choice with '+features[0]+'! Now, what design style do you like?']:['Nice, '+features[0]+' — solid pick! Now, what design style do you prefer?','Good choice with '+features[0]+'! Let\'s pick a design style next.']);
+  return _abPick(isTa?['Nalla feature set! 💪 Ippo design style eppadi irukanum?','Great combo of features! Now let\'s pick a design style.','Solid lineup! 🔥 Next: design style.']:['Great feature set! 💪 Now, what design style do you prefer?','Nice combo of features! Let\'s pick a design style next.','Solid lineup! 🔥 Next: design style.']);
+}
+// Editing/resending/regenerating a message while the guided flow is active can no longer be
+// trusted to answer the CURRENT step correctly (it may belong to an earlier step, or be unrelated).
+// Abandon the stale flow with a visible notice, then restart cleanly from the platform question.
+// newIntentText overrides the preserved app idea (used when an edit changed it); otherwise the
+// existing _abState.intentText survives the reset so the user doesn't have to restate it.
+function _abResetWithNotice(newIntentText){
+  var prevIntent=(newIntentText!=null)?newIntentText:((_abState&&_abState.intentText)||'');
+  _abState=null;
+  var msgs=document.getElementById('chat-msgs');
+  var notice='Message maathiteenga — builder-a restart panren! 🔄 Let\'s start fresh.';
+  var div=document.createElement('div');div.className='msg';
+  div.innerHTML='<div class="mav ai">F</div><div><div class="bub">'+esc(notice)+'</div></div>';
+  msgs.appendChild(div);msgs.scrollTop=msgs.scrollHeight;
+  chatHistory.push({role:'assistant',content:notice});saveChat();chSync();
+  _abState={step:1,platform:'',techStack:'',features:[],designStyle:'',intentText:prevIntent};
+  _abUILock();
+  _abAsk('Where should your app run?',['Phone only','Desktop only','Both']);
+}
 function _abHandleAnswer(t){
   if(!_abState)return false;
-  if(_abState.step===1){_abState.platform=t;_abState.step=2;_abAsk('Which tech stack do you prefer?',['Simple HTML/CSS/JS','React']);return true;}
-  if(_abState.step===2){_abState.techStack=t;_abState.step=3;_abRenderFeatureSelect();return true;}
-  if(_abState.step===3){if(_abState.features.indexOf(t)===-1)_abState.features.push(t);_abState.step=4;_abAsk('What design style do you prefer?',['Minimal','Colorful','Professional']);return true;}
-  if(_abState.step===4){_abState.designStyle=t;_abState.step=5;_abRenderPlanCard();return true;}
+  if(_abState.step===1){_abState.platform=t;_abState.step=2;_abAck(_abAckPick(_abAckLines.platform,t,'Got it! Now, which tech stack do you prefer?'));_abAsk('Which tech stack do you prefer?',['Simple HTML/CSS/JS','React']);return true;}
+  if(_abState.step===2){_abState.techStack=t;_abState.step=3;_abAck(_abAckPick(_abAckLines.techStack,t,'Got it! Let\'s pick the features.'));_abRenderFeatureSelect();return true;}
+  if(_abState.step===3){if(_abState.features.indexOf(t)===-1)_abState.features.push(t);_abState.step=4;_abAck(_abFeatureAck(_abState.features));_abAsk('What design style do you prefer?',['Minimal','Colorful','Professional']);return true;}
+  if(_abState.step===4){_abState.designStyle=t;_abState.step=5;_abAck(_abAckPick(_abAckLines.designStyle,t,'Got it! Here\'s your plan.'));_abRenderPlanCard();return true;}
   if(_abState.step===5){
     if(t==='Start over'){var _abPrevIntent=_abState.intentText;_abState={step:1,platform:'',techStack:'',features:[],designStyle:'',intentText:_abPrevIntent};_abAsk('Where should your app run?',['Phone only','Desktop only','Both']);}
     else{_abTriggerBuild();}
@@ -2051,6 +2302,7 @@ function _abHandleAnswer(t){
 }
 function _abTriggerBuild(){
   _abState.step=6;
+  _abClearState(); // a build in flight can't be meaningfully resumed after a reload — don't persist step 6
   var msgs=document.getElementById('chat-msgs');
   var buildingContent='Building your app… ⏳';
   chatHistory.push({role:'assistant',content:buildingContent});
@@ -2063,7 +2315,7 @@ function _abTriggerBuild(){
     :s.designStyle==='Colorful'?'DESIGN SYSTEM (mandatory):\n- Include Tailwind CSS via CDN: <script src="https://cdn.tailwindcss.com"><\/script>\n- Layout: max-w-4xl mx-auto container, card-based sections with bg-white rounded-xl shadow-lg p-6, page background light gray/white\n- Header: gradient header (indigo-600 to purple-600) with white text, text-2xl font-bold, rounded-t-xl\n- Buttons: rounded-lg px-4 py-2 font-medium, hover state darkening, transition-all duration-200\n- Inputs: rounded-lg border border-gray-300 px-4 py-2 focus:ring-2 focus:outline-none, ring color indigo-500\n- All interactive elements need hover/focus states with transition-all duration-200\n- Icons: use inline SVG only, always with this exact structure: <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-5 h-5"> with a simple <path> or basic shapes inside. Examples: plus icon path d="M12 5v14M5 12h14", search icon: <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>, trash icon path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6". Never output raw unicode symbols, HTML entities, or emoji as icons. If unsure of an icon path, use the plus icon or omit the icon and use text only.\n- Empty states: centered muted message with icon when lists are empty\n- Progress indicators (bars/percentages) where relevant\n- Mobile responsive: stacked on small screens, grid/flex-row on md+\n- Typography: text-2xl font-bold titles, text-sm text-gray-500 secondary text\n- Auth flow (mandatory if login/signup feature exists): wrap the login screen in <div id="login-screen"> and ALL main app content in <div id="main-app" class="hidden">. On successful login, run: document.getElementById(\'login-screen\').classList.add(\'hidden\'); document.getElementById(\'main-app\').classList.remove(\'hidden\'); Include a logout button in the main app header that reverses this. The page must load showing ONLY the login screen.'
     :'DESIGN SYSTEM (mandatory):\n- Include Tailwind CSS via CDN: <script src="https://cdn.tailwindcss.com"><\/script>\n- Layout: max-w-4xl mx-auto container, card-based sections with bg-white rounded-xl shadow-lg p-6, page background #F9FAFB\n- Header: gradient header (from-slate-800 to-blue-900, primary #1E3A5F navy) with white text, text-2xl font-bold, rounded-t-xl\n- Buttons: rounded-lg px-4 py-2 font-medium, hover state darkening, transition-all duration-200\n- Inputs: rounded-lg border border-gray-300 px-4 py-2 focus:ring-2 focus:outline-none, ring color accent #3B82F6 blue-500\n- All interactive elements need hover/focus states with transition-all duration-200\n- Icons: use inline SVG only, always with this exact structure: <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-5 h-5"> with a simple <path> or basic shapes inside. Examples: plus icon path d="M12 5v14M5 12h14", search icon: <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>, trash icon path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6". Never output raw unicode symbols, HTML entities, or emoji as icons. If unsure of an icon path, use the plus icon or omit the icon and use text only.\n- Empty states: centered muted message with icon when lists are empty\n- Progress indicators (bars/percentages) where relevant\n- Mobile responsive: stacked on small screens, grid/flex-row on md+\n- Typography: text-2xl font-bold titles, text-sm text-gray-500 secondary text\n- Auth flow (mandatory if login/signup feature exists): wrap the login screen in <div id="login-screen"> and ALL main app content in <div id="main-app" class="hidden">. On successful login, run: document.getElementById(\'login-screen\').classList.add(\'hidden\'); document.getElementById(\'main-app\').classList.remove(\'hidden\'); Include a logout button in the main app header that reverses this. The page must load showing ONLY the login screen.';
   var feat=s.features.length?s.features.join(', '):'none';
-  var prompt='Build a complete app.\nApp idea: '+(s.intentText||'')+'\nPlatform: '+s.platform+'\nTech stack: '+s.techStack+'\nFeatures: '+feat+'\nDesign style: '+s.designStyle+'\n'+styleGuide+'\n';
+  var prompt='Build a complete app.\nApp idea: '+(s.intentText||'')+'\nPlatform: '+s.platform+'\nTech stack: '+s.techStack+'\nFeatures: '+feat+'\nIMPORTANT: Fully implement a working, visible UI section for EVERY feature listed above (not just login). Each feature must have its own functional section inside the main app with real controls and basic working JavaScript logic. Do not stop after the login screen. Do not leave any feature as an empty placeholder or a comment.\nDesign style: '+s.designStyle+'\n'+styleGuide+'\n';
   if(s.techStack==='React'){
     prompt+='Generate a SINGLE HTML file that uses React via CDN script tags (react, react-dom, and babel-standalone for in-browser JSX) so it runs directly in an iframe preview with no build step. Return the full file in one ```html code block.';
   }else{
@@ -2087,6 +2339,7 @@ function _abRenderPlanCard(){
   msgs.appendChild(div);
   flRenderQuickReply({options:qrOptions},msgs);
   msgs.scrollTop=msgs.scrollHeight;
+  _abSaveState();
 }
 function _abRenderFeatureSelect(){
   var msgs=document.getElementById('chat-msgs');
@@ -2099,6 +2352,7 @@ function _abRenderFeatureSelect(){
   msgs.appendChild(bar);msgs.scrollTop=msgs.scrollHeight;
   chatHistory.push({role:'assistant',content:'Which features do you need? Pick one or more, then tap Done.',qrOptions:opts});
   saveChat();chSync();
+  _abSaveState();
 }
 function _abToggleFeature(btn){
   if(!_abState||_abState.step!==3)return;
@@ -2119,6 +2373,7 @@ function _abFeatureDone(){
   chatHistory.push({role:'user',content:label});
   saveChat();chSync();
   _abState.step=4;
+  _abAck(_abFeatureAck(_abState.features));
   _abAsk('What design style do you prefer?',['Minimal','Colorful','Professional']);
 }
 function flParseQuickReply(text){
@@ -2196,6 +2451,20 @@ function flQrClick(btn){
   var bar=btn.parentElement;
   bar.querySelectorAll('.fl-qr-btn').forEach(function(b){b.disabled=true;});
   var hint=bar.querySelector('[data-qr-hint]');if(hint)hint.style.display='none';
+  // Handoff from the server's conversational MENTOR MODE into the structured guided flow —
+  // this exact option is a reserved CTA, not a normal chat reply, so don't send() it.
+  if(opt==='🛠️ Guide me step-by-step'){
+    var lastUserMsg=[...chatHistory].reverse().find(function(m){return m.role==='user';});
+    var msgs=document.getElementById('chat-msgs');
+    var u=document.createElement('div');u.className='msg u';
+    u.innerHTML=renderUserBub({content:opt});
+    msgs.appendChild(u);msgs.scrollTop=msgs.scrollHeight;
+    chatHistory.push({role:'user',content:opt});saveChat();chSync();
+    _abState={step:1,platform:'',techStack:'',features:[],designStyle:'',intentText:(lastUserMsg&&lastUserMsg.content)||''};
+    _abUILock();
+    _abAsk('Where should your app run?',['Phone only','Desktop only','Both']);
+    return;
+  }
   var inp=document.getElementById('chat-in');
   if(inp){inp.value=opt;send();}
 }
@@ -2256,6 +2525,7 @@ function flDoubClick(btn){
 function flDoubSend(q){var inp=document.getElementById('chat-in');if(inp){inp.value=q;send();}}
 var _flQuizState={};
 var _pendingSourceUrl=null;
+var _appBuildAwaitingApproval=false;
 var _ccStore={};
 function flRenderQuizCard(questions,msgs,cardId){
   _flQuizState[cardId]={questions:questions,answers:[],current:0};
@@ -2473,9 +2743,27 @@ function attachHandle(file){
   reader.onload=function(e){
     var data=e.target.result;
     if(isImg){
-      var b64=data.split(',')[1];
-      attachData={type:'image',name:file.name,mimeType:file.type,data:b64,thumb:data};
-      showAttachBar('<img src="'+data+'" class="attach-thumb" alt="">',file.name);
+      var useOriginal=function(){
+        var b64=data.split(',')[1];
+        attachData={type:'image',name:file.name,mimeType:file.type,data:b64,thumb:data};
+        showAttachBar('<img src="'+data+'" class="attach-thumb" alt="">',file.name);
+      };
+      var img=new Image();
+      img.onerror=useOriginal;
+      img.onload=function(){
+        var maxDim=1024;
+        var w=img.width,h=img.height;
+        if(w<=maxDim&&h<=maxDim){useOriginal();return;}
+        if(w>=h){h=Math.round(h*(maxDim/w));w=maxDim;}else{w=Math.round(w*(maxDim/h));h=maxDim;}
+        var canvas=document.createElement('canvas');canvas.width=w;canvas.height=h;
+        canvas.getContext('2d').drawImage(img,0,0,w,h);
+        var outType=file.type==='image/png'?'image/png':'image/jpeg';
+        var resizedData=canvas.toDataURL(outType,0.85);
+        var b64r=resizedData.split(',')[1];
+        attachData={type:'image',name:file.name,mimeType:outType,data:b64r,thumb:resizedData};
+        showAttachBar('<img src="'+resizedData+'" class="attach-thumb" alt="">',file.name);
+      };
+      img.src=data;
     }else{
       attachData={type:'text',name:file.name,mimeType:'text/plain',data:data};
       showAttachBar('<span style="font-size:14px">📄</span>',file.name);
@@ -2494,19 +2782,34 @@ function _unlockSend(){
   var b=document.querySelector('.cin-row .sbtn');
   if(b){b.disabled=false;b.style.opacity='';}
 }
+// Single source of truth for the App-Builder ownership flags EVERY Pro-mode-chat /api/chat call
+// must carry — attaches them onto whatever body object a caller already built. Without this,
+// a caller can silently drift out of sync (as regenMsg did) and the server's old MANDATORY
+// APP-BUILD PROTOCOL can reactivate on that one call path while every other path stays gated off.
+function _buildChatFetchBody(body){
+  // Tells the server the client's App Builder owns build flows entirely (its own guided
+  // _abState machine) — the server must never run its own MANDATORY APP-BUILD PROTOCOL
+  // (platform question, silent tech decision, auto-mockup) on top of it.
+  if(FEATURES.appBuilder&&!isSimple())body.appBuilderClientOwns=true;
+  // 8192 is gemini-flash-latest's actual per-call output ceiling (the Gemini API path is not
+  // clamped by _MODEL_OUTPUT_BUDGET server-side) — safe to send even when Groq ends up serving
+  // the request, since Groq models are separately clamped to their own lower budget regardless.
+  if(_abState&&_abState.step===6){body.maxTokensOverride=8192;body.appBuilderBuild=true;}
+  return body;
+}
 function send(){
   if(_sendPending)return;
   var inp=document.getElementById('chat-in');
   var t=inp.value.trim();if(!t&&!attachData)return;
-  console.log('[ab-diag] appBuilder='+FEATURES.appBuilder+' simple='+isSimple()+' _abState='+JSON.stringify(_abState)+' detectIntent='+_abDetectIntent(t));
+  console.log('[ab-diag] appBuilder='+FEATURES.appBuilder+' simple='+isSimple()+' _abState='+JSON.stringify(_abState)+' detectIntent='+_abDetectIntent(t)+' specificBuildRequest='+_abIsSpecificBuildRequest(t));
   if(FEATURES.appBuilder&&!isSimple()){
-    var _abFa=_abState&&_abState.step<=5,_abNi=!_abState&&_abDetectIntent(t);
+    var _abFa=_abState&&_abState.step<=5,_abNi=!_abState&&_abIsSpecificBuildRequest(t);
     if(_abFa||_abNi){
       var _abM=document.getElementById('chat-msgs'),_abU=document.createElement('div');
       _abU.className='msg u';_abU.innerHTML=renderUserBub({content:t});
       _abM.appendChild(_abU);inp.value='';rsz(inp);_abM.scrollTop=_abM.scrollHeight;
       chatHistory.push({role:'user',content:t});saveChat();chSync();
-      if(_abNi){_abState={step:1,platform:'',techStack:'',features:[],designStyle:'',intentText:t};_abAsk('Where should your app run?',['Phone only','Desktop only','Both']);}
+      if(_abNi){_abStartWithIntro(t);}
       else{_abHandleAnswer(t);}
       return;
     }
@@ -2544,8 +2847,8 @@ function send(){
   if(_abState&&_abState.step===6){msgObj.fullPrompt=apiPrompt;msgObj.isBuilderBuild=true;}
   chatHistory.push(msgObj);
   saveChat();chSync();
-  var fetchBody={prompt:apiPrompt||'',history:histForApi,enterpriseMode:enterpriseMode,simpleMode:isSimple()};
-  if(_abState&&_abState.step===6){fetchBody.maxTokensOverride=8000;fetchBody.appBuilderBuild=true;}
+  var fetchBody=_buildChatFetchBody({prompt:apiPrompt||'',history:histForApi,enterpriseMode:enterpriseMode,simpleMode:isSimple()});
+  if(_appBuildAwaitingApproval){fetchBody.awaitingApproval=true;_appBuildAwaitingApproval=false;}
   if(chatFieldMode){fetchBody.fieldMode=chatFieldMode;fetchBody.learnLang=_learnLang;}
   if(_pendingSourceUrl){fetchBody.sourceUrl=_pendingSourceUrl;_pendingSourceUrl=null;}
   // Closure-local flag: captures test intent at send-time, not as mutable module state.
@@ -2574,6 +2877,12 @@ function send(){
           chSaveToOrigin(origChatId,{role:'assistant',content:'[quiz: '+d.testQuestions.join(' | ')+']'});
         }
         _unlockSend();return;
+      }
+      // Hidden app-build protocol marker (mockup/approval step) — strip before it's ever
+      // displayed or persisted, and flag it so the NEXT send() tells the server this is a continuation.
+      if(/<<APP_BUILD_STEP:AWAITING_APPROVAL>>/i.test(d.reply||'')){
+        _appBuildAwaitingApproval=true;
+        d.reply=(d.reply||'').replace(/\s*<<APP_BUILD_STEP:AWAITING_APPROVAL>>\s*/gi,'');
       }
       var parsed=chatFieldMode?flParseQuestions(d.reply||''):{clean:d.reply||'',questions:[]};
       var _qrParsed=flParseQuickReply(parsed.clean||'');
@@ -2607,7 +2916,10 @@ function send(){
         }
         if(_qrParsed&&_qrParsed.qr)flRenderQuickReply(_qrParsed.qr,msgs);
         pvAutoUpdate();
-        if(_abState&&_abState.step===6)_abState=null;
+        // Guided-flow build response cut off mid-file (hit the output-token limit) — automatically
+        // continue and stitch, so the user gets one complete file instead of a truncated one.
+        if(fetchBody.appBuilderBuild&&_abFenceOpenUnclosed(_reply))_abContinueBuild(msgs,ai,1);
+        if(_abState&&_abState.step===6){_abState=null;_abClearState();}
       }else{
         chSaveToOrigin(origChatId,{role:'assistant',content:_reply});
       }
@@ -2620,7 +2932,7 @@ function send(){
         ai.innerHTML='<div class="mav ai">F</div><div><div class="bub" style="color:var(--danger)">Connection error — is the server running?</div>'+aiActBar()+'</div>';
         msgs.appendChild(ai);msgs.scrollTop=msgs.scrollHeight;
       }
-      if(_abState&&_abState.step===6)_abState=null;
+      if(_abState&&_abState.step===6){_abState=null;_abClearState();}
       _unlockSend();
     });
 }
@@ -3376,10 +3688,14 @@ function ccGetFiles(){
   var _fnRe=/^(?:\/\/|#(?!!)|--|\/\*)\s*([\w.\-/]+\.[\w]+)/;
   var blocks=[],snipN=0;
   var re=/```([^\n`]*)\n?([\s\S]*?)```/g,m;
+  var _tailRe=/```([^\n`]*)\n?([\s\S]*)$/;
   for(var i=0;i<chatHistory.length;i++){
     if(chatHistory[i].role!=='assistant')continue;
+    var _content=chatHistory[i].content||'';
     re.lastIndex=0;
-    while((m=re.exec(chatHistory[i].content||''))!==null){
+    var _consumedEnd=0;
+    while((m=re.exec(_content))!==null){
+      _consumedEnd=re.lastIndex;
       var tag=(m[1]||'').trim().toLowerCase();
       var raw=(m[2]||'').trimEnd();
       if(!raw)continue;
@@ -3401,6 +3717,32 @@ function ccGetFiles(){
         filename='snippet-'+snipN+(ext?'.'+ext:tag?'.'+tag:'');
       }
       blocks.push({filename:filename,content:raw,skipped:_skipReason||undefined});
+    }
+    // Unterminated trailing fence — the response was cut off (output-token limit on a large
+    // generation) before the closing ``` was ever written, so the complete-pair regex above
+    // found nothing for it. The code itself is still real and usable; surface it as a file too.
+    var _tm=_tailRe.exec(_content.slice(_consumedEnd));
+    if(_tm){
+      var tag=(_tm[1]||'').trim().toLowerCase();
+      var raw=(_tm[2]||'').trimEnd();
+      if(raw){
+        var _skipReason=null;
+        if(tag==='text'||tag==='txt'||tag==='plaintext'||tag==='output'){_skipReason='plain text';}
+        else if(raw.indexOf('├')!==-1||raw.indexOf('└')!==-1){_skipReason='directory tree';}
+        var firstLine=(raw.split('\n')[0]||'').trim();
+        var fnHint=_fnRe.exec(firstLine);
+        var filename;
+        if(fnHint){
+          filename=fnHint[1];
+        }else if(tag==='dockerfile'||tag==='docker'){
+          filename='Dockerfile';
+        }else{
+          snipN++;
+          var ext=_ext[tag];
+          filename='snippet-'+snipN+(ext?'.'+ext:tag?'.'+tag:'');
+        }
+        blocks.push({filename:filename,content:raw,skipped:_skipReason||undefined});
+      }
     }
   }
   // Deduplicate by filename: if the same filename appears multiple times, keep the last (most recent version)
@@ -4143,6 +4485,20 @@ function initPageAll(){
       scanChatFiles();
     }
   }
+  // _abState (via _abRestoreState() at script load) is a single global key, not scoped to any
+  // specific chat/session — it has no idea which session we just restored above. If that session's
+  // last message isn't itself a pending guided-flow question (qrOptions present), any _abState we
+  // loaded belongs to a DIFFERENT, already-abandoned flow (e.g. from last night, or another chat)
+  // and must not be applied here — otherwise a brand-new message gets silently treated as the
+  // answer to someone else's stale platform/stack/design question.
+  (function(){
+    var _abLast=chatHistory.length?chatHistory[chatHistory.length-1]:null;
+    var _abPending=_abLast&&_abLast.role==='assistant'&&Array.isArray(_abLast.qrOptions)&&_abLast.qrOptions.length>=2;
+    if(_abState&&!_abPending){
+      console.log('[init] discarding stale _abState — restored session has no pending guided-flow question');
+      _abState=null;_abClearState();
+    }
+  })();
   chDraw();
   prjDraw();
 
