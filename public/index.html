@@ -395,6 +395,8 @@ body.ab-flow-active .mac[onclick^="regenMsg"]{display:none!important}
 .fl-qr-btn:hover:not(:disabled){background:var(--accent);color:white;transform:scale(1.06);box-shadow:0 4px 12px rgba(0,0,0,.15)}
 .fl-qr-btn:active:not(:disabled){transform:scale(.98)}
 .fl-qr-btn:disabled{opacity:.4;cursor:not-allowed}
+.ab-bar-done{opacity:.6}
+.ab-bar-done [data-qr-hint]{display:none}
 .cc-wrap{margin:2px 0 0 36px}
 .cc-check-btn{font-size:11px;padding:5px 12px;border:1px solid var(--accent);border-radius:var(--r);background:transparent;color:var(--accent);cursor:pointer;font-family:inherit;transition:all .15s}
 .cc-check-btn:hover{background:var(--accent);color:white}
@@ -1418,7 +1420,7 @@ function chNewChat(){
   chatHistory=[];localStorage.removeItem('forgeai_chat_history');
   localStorage.removeItem(_acKey());
   chatFieldMode=null;fieldModeUpdate();
-  _abState=null;_abClearState();
+  _abState=null;_abClearState();_abLiveBar=null;
   document.getElementById('chat-msgs').innerHTML=welcomeHTML();
   chDraw();
   var ni=document.querySelector((isSimple()?'#simple-nav':'#pro-nav')+' .ni');if(ni)go('chat',ni);
@@ -1429,7 +1431,7 @@ function chOpen(id){
   for(var i=0;i<all.length;i++){if(all[i].id===id){sess=all[i];break;}}
   if(!sess){console.warn('[chOpen] not found:',id);return;}
   localStorage.setItem(_acKey(),id);
-  _abState=null;_abClearState();
+  _abState=null;_abClearState();_abLiveBar=null;
   chatHistory=(Array.isArray(sess.messages)?sess.messages:[]).slice();
   chatFieldMode=sess.fieldMode||null;fieldModeUpdate();
   var cm=document.getElementById('chat-msgs');
@@ -1450,7 +1452,9 @@ function chOpen(id){
           ccWrap.innerHTML='<button class="cc-check-btn" onclick="ccRunCheck(\''+ccId+'\')">&#10003; Check &amp; Download ZIP</button>';
           cm.appendChild(ccWrap);
         }
-        if(m.role!=='user'&&Array.isArray(m.qrOptions)&&m.qrOptions.length>=2){flRenderQuickReply({options:m.qrOptions},cm);}
+        // chOpen always clears _abState above (switching chats never resumes a guided flow —
+        // it's a single global, not per-chat), so every historical card here renders disabled.
+        if(m.role!=='user'&&Array.isArray(m.qrOptions)&&m.qrOptions.length>=2){flRenderQuickReply({options:m.qrOptions},cm,'replay');}
       }catch(e){console.warn('[chat] skipped bad message at index',i,e.message);}
     }
     cm.scrollTop=cm.scrollHeight;
@@ -2137,6 +2141,65 @@ function _abRestoreState(){
   }catch(e){console.warn('[_abRestoreState] failed:',e.message);}
 }
 _abRestoreState();
+// Only ONE guided-flow quick-reply/toggle bar should ever be live at a time. Every earlier bar
+// (platform/stack/features/design/plan) must be disabled the moment the flow moves past it —
+// otherwise a stale click on an old card silently feeds the wrong step (index.html audit #4/#5).
+var _abLiveBar=null;
+function _abDisableBar(bar){
+  if(!bar)return;
+  bar.querySelectorAll('button').forEach(function(b){b.disabled=true;});
+  bar.classList.add('ab-bar-done');
+}
+function _abEnableBar(bar){
+  if(!bar)return;
+  bar.querySelectorAll('button').forEach(function(b){b.disabled=false;});
+  bar.classList.remove('ab-bar-done');
+}
+function _abArmBar(bar){
+  if(_abLiveBar&&_abLiveBar!==bar)_abDisableBar(_abLiveBar);
+  _abLiveBar=bar;
+}
+// Validates a guided-flow answer (click OR free-typed text) against the options actually offered
+// for the current step. Exact/case-insensitive match wins; otherwise a loose word-level match
+// against each option's significant words (emoji stripped) catches things like "react venum" ->
+// "React". Returns the canonical option string, or null if nothing reasonably matches.
+function _abMatchOption(t,options){
+  var norm=(t||'').toLowerCase().trim();
+  if(!norm)return null;
+  var stripEmoji=function(s){return s.replace(/[\u{1F300}-\u{1FAFF}☀-➿]/gu,'').trim().toLowerCase();};
+  for(var i=0;i<options.length;i++){if(options[i].toLowerCase()===norm)return options[i];}
+  var normNoEmoji=stripEmoji(norm);
+  for(var i=0;i<options.length;i++){if(stripEmoji(options[i])===normNoEmoji)return options[i];}
+  for(var i=0;i<options.length;i++){
+    var words=stripEmoji(options[i]).split(/[\s\/]+/).filter(function(w){return w.length>2;});
+    for(var j=0;j<words.length;j++){if(normNoEmoji.indexOf(words[j])!==-1)return options[i];}
+  }
+  return null;
+}
+// Strips a leaked internal-instruction header a weak model sometimes prepends before its real
+// reply (e.g. "Drafting the Response (in Tanglish):", "Here is the rewritten response in pure
+// English:", "I must correct myself..."). Applies repeatedly in case more than one is chained.
+// Logs when it actually removes something so leak frequency stays visible in console.
+function _abStripScaffold(text){
+  var s=(text||'').trim();
+  var original=s;
+  var patterns=[
+    /^i\s+must\s+correct\s+myself[^.]*\.\s*/i,
+    /^(here\s+is|here's)\s+the\s+(rewritten|corrected)?\s*response[^:]*:\s*/i,
+    /^drafting\s+the\s+response[^:]*:\s*/i,
+    /^\(?\s*in\s+(tanglish|thanglish|tamil|english|hindi|telugu)\s*\)?\s*:\s*/i
+  ];
+  var changed=true,guard=0;
+  while(changed&&guard<5){
+    changed=false;guard++;
+    for(var i=0;i<patterns.length;i++){
+      var m=patterns[i].exec(s);
+      if(m&&m.index===0){s=s.slice(m[0].length).trim();changed=true;}
+    }
+  }
+  if(s!==original)console.log('[scaffold-strip] removed leaked meta-header(s) — remainder length='+s.length);
+  return s;
+}
 function _flTamilInput(s){return /[஀-௿]/.test(s);}
 // ── App Builder Flow (Phase 1) ────────────────────────────────────────────────
 function _abDetectIntent(text){var t=(text||'').toLowerCase();return /\b(build|create|make|develop|design|need|venum|pannu|pannanum|pananum|seyyanum|seiyanum|vendiyathu)\b/.test(t)&&/\b(app|application|website|tool|system)\b/.test(t);}
@@ -2158,7 +2221,23 @@ function _abIsSpecificBuildRequest(text){
   var meaningful=words.filter(function(w){return w.length>1&&stop.indexOf(w)===-1;});
   return meaningful.length>0;
 }
-function _abAsk(question,options){var msgs=document.getElementById('chat-msgs');var div=document.createElement('div');div.className='msg';div.innerHTML='<div class="mav ai">F</div><div><div class="bub">'+esc(question)+'</div></div>';msgs.appendChild(div);flRenderQuickReply({options:options},msgs);msgs.scrollTop=msgs.scrollHeight;chatHistory.push({role:'assistant',content:question,qrOptions:options});saveChat();chSync();_abSaveState();}
+// Every guided-flow card gets navigation controls appended: "Back" (only once there's a
+// previous step to return to) and "Start over" (always) — same live bar as the real options,
+// so _abArmBar's one-live-bar rule covers them automatically.
+function _abAsk(question,options){
+  var msgs=document.getElementById('chat-msgs');
+  var div=document.createElement('div');div.className='msg';
+  div.innerHTML='<div class="mav ai">F</div><div><div class="bub">'+esc(question)+'</div></div>';
+  msgs.appendChild(div);
+  var fullOptions=options.slice();
+  if(_abState&&_abState.step>1)fullOptions.push('⬅ Back');
+  if(_abState)fullOptions.push('🔄 Start over');
+  flRenderQuickReply({options:fullOptions},msgs,'live');
+  msgs.scrollTop=msgs.scrollHeight;
+  chatHistory.push({role:'assistant',content:question,qrOptions:fullOptions});
+  saveChat();chSync();
+  _abSaveState();
+}
 // Fresh, specific build request: one-time warm conversational intro before the platform card.
 // Always falls through to the same card, with or without the intro (server error, timeout, anything).
 function _abStartWithIntro(t){
@@ -2182,12 +2261,15 @@ function _abStartWithIntro(t){
   Promise.race([fetchP,timeoutP]).then(function(d){
     var ty=document.getElementById('ab-intro-typ');if(ty)ty.remove();
     if(_abState!==_abSession){console.log('[_abStartWithIntro] stale session — discarding intro response, not persisting');return;}
-    if(d&&d.intro){
+    var _cleanIntro=d&&d.intro?_abStripScaffold(d.intro):'';
+    if(_cleanIntro){
       var div=document.createElement('div');div.className='msg';
-      div.innerHTML='<div class="mav ai">F</div><div><div class="bub">'+formatMarkdown(d.intro)+'</div></div>';
+      div.innerHTML='<div class="mav ai">F</div><div><div class="bub">'+formatMarkdown(_cleanIntro)+'</div></div>';
       msgs.appendChild(div);msgs.scrollTop=msgs.scrollHeight;
-      chatHistory.push({role:'assistant',content:d.intro});saveChat();chSync();
+      chatHistory.push({role:'assistant',content:_cleanIntro});saveChat();chSync();
     }
+    // If stripping left nothing (the whole reply was scaffold), just skip the intro bubble
+    // entirely — same graceful fallback already used for a failed/timed-out intro call.
     proceedToCard();
   });
 }
@@ -2257,11 +2339,15 @@ function _abAckPick(lookup,option,fallbackText){
   return arr&&arr.length?_abPick(arr):fallbackText;
 }
 function _abAck(text){
+  // Ack text is always our own static template today (never model-generated), so this is a
+  // defensive no-op in practice — but keeps the same leak protection in place if ack content
+  // ever becomes model-generated. Falls back to the original text if stripping empties it.
+  var _clean=_abStripScaffold(text)||text;
   var msgs=document.getElementById('chat-msgs');
   var div=document.createElement('div');div.className='msg';
-  div.innerHTML='<div class="mav ai">F</div><div><div class="bub">'+esc(text)+'</div></div>';
+  div.innerHTML='<div class="mav ai">F</div><div><div class="bub">'+esc(_clean)+'</div></div>';
   msgs.appendChild(div);msgs.scrollTop=msgs.scrollHeight;
-  chatHistory.push({role:'assistant',content:text});saveChat();chSync();
+  chatHistory.push({role:'assistant',content:_clean});saveChat();chSync();
 }
 function _abFeatureAck(features){
   var isTa=_abDetectLang((_abState&&_abState.intentText)||'')!=='english';
@@ -2287,14 +2373,80 @@ function _abResetWithNotice(newIntentText){
   _abUILock();
   _abAsk('Where should your app run?',['Phone only','Desktop only','Both']);
 }
+// Step N's card is reached by answering step N-1's question — going Back means returning to
+// N-1 and clearing exactly the field that answer set, so it can be picked again.
+var _abStepDefs={
+  2:{clearField:'platform',prevStep:1,render:function(){_abAsk('Where should your app run?',['Phone only','Desktop only','Both']);}},
+  3:{clearField:'techStack',prevStep:2,render:function(){_abAsk('Which tech stack do you prefer?',['Simple HTML/CSS/JS','React']);}},
+  4:{clearField:'features',prevStep:3,render:function(){_abRenderFeatureSelect();}},
+  5:{clearField:'designStyle',prevStep:4,render:function(){_abAsk('What design style do you prefer?',['Minimal','Colorful','Professional']);}}
+};
+function _abGoBack(){
+  if(!_abState)return;
+  var def=_abStepDefs[_abState.step];
+  if(!def)return; // no Back from step 1
+  if(def.clearField==='features')_abState.features=[];else _abState[def.clearField]='';
+  _abState.step=def.prevStep;
+  var isTa=_abDetectLang(_abState.intentText||'')!=='english';
+  _abAck(isTa?'Seri, adha maathi pick pannalam 🔙':'Sure, let\'s revisit that 🔙');
+  def.render();
+}
+function _abStartOverFlow(){
+  if(!_abState)return;
+  var prevIntent=_abState.intentText;
+  _abClearState();
+  _abState={step:1,platform:'',techStack:'',features:[],designStyle:'',intentText:prevIntent};
+  var isTa=_abDetectLang(prevIntent||'')!=='english';
+  _abAck(isTa?'Seri, mudhal irundhu start pannalam! 🔄':'Sure, let\'s start fresh! 🔄');
+  _abAsk('Where should your app run?',['Phone only','Desktop only','Both']);
+}
+// Validates every answer (click OR free-typed text) against the CURRENT step's actual options
+// before writing anything into _abState — a stale/garbage value used to silently overwrite
+// platform/techStack/designStyle and corrupt the eventual build prompt (index.html audit #3).
 function _abHandleAnswer(t){
   if(!_abState)return false;
-  if(_abState.step===1){_abState.platform=t;_abState.step=2;_abAck(_abAckPick(_abAckLines.platform,t,'Got it! Now, which tech stack do you prefer?'));_abAsk('Which tech stack do you prefer?',['Simple HTML/CSS/JS','React']);return true;}
-  if(_abState.step===2){_abState.techStack=t;_abState.step=3;_abAck(_abAckPick(_abAckLines.techStack,t,'Got it! Let\'s pick the features.'));_abRenderFeatureSelect();return true;}
-  if(_abState.step===3){if(_abState.features.indexOf(t)===-1)_abState.features.push(t);_abState.step=4;_abAck(_abFeatureAck(_abState.features));_abAsk('What design style do you prefer?',['Minimal','Colorful','Professional']);return true;}
-  if(_abState.step===4){_abState.designStyle=t;_abState.step=5;_abAck(_abAckPick(_abAckLines.designStyle,t,'Got it! Here\'s your plan.'));_abRenderPlanCard();return true;}
+  var _tt=(t||'').trim();
+  if(/^(?:🔄\s*)?start\s*over$|^restart$/i.test(_tt)){_abStartOverFlow();return true;}
+  if(_abState.step>1&&/^(?:⬅\s*)?back$|^go\s*back$/i.test(_tt)){_abGoBack();return true;}
+  function reask(renderFn){
+    var isTa=_abDetectLang(_abState.intentText||'')!=='english';
+    _abAck(isTa?'Sorry, puriyala 🙏 Kelvi options-la irundhu ondru pick pannunga:':'Sorry, didn\'t quite catch that 🙏 Please pick one of the options below:');
+    if(renderFn)renderFn();
+  }
+  if(_abState.step===1){
+    var opts=['Phone only','Desktop only','Both'],m=_abMatchOption(t,opts);
+    if(!m){console.log('[_abHandleAnswer] step1 no match for '+JSON.stringify(t));reask(function(){_abAsk('Where should your app run?',opts);});return true;}
+    _abState.platform=m;_abState.step=2;_abAck(_abAckPick(_abAckLines.platform,m,'Got it! Now, which tech stack do you prefer?'));_abAsk('Which tech stack do you prefer?',['Simple HTML/CSS/JS','React']);return true;
+  }
+  if(_abState.step===2){
+    var opts=['Simple HTML/CSS/JS','React'],m=_abMatchOption(t,opts);
+    if(!m){console.log('[_abHandleAnswer] step2 no match for '+JSON.stringify(t));reask(function(){_abAsk('Which tech stack do you prefer?',opts);});return true;}
+    _abState.techStack=m;_abState.step=3;_abAck(_abAckPick(_abAckLines.techStack,m,'Got it! Let\'s pick the features.'));_abRenderFeatureSelect();return true;
+  }
+  if(_abState.step===3){
+    var featOpts=['User Login','Data Storage','Search','Notifications','Payment','Maps','Charts','Chat'];
+    var m=_abMatchOption(t,featOpts);
+    if(m){
+      var bar=document.getElementById('ab-feat-bar');
+      var btnEl=bar&&bar.querySelector('.fl-qr-btn[data-opt="'+m+'"]');
+      if(btnEl){_abToggleFeature(btnEl);console.log('[_abHandleAnswer] step3 free-text matched feature: '+m);}
+      else console.log('[_abHandleAnswer] step3 matched feature but its button was not found: '+m);
+      return true; // toggling a feature never advances the step — only Done does
+    }
+    if(/^(done|finish|ready|mudinjuchu|mudinchu|aayiduchu)$/i.test((t||'').trim())){_abFeatureDone();return true;}
+    console.log('[_abHandleAnswer] step3 no match for '+JSON.stringify(t));
+    reask(null); // the feature bar is already on screen and unchanged — nothing to re-render
+    return true;
+  }
+  if(_abState.step===4){
+    var opts=['Minimal','Colorful','Professional'],m=_abMatchOption(t,opts);
+    if(!m){console.log('[_abHandleAnswer] step4 no match for '+JSON.stringify(t));reask(function(){_abAsk('What design style do you prefer?',opts);});return true;}
+    _abState.designStyle=m;_abState.step=5;_abAck(_abAckPick(_abAckLines.designStyle,m,'Got it! Here\'s your plan.'));_abRenderPlanCard();return true;
+  }
   if(_abState.step===5){
-    if(t==='Start over'){var _abPrevIntent=_abState.intentText;_abState={step:1,platform:'',techStack:'',features:[],designStyle:'',intentText:_abPrevIntent};_abAsk('Where should your app run?',['Phone only','Desktop only','Both']);}
+    var opts=['Build it 🚀','Start over'],m=_abMatchOption(t,opts);
+    if(!m){console.log('[_abHandleAnswer] step5 no match for '+JSON.stringify(t));reask(function(){_abRenderPlanCard();});return true;}
+    if(m==='Start over'){_abStartOverFlow();}
     else{_abTriggerBuild();}
     return true;
   }
@@ -2330,14 +2482,14 @@ function _abRenderPlanCard(){
   var s=_abState;
   var feat=s.features.length?s.features.join(', '):'(none)';
   var content='Here\'s your app plan:\n📱 Platform: '+s.platform+'\n⚙️ Stack: '+s.techStack+'\n✨ Features: '+feat+'\n🎨 Style: '+s.designStyle+'\nReady to build?';
-  var qrOptions=['Build it 🚀','Start over'];
+  var qrOptions=['Build it 🚀','⬅ Back','Start over'];
   chatHistory.push({role:'assistant',content:content,qrOptions:qrOptions});
   saveChat();chSync();
   var msgs=document.getElementById('chat-msgs');
   var div=document.createElement('div');div.className='msg';
   div.innerHTML='<div class="mav ai">F</div><div><div class="bub">'+formatMarkdown(content)+'</div></div>';
   msgs.appendChild(div);
-  flRenderQuickReply({options:qrOptions},msgs);
+  flRenderQuickReply({options:qrOptions},msgs,'live');
   msgs.scrollTop=msgs.scrollHeight;
   _abSaveState();
 }
@@ -2348,9 +2500,13 @@ function _abRenderFeatureSelect(){
   msgs.appendChild(div);
   var opts=['User Login','Data Storage','Search','Notifications','Payment','Maps','Charts','Chat'];
   var bar=document.createElement('div');bar.className='fl-qr-bar';bar.id='ab-feat-bar';
-  bar.innerHTML=opts.map(function(o){return '<button class="fl-qr-btn" onclick="_abToggleFeature(this)" data-opt="'+esc(o)+'">'+esc(o)+'</button>';}).join('')+'<button class="fl-qr-btn" style="background:var(--accent);color:#fff;border-color:var(--accent)" onclick="_abFeatureDone()">Done &rarr;</button>';
+  bar.innerHTML=opts.map(function(o){return '<button class="fl-qr-btn" onclick="_abToggleFeature(this)" data-opt="'+esc(o)+'">'+esc(o)+'</button>';}).join('')
+    +'<button class="fl-qr-btn" style="background:var(--accent);color:#fff;border-color:var(--accent)" onclick="_abFeatureDone()">Done &rarr;</button>'
+    +'<button class="fl-qr-btn" onclick="flQrClick(this)" data-opt="⬅ Back">⬅ Back</button>'
+    +'<button class="fl-qr-btn" onclick="flQrClick(this)" data-opt="🔄 Start over">🔄 Start over</button>';
   msgs.appendChild(bar);msgs.scrollTop=msgs.scrollHeight;
-  chatHistory.push({role:'assistant',content:'Which features do you need? Pick one or more, then tap Done.',qrOptions:opts});
+  _abArmBar(bar);
+  chatHistory.push({role:'assistant',content:'Which features do you need? Pick one or more, then tap Done.',qrOptions:opts.concat(['⬅ Back','🔄 Start over'])});
   saveChat();chSync();
   _abSaveState();
 }
@@ -2434,7 +2590,11 @@ function flParseQuickReply(text){
   }catch(err){console.warn('[quick_reply] parse failed:',err.message);}
   return{clean:clean,qr:null};
 }
-function flRenderQuickReply(qr,msgs){
+// mode: undefined (default, unchanged behavior — used by plain chat/field-mode quick-replies),
+// 'live' (guided-flow card — arms this bar as the sole live one, disabling whatever was live
+// before it), or 'replay' (history reconstruction — render disabled immediately; the caller
+// re-enables at most one bar afterward, only once it knows which step is genuinely still pending).
+function flRenderQuickReply(qr,msgs,mode){
   var bar=document.createElement('div');bar.className='fl-qr-bar';
   bar.innerHTML=qr.options.map(function(opt){return '<button class="fl-qr-btn" onclick="flQrClick(this)" data-opt="'+esc(opt)+'">'+esc(opt)+'</button>';}).join('');
   var hint=document.createElement('div');
@@ -2444,11 +2604,21 @@ function flRenderQuickReply(qr,msgs){
   hint.textContent=_hintEl?_hintEl.textContent:'or type your own answer ✍️';
   bar.appendChild(hint);
   msgs.appendChild(bar);msgs.scrollTop=msgs.scrollHeight;
+  if(mode==='live')_abArmBar(bar);
+  else if(mode==='replay')_abDisableBar(bar);
+  return bar;
 }
 function flQrClick(btn){
   if(_sendPending)return;
   var opt=btn.dataset.opt;
   var bar=btn.parentElement;
+  // Belt-and-braces alongside the bar-disabling in _abArmBar/_abDisableBar: a stale bar should
+  // already be disabled and unclickable, but if one somehow still fires (e.g. a click queued
+  // just before disabling took effect), don't let it feed a wrong-step answer into _abState.
+  if(_abState&&_abState.step<=5&&_abLiveBar&&bar!==_abLiveBar){
+    console.log('[flQrClick] ignoring click from a non-current guided-flow bar');
+    return;
+  }
   bar.querySelectorAll('.fl-qr-btn').forEach(function(b){b.disabled=true;});
   var hint=bar.querySelector('[data-qr-hint]');if(hint)hint.style.display='none';
   // Handoff from the server's conversational MENTOR MODE into the structured guided flow —
@@ -4461,6 +4631,7 @@ function initPageAll(){
       activeId=all[0].id;localStorage.setItem(_acKey(),activeId);
     }
     for(var i=0;i<all.length;i++){if(all[i].id===activeId){sess=all[i];break;}}
+    var _abLastQrBar=null;
     if(sess&&Array.isArray(sess.messages)&&sess.messages.length>0){
       chatHistory=sess.messages.slice();
       chatFieldMode=sess.fieldMode||null;fieldModeUpdate();
@@ -4478,13 +4649,17 @@ function initPageAll(){
             ccWrap.innerHTML='<button class="cc-check-btn" onclick="ccRunCheck(\''+ccId+'\')">&#10003; Check &amp; Download ZIP</button>';
             cm.appendChild(ccWrap);
           }
-          if(m.role!=='user'&&Array.isArray(m.qrOptions)&&m.qrOptions.length>=2){flRenderQuickReply({options:m.qrOptions},cm);}
+          // Render every historical card disabled by default — re-armed below, but only the
+          // ONE bar belonging to _abState's current step, and only if _abState survives the
+          // stale-discard check just past this loop.
+          if(m.role!=='user'&&Array.isArray(m.qrOptions)&&m.qrOptions.length>=2){_abLastQrBar=flRenderQuickReply({options:m.qrOptions},cm,'replay');}
         }catch(e){console.warn('[chat] skipped bad message at index',i,e.message);}
       }
       cm.scrollTop=cm.scrollHeight;
       scanChatFiles();
     }
   }
+  _abLiveBar=null;
   // _abState (via _abRestoreState() at script load) is a single global key, not scoped to any
   // specific chat/session — it has no idea which session we just restored above. If that session's
   // last message isn't itself a pending guided-flow question (qrOptions present), any _abState we
@@ -4497,6 +4672,12 @@ function initPageAll(){
     if(_abState&&!_abPending){
       console.log('[init] discarding stale _abState — restored session has no pending guided-flow question');
       _abState=null;_abClearState();
+    }else if(_abState&&_abPending&&_abLastQrBar){
+      // _abState survived the stale-check — its pending question IS the last rendered card,
+      // so that (and only that) bar is the one still genuinely awaiting an answer.
+      console.log('[init] re-arming the current step\'s bar after reload — step='+_abState.step);
+      _abEnableBar(_abLastQrBar);
+      _abLiveBar=_abLastQrBar;
     }
   })();
   chDraw();
