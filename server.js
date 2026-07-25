@@ -440,7 +440,7 @@ function detectLanguage(prompt) {
   }
 
   // Thanglish — check with word boundaries to avoid false matches
-  const thanglishPattern = /\b(enna|epdi|eppadi|irukku|iruka|iruku|panu|pannu|panra|pana|pandriya|pandra|panren|pananum|pannanum|panalam|venum|vendam|sollu|kudu|illa|seri|aagum|mudiyum|evlo|ethna|yaru|yenna|ooda|ipo|ippo|indha|andha|romba|konjam|theriyum|vanakkam|nandri|solla|panunga|kuduga|mattum|avanga|pakalam|mudila|mudiyadu|therila|puriyla|sollunga|parunga|atha|pathi|pesalama|pesalam|podu|rendulayum|rendume)\b/i;
+  const thanglishPattern = /\b(enna|epdi|eppadi|irukku|iruka|iruku|panu|pannu|panra|pana|pandriya|pandra|panren|pananum|pannanum|panannum|panalam|venum|vendam|sollu|kudu|illa|seri|aagum|aaganum|mudiyum|mudiyuma|mudiumaa|mudiyala|evlo|ethna|yaru|yenna|ooda|ipo|ippo|indha|andha|romba|konjam|theriyum|vanakkam|nandri|solla|panga|panunga|pannunga|kuduga|mattum|avanga|pakalam|mudila|mudiyadu|therila|puriyla|sollunga|parunga|atha|pathi|pesalama|pesalam|podu|rendulayum|rendume|seiya|seiyanum|aama|aamaam)\b/i;
   // Also catch standalone particles like "la" and "ku" only when next to Tamil-context words
   const hasStrongThanglish = thanglishPattern.test(prompt);
   // "la" / "ku" alone are too ambiguous — only count them if a strong word is also present
@@ -605,6 +605,7 @@ async function callGroqModel(model, prompt, sysPrompt, history = [], maxTokensOv
     }
   );
   try { updateGroqQuota(model, response.headers); } catch (e) { console.warn('[quota-track]', e.message); }
+  console.log(`[callGroqModel] model=${model} maxTokens=${maxTok} finishReason=${response.data.choices[0].finish_reason || 'unknown'} outputLength=${response.data.choices[0].message.content.length}`);
   return response.data.choices[0].message.content;
 }
 
@@ -633,6 +634,7 @@ async function callGeminiModel(model, prompt, sysPrompt, history = [], maxTokens
     const reason = candidate?.finishReason || 'unknown';
     throw new Error(`Gemini returned no text — finishReason: ${reason}, response: ${JSON.stringify(response.data).slice(0, 300)}`);
   }
+  console.log(`[callGeminiModel] model=${model} maxOutputTokens=${maxTokensOverride ?? 8192} finishReason=${candidate.finishReason || 'unknown'} outputLength=${candidate.content.parts[0].text.length}`);
   return candidate.content.parts[0].text;
 }
 
@@ -1014,51 +1016,6 @@ function extractFirstJson(str) {
   if (s === -1 || e === -1 || e <= s) return null;
   try { return JSON.parse(str.slice(s, e + 1)); } catch { return null; }
 }
-
-// ============================================
-// DIAGNOSTIC TEST ENDPOINT — NO AUTH (remove after QR debug)
-// ============================================
-app.post('/api/test-qr', async (req, res) => {
-  req.body = req.body || {};
-  req.body.prompt = req.body.prompt || 'enaku oru app venum';
-  req.body.history = [];
-  req.body.enterpriseMode = false;
-  req.body.simpleMode = !!req.body.simpleMode;
-  req.session = req.session || {};
-  req.session.userId = 'test'; req.session.userPlan = 'pro';
-  // Reuse the chat handler directly via internal call
-  try {
-    const { prompt, history, enterpriseMode, simpleMode } = req.body;
-    const lang = detectLanguage(prompt);
-    const intent = detectIntent(prompt);
-    const isStudent = false;
-    let sysPrompt = '';
-    const langInstr = langInstructions;
-    if (simpleMode) {
-      const _lp = getLangPreamble(lang);
-      sysPrompt = (_lp ? _lp + '\n\n' : '') + SIMPLE_MODE_PROMPT + '\n\n' + langInstr[lang];
-      sysPrompt += '\n\nQUICK REPLY BLOCKS — MANDATORY: Whenever you ask the user to choose between options (yes/no, topic choice, next-step choice), you MUST output the structured quick_reply block instead of a plain-text question.\n\nFormat (at the very end of your response):\n<<QUICK_REPLY>>{"type":"quick_reply","question":"Your question?","options":["Option 1","Option 2","Option 3"]}<<END_QUICK_REPLY>>\n\nRules: Maximum 4 options. Each option maximum 5 words. ONE quick_reply block per response. Regular answers stay as plain text.';
-    } else {
-      const identity = (lang === 'tamil' || lang === 'thanglish') ? TAMIL_CODING_IDENTITY : CODING_IDENTITY;
-      const _lp = getLangPreamble(lang);
-      sysPrompt = (_lp ? _lp + '\n\n' : '') + identity + '\n\n' + systemPrompts[intent] + '\n\n' + langInstr[lang];
-      sysPrompt += `\n\n=== MANDATORY APP-BUILD PROTOCOL (NON-NEGOTIABLE) ===\n\nSTEP 0 — PLATFORM CHECK (BLOCKING):\nBefore ANY mockup, ANY code, or ANY tech suggestion, you MUST know the target platform. If the user has not stated it, your NEXT response must ask ONLY this question — in the user's language — with a QUICK_REPLY block and NOTHING else app-related:\n\nEnglish version:\n<<QUICK_REPLY>>{"type":"quick_reply","question":"Where should your app run?","options":["Phone only","Desktop only","Both","Not sure"]}<<END_QUICK_REPLY>>\n\n[Use this style ONLY when the user writes Tanglish/Tamil] Tanglish version: "Unga app enga use aaganum?"\n<<QUICK_REPLY>>{"type":"quick_reply","question":"Unga app enga use aaganum?","options":["Phone-la mattum","Computer-la mattum","Rendulayum","Theriyala"]}<<END_QUICK_REPLY>>\n\n=== END MANDATORY APP-BUILD PROTOCOL ===`;
-      sysPrompt += '\n\nQUICK REPLY BLOCKS — MANDATORY: Whenever you ask the user to choose between options, you MUST output the structured quick_reply block.\n\nFormat:\n<<QUICK_REPLY>>{"type":"quick_reply","question":"Your question?","options":["Option 1","Option 2","Option 3"]}<<END_QUICK_REPLY>>';
-    }
-    const estimatedTokens = Math.ceil((sysPrompt.length + prompt.length) / 4) + 100;
-    const decision = decideModel(prompt, lang, intent, estimatedTokens);
-    const primaryModel = decision.model;
-    console.log(`[test-qr] lang=${lang} intent=${intent} model=${primaryModel} tokens~${estimatedTokens}`);
-    const { reply, model: usedModel } = await callWithFallback(primaryModel, prompt, sysPrompt, [], lang);
-    const hasQr = (reply||'').includes('<<QUICK_REPLY>>');
-    console.log(`[test-qr] model=${usedModel} has_qr=${hasQr}`);
-    console.log(`[test-qr] RAW REPLY:\n${reply}`);
-    return res.json({ lang, intent, model: usedModel, has_quick_reply: hasQr, raw_reply: reply });
-  } catch(err) {
-    console.error('[test-qr] error:', err.message);
-    return res.status(500).json({ error: err.message });
-  }
-});
 
 // ============================================
 // MAIN CHAT ENDPOINT — With Router!
@@ -1590,16 +1547,9 @@ DOES NOT APPLY TO: bug fixes, small snippets, single functions, adding one featu
 // ============================================
 const APP_BUILD_INTRO_PROMPT = `You are a warm, encouraging startup mentor talking to a non-coder who just said they want to build an app. Reply in the SAME language/style the user wrote in (Tanglish/Tamil in, Tanglish/Tamil out; English in, English out — never mix, never switch).
 
-Your reply must:
-1. Warmly acknowledge their SPECIFIC app idea by name — reference what they actually said, never generic filler.
-2. Give a short, genuinely useful take in 2-4 sentences: who this app is likely for, which 1-2 features matter most for a first version, and one practical tip a real mentor would give.
-3. End with exactly ONE natural, energetic transition line into starting the build (e.g. "Let's get started — first, where should it run?"), translated into the user's language/style.
+Write a short, warm reply that warmly acknowledges their specific app idea by name (reference what they actually said, never generic filler), gives a genuinely useful take in 2-4 sentences covering who the app is likely for, which 1-2 features matter most for a first version, and one practical tip a real mentor would give, then ends with exactly one natural, energetic transition line into starting the build (e.g. "Let's get started — first, where should it run?"), translated into the user's language/style. Do not write any code, mockup, or technical detail. Do not ask more than one question total — the transition line is that one question. Do not output any quick-reply/button markup, just plain conversational text, and keep the whole reply under 80 words.
 
-Rules:
-- Do NOT write any code, mockup, or technical detail.
-- Do NOT ask more than one question total (the transition line IS that one question).
-- Do NOT output any quick-reply/button markup — plain conversational text only.
-- Keep the whole reply under 80 words.
+Output ONLY the reply itself, starting directly with its first word — no labels, no checklists, no numbered or bulleted lists, no "Yes"/"No" confirmations, no restating or verifying these instructions in any form.
 
 Example (Tanglish input "supermarket inventory app build panannum"):
 "Super idea! Supermarket-ku fresh stock, expiry dates track panradhu konjam kashtama irukum — idha automate pannuna nalla time & money mudhalum. Low-stock alerts oda barcode scan feature first version-ku romba useful-a irukum. Start pannalam — indha app enga run aganum?"
@@ -1617,13 +1567,29 @@ app.post('/api/app-build-intro', requireAuth, async (req, res) => {
   const lang = detectLanguage(ideaText);
   const model = (lang === 'tamil' || lang === 'thanglish') ? MODELS.GEM_FLASH : MODELS.GROQ_70B;
 
+  const callOnce = () => model === MODELS.GEM_FLASH
+    ? callGeminiModel(model, ideaText, APP_BUILD_INTRO_PROMPT, [], 800, 10000)
+    : callGroqModel(model, ideaText, APP_BUILD_INTRO_PROMPT, [], 800, 10000);
+
   try {
-    const reply = model === MODELS.GEM_FLASH
-      ? await callGeminiModel(model, ideaText, APP_BUILD_INTRO_PROMPT, [], 800, 10000)
-      : await callGroqModel(model, ideaText, APP_BUILD_INTRO_PROMPT, [], 800, 10000);
-    res.json({ intro: reply.trim(), model });
+    let reply, usedRetry = false;
+    try {
+      reply = await callOnce();
+    } catch (err1) {
+      // Transient upstream failure (e.g. Gemini 503 "overloaded") — one retry after a short
+      // delay before giving up. Existing graceful client-side fallback (skip intro, go straight
+      // to the platform card) is unchanged if this retry also fails.
+      console.error('[app-build-intro] attempt 1 failed:', err1.message);
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      usedRetry = true;
+      reply = await callOnce();
+      console.log('[app-build-intro] attempt 2 (retry) succeeded');
+    }
+    // Temporary diagnostic logging (Batch 5 investigation) — remove once the truncation cause is confirmed.
+    console.log(`[app-build-intro] success — model=${model} maxTokensRequested=800 outputLength=${reply.trim().length}${usedRetry ? ' (after retry)' : ''}`);
+    res.json({ intro: reply.trim(), model, lang });
   } catch (err) {
-    console.error('[app-build-intro] failed:', err.message);
+    console.error('[app-build-intro] failed after retry:', err.message);
     res.status(503).json({ error: 'intro unavailable' });
   }
 });
@@ -1957,7 +1923,7 @@ app.get('/api/health-check', (req, res) => {
 });
 
 // POST /api/health-check/load-test — spawns load-test.js as a child process
-app.post('/api/health-check/load-test', (req, res) => {
+app.post('/api/health-check/load-test', requireAuth, (req, res) => {
   if (ltRunning) return res.status(409).json({ error: 'Load test already running, please wait.' });
   ltRunning = true;
   execFile(process.execPath, [LT_SCRIPT, '--host', 'http://127.0.0.1:3000', '--concurrency', '50', '--json'],
@@ -1980,7 +1946,7 @@ app.post('/api/health-check/load-test', (req, res) => {
 // ============================================
 // QUOTA DASHBOARD — read-only snapshot
 // ============================================
-app.get('/api/quota', (req, res) => {
+app.get('/api/quota', requireAuth, (req, res) => {
   const out = {};
   // Groq models — populated from x-ratelimit-* response headers
   [MODELS.GROQ_8B, MODELS.GROQ_70B, MODELS.GROQ_SCOUT].forEach(m => {

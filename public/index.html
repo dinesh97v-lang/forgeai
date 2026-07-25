@@ -1854,6 +1854,10 @@ function pvDetectLang(rawLang, code){
   console.log('[pvDetect] label="'+rawLang+'" → "'+key+'" ('+code.length+'ch)');
   return key;
 }
+// Shared in-memory localStorage/sessionStorage shim for BOTH preview iframes (pv-iframe here,
+// and dw-preview-frame in _dwLoadPreview) — both run in a sandboxed opaque origin where real
+// storage throws on access. One definition so the two paths can't drift apart.
+var _PREVIEW_STORAGE_SHIM='(function(){function _mkStore(){var d={};return{getItem:function(k){return Object.prototype.hasOwnProperty.call(d,k)?d[k]:null;},setItem:function(k,v){d[String(k)]=String(v);},removeItem:function(k){delete d[String(k)];},clear:function(){d={};},key:function(i){return Object.keys(d)[i]||null;},get length(){return Object.keys(d).length;}};}try{window.localStorage;}catch(e){Object.defineProperty(window,"localStorage",{value:_mkStore(),configurable:true});}try{window.sessionStorage;}catch(e){Object.defineProperty(window,"sessionStorage",{value:_mkStore(),configurable:true});}})();';
 function pvBuild(){
   var h=pvFiles.html; if(!h) return '';
   console.log('[pvBuild] html='+h.length+'ch css='+pvFiles.css.length+'ch js='+pvFiles.js.length+'ch');
@@ -1862,6 +1866,13 @@ function pvBuild(){
   h=h.replace(/<link\b(?![^>]*\bhref\s*=\s*["'](?:https?:)?\/\/)[^>]*>/gi,'');
   h=h.replace(/<script\b(?![^>]*\bsrc\s*=\s*["'](?:https?:)?\/\/)[^>]*\bsrc\s*=\s*["'][^"']*["'][^>]*>\s*<\/script>/gi,'');
   var css=pvFiles.css, js=pvFiles.js;
+  // Storage shim must install before ANY generated code runs — whether that code is already
+  // inline in pvFiles.html (the common single-file case) or gets added below as separately-
+  // extracted js — so splice it in first, at the earliest point available.
+  var shimSc='<script>'+_PREVIEW_STORAGE_SHIM+'<\/script>';
+  if(/(<\/head>)/i.test(h)){h=h.replace(/(<\/head>)/i,function(_,g){return shimSc+g;});}
+  else if(/(<\/body>)/i.test(h)){h=h.replace(/(<\/body>)/i,function(_,g){return shimSc+g;});}
+  else{h=shimSc+h;}
   if(css){
     var st='<style>\n'+css+'\n</style>';
     if(/(<\/head>)/i.test(h)){h=h.replace(/(<\/head>)/i,function(_,g){return st+g;});}
@@ -2250,10 +2261,25 @@ function _abMatchOption(t,options){
   }
   return null;
 }
+// Detects the model answering its own self-check checklist instead of writing the reply — e.g.
+// a bare language-name line ("Tanglish."), or numbered lines ending in a Yes/No confirmation
+// ("5. No code/buttons/tech specs? Yes."), or an "Under N words?" style line. Requires more than
+// one such signal (or a language-only opening line) before discarding, so ordinary prose that
+// incidentally mentions a word count isn't misclassified.
+function _abLooksLikeChecklist(s){
+  var lines=(s||'').split('\n').map(function(l){return l.trim();}).filter(Boolean);
+  if(!lines.length)return false;
+  var languageOnlyFirstLine=/^(tanglish|thanglish|tamil|english|hindi|telugu)\.?$/i.test(lines[0]);
+  var numberedYesNoCount=lines.filter(function(l){return /^\d+\.\s.*\?\s*(yes|no)\b/i.test(l);}).length;
+  var underWordsLine=lines.some(function(l){return /\bunder\s+\d+\s+words\??/i.test(l);});
+  return languageOnlyFirstLine||numberedYesNoCount>=2||(numberedYesNoCount>=1&&underWordsLine);
+}
 // Strips a leaked internal-instruction header a weak model sometimes prepends before its real
 // reply (e.g. "Drafting the Response (in Tanglish):", "Here is the rewritten response in pure
 // English:", "I must correct myself..."). Applies repeatedly in case more than one is chained.
-// Logs when it actually removes something so leak frequency stays visible in console.
+// Also discards the entire reply if it looks like the model answered its own self-check
+// checklist instead of writing the intro (see _abLooksLikeChecklist). Logs when it actually
+// removes/discards something so leak frequency stays visible in console.
 function _abStripScaffold(text){
   var s=(text||'').trim();
   var original=s;
@@ -2270,6 +2296,10 @@ function _abStripScaffold(text){
       var m=patterns[i].exec(s);
       if(m&&m.index===0){s=s.slice(m[0].length).trim();changed=true;}
     }
+  }
+  if(_abLooksLikeChecklist(s)){
+    console.log('[scaffold-strip] detected checklist/self-check style output — discarding entire reply');
+    return '';
   }
   if(s!==original)console.log('[scaffold-strip] removed leaked meta-header(s) — remainder length='+s.length);
   return s;
@@ -2335,6 +2365,10 @@ function _abStartWithIntro(t){
   Promise.race([fetchP,timeoutP]).then(function(d){
     var ty=document.getElementById('ab-intro-typ');if(ty)ty.remove();
     if(_abState!==_abSession){console.log('[_abStartWithIntro] stale session — discarding intro response, not persisting');return;}
+    // Store the server's own detection so every ack in this flow reuses the SAME verdict instead
+    // of re-running a second, independent detection call — the two can never be guaranteed to
+    // agree forever (e.g. a stale client copy vs a freshly-updated server word list).
+    if(d&&d.lang)_abState.introLang=d.lang;
     var _rawIntro=d&&d.intro?d.intro:'';
     console.log('[_abStartWithIntro] raw intro reply — length='+_rawIntro.length+' text='+JSON.stringify(_rawIntro));
     var _cleanIntro=_rawIntro?_abStripScaffold(_rawIntro):'';
@@ -2402,16 +2436,24 @@ function _abDetectLang(text){
     var c=s.charCodeAt(i);
     if(c>=0x0B80&&c<=0x0BFF)return 'tamil';
   }
-  var thanglishPattern=/\b(enna|epdi|eppadi|irukku|iruka|iruku|panu|pannu|panra|pana|pandriya|pandra|panren|pananum|pannanum|panalam|venum|vendam|sollu|kudu|illa|seri|aagum|mudiyum|evlo|ethna|yaru|yenna|ooda|ipo|ippo|indha|andha|romba|konjam|theriyum|vanakkam|nandri|solla|panunga|kuduga|mattum|avanga|pakalam|mudila|mudiyadu|therila|puriyla|sollunga|parunga|atha|pathi|pesalama|pesalam|podu|rendulayum|rendume)\b/i;
+  var thanglishPattern=/\b(enna|epdi|eppadi|irukku|iruka|iruku|panu|pannu|panra|pana|pandriya|pandra|panren|pananum|pannanum|panannum|panalam|venum|vendam|sollu|kudu|illa|seri|aagum|aaganum|mudiyum|mudiyuma|mudiumaa|mudiyala|evlo|ethna|yaru|yenna|ooda|ipo|ippo|indha|andha|romba|konjam|theriyum|vanakkam|nandri|solla|panga|panunga|pannunga|kuduga|mattum|avanga|pakalam|mudila|mudiyadu|therila|puriyla|sollunga|parunga|atha|pathi|pesalama|pesalam|podu|rendulayum|rendume|seiya|seiyanum|aama|aamaam)\b/i;
   var hasStrongThanglish=thanglishPattern.test(s);
   var hasParticles=/\b(la|ku|oda)\b/i.test(s);
   if(hasStrongThanglish||(hasParticles&&/\b(tamilnadu|chennai|india|anna|amma|appa|bro|da|di|machan)\b/i.test(s)))return 'thanglish';
   return 'english';
 }
+// Single source of truth for "is this flow's language Tanglish/Tamil?" — prefers the server's
+// own detection from the intro call (_abState.introLang) so every ack agrees with it exactly;
+// falls back to a live client-side re-detect only when no intro ran (CTA handoff, reset paths,
+// or the intro call itself failed/timed out).
+function _abFlowIsTa(){
+  var lang=(_abState&&_abState.introLang)?_abState.introLang:_abDetectLang((_abState&&_abState.intentText)||'');
+  return lang!=='english';
+}
 function _abAckPick(lookup,option,fallbackText){
   var entry=lookup[option];
   if(!entry)return fallbackText;
-  var isTa=_abDetectLang((_abState&&_abState.intentText)||'')!=='english';
+  var isTa=_abFlowIsTa();
   var arr=isTa?(entry.ta||entry.en):entry.en;
   return arr&&arr.length?_abPick(arr):fallbackText;
 }
@@ -2427,7 +2469,7 @@ function _abAck(text){
   chatHistory.push({role:'assistant',content:_clean});saveChat();chSync();
 }
 function _abFeatureAck(features){
-  var isTa=_abDetectLang((_abState&&_abState.intentText)||'')!=='english';
+  var isTa=_abFlowIsTa();
   if(features.length===0)return _abPick(isTa?['No extra features, keeping it clean! Ippo, design style eppadi irukanum?','Simple and minimal, got it. Now let\'s pick a design style.']:['No extra features, keeping it clean! Now, which design style do you prefer?','Simple and minimal, got it. Let\'s pick a design style next.']);
   if(features.length===1)return _abPick(isTa?['Nice, '+features[0]+' — solid pick! Ippo design style venum?','Good choice with '+features[0]+'! Now, what design style do you like?']:['Nice, '+features[0]+' — solid pick! Now, what design style do you prefer?','Good choice with '+features[0]+'! Let\'s pick a design style next.']);
   return _abPick(isTa?['Nalla feature set! 💪 Ippo design style eppadi irukanum?','Great combo of features! Now let\'s pick a design style.','Solid lineup! 🔥 Next: design style.']:['Great feature set! 💪 Now, what design style do you prefer?','Nice combo of features! Let\'s pick a design style next.','Solid lineup! 🔥 Next: design style.']);
@@ -2529,6 +2571,10 @@ function _abHandleAnswer(t){
   }
   return false;
 }
+// True only while _abTriggerBuild's own send() call is being set up/in flight — tells send()
+// to skip its stale-check and guided-flow detection for this one call, since the build prompt
+// itself would otherwise look like a fresh, specific build request and restart the flow.
+var _abBuildInFlight=false;
 function _abTriggerBuild(){
   _abState.step=6;
   _abClearState(); // a build in flight can't be meaningfully resumed after a reload — don't persist step 6
@@ -2553,7 +2599,9 @@ function _abTriggerBuild(){
   prompt+='\nDo not give setup instructions or ask the user to create files. End the response with a one-line summary of what the app does.';
   var inp=document.getElementById('chat-in');
   inp.value=prompt;
-  send();
+  _abBuildInFlight=true;
+  try{ send(); }
+  catch(e){ _abBuildInFlight=false; throw e; }
 }
 function _abRenderPlanCard(){
   var s=_abState;
@@ -3045,11 +3093,11 @@ function _buildChatFetchBody(body){
   return body;
 }
 function send(){
-  if(_sendPending)return;
+  if(_sendPending){_abBuildInFlight=false;return;}
   var inp=document.getElementById('chat-in');
-  var t=inp.value.trim();if(!t&&!attachData)return;
+  var t=inp.value.trim();if(!t&&!attachData){_abBuildInFlight=false;return;}
   console.log('[ab-diag] appBuilder='+FEATURES.appBuilder+' simple='+isSimple()+' _abState='+JSON.stringify(_abState)+' detectIntent='+_abDetectIntent(t)+' specificBuildRequest='+_abIsSpecificBuildRequest(t));
-  if(FEATURES.appBuilder&&!isSimple()){
+  if(FEATURES.appBuilder&&!isSimple()&&!_abBuildInFlight){
     // Belt-and-braces: if _abState is active but the chat's last assistant message isn't
     // genuinely the pending guided-flow question (or the chat is empty), it belongs to a
     // DIFFERENT context that something forgot to clear — discard it here too, not just at page
@@ -3120,6 +3168,7 @@ function send(){
     .then(function(r){return r.json();})
     .then(function(d){
       var ty=document.getElementById('typ');if(ty)ty.remove();
+      _abBuildInFlight=false;
       var sameChat=chCurId()===origChatId;
       // ── Quiz card: server returned structured test questions ───────────────
       if(d.testQuestions&&d.testQuestions.length>=1){
@@ -3187,6 +3236,7 @@ function send(){
     })
     .catch(function(){
       var ty=document.getElementById('typ');if(ty)ty.remove();
+      _abBuildInFlight=false;
       if(chCurId()===origChatId){
         var ai=document.createElement('div');ai.className='msg';
         ai.innerHTML='<div class="mav ai">F</div><div><div class="bub" style="color:var(--danger)">Connection error — is the server running?</div>'+aiActBar()+'</div>';
@@ -3588,7 +3638,7 @@ function showResult(inp,code){
           '<button onclick="_dwLoadPreview()" style="font-size:10px;padding:2px 8px;border:1px solid var(--border);border-radius:4px;background:var(--bg);cursor:pointer;color:var(--text2);font-family:inherit">&#8635; Refresh</button>'+
         '</div>'+
       '</div>'+
-      '<iframe id="dw-preview-frame" sandbox="allow-scripts allow-same-origin allow-forms" style="width:100%;height:360px;border:1px solid var(--border);border-radius:0 0 var(--r) var(--r);background:#fff;display:block"></iframe>'+
+      '<iframe id="dw-preview-frame" sandbox="allow-scripts allow-forms" style="width:100%;height:360px;border:1px solid var(--border);border-radius:0 0 var(--r) var(--r);background:#fff;display:block"></iframe>'+
       '<div id="dw-smoke-report" style="font-size:11px;color:var(--text3);margin-top:4px;padding:0 2px">Loading preview...</div>'+
     '</div>'+
     '<div id="dw-check-wrap" style="margin-bottom:8px"></div>'+
@@ -3670,6 +3720,7 @@ function _dwLoadPreview(){
   if(smoke)smoke.textContent='Loading preview...';
   // Inject error capture + smoke report script before </head>
   var inject='<script>'+
+    _PREVIEW_STORAGE_SHIM+
     'window.onerror=function(m,s,l){window.parent.postMessage({type:"dw-err",msg:m,line:l},"*");return false;};'+
     'window.addEventListener("unhandledrejection",function(e){window.parent.postMessage({type:"dw-err",msg:String(e.reason),line:0},"*");});'+
     'window.addEventListener("load",function(){'+
@@ -4766,6 +4817,7 @@ function initPageAll(){
       // _abState survived the stale-check — its pending question IS the last rendered card,
       // so that (and only that) bar is the one still genuinely awaiting an answer.
       console.log('[init] re-arming the current step\'s bar after reload — step='+_abState.step);
+      _abUILock();
       _abEnableBar(_abLastQrBar);
       _abLiveBar=_abLastQrBar;
     }
