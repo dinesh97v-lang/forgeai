@@ -1923,6 +1923,46 @@ function pvBuild(){
     console.log('[pvVendor] '+url+' -> '+newSrc);
     return '<script'+newAttrs+'><\/script>';
   });
+  // [pvFix] Tailwind's CDN (cdn.tailwindcss.com) ships JavaScript, not CSS — a <link
+  // rel="stylesheet"> pointing at it can never work no matter what path it uses. The [pvVendor]
+  // rewrite above only matches <script> elements, so a <link>-shaped reference would otherwise
+  // slip through with zero log output and zero styling. Convert any such <link> to a <script src>
+  // pointing at the same local vendor copy, sharing _pvVendorSeen so a redundant <link> alongside
+  // an already-rewritten <script> is removed instead of double-loading Tailwind.
+  h=h.replace(/<link\b([^>]*)>/gi,function(tag,attrs){
+    var hrefMatch=/\bhref\s*=\s*["']([^"']*)["']/i.exec(attrs);
+    if(!hrefMatch) return tag;
+    var host='';
+    try{host=new URL(hrefMatch[1],location.href).hostname.toLowerCase();}catch(e){return tag;}
+    if(host!=='cdn.tailwindcss.com') return tag;
+    if(_pvVendorSeen['tailwind']){
+      console.log('[pvFix] duplicate Tailwind <link> removed (already loaded via <script>): '+hrefMatch[1]);
+      return '';
+    }
+    _pvVendorSeen['tailwind']=true;
+    var newSrc=location.origin+'/vendor/tailwind.js';
+    console.log('[pvFix] converted <link> Tailwind reference to <script src> (the Tailwind CDN ships JS, not CSS, so a <link> can never work): '+hrefMatch[1]+' -> '+newSrc);
+    return '<script src="'+newSrc+'"><\/script>';
+  });
+  // [pvFix] Fallback for Tailwind missing entirely: inject the local vendor script if the markup
+  // uses Tailwind utility classes but no Tailwind reference (script or link) was found above.
+  // Test: count distinct hits of Tailwind's signature numeric-suffixed utility patterns
+  // (p/px/py/pt/pb/pl/pr/m/mx/my/mt/mb/ml/mr/w/h/gap/space-x/space-y followed by a number),
+  // rounded-*/shadow-* size tokens, and responsive/state variant prefixes (sm:/md:/lg:/xl:/
+  // hover:/focus:/dark:). These are distinctive enough that plain hand-written CSS essentially
+  // never produces them by coincidence. Require at least 2 hits (not just 1) so a single stray
+  // match — e.g. an unrelated class literally named "w-2" — doesn't trigger an unwanted injection.
+  if(!_pvVendorSeen['tailwind']){
+    var _pvTwHits=(h.match(/\b(?:p|px|py|pt|pb|pl|pr|m|mx|my|mt|mb|ml|mr|w|h|gap|space-x|space-y)-\d+\b|\brounded-(?:sm|md|lg|xl|2xl|full)\b|\bshadow-(?:sm|md|lg|xl|2xl)\b|\b(?:sm|md|lg|xl|hover|focus|dark):[a-z-]/gi)||[]).length;
+    if(_pvTwHits>=2){
+      var twSc='<script src="'+location.origin+'/vendor/tailwind.js"><\/script>';
+      if(/(<\/head>)/i.test(h)){h=h.replace(/(<\/head>)/i,function(_,g){return twSc+g;});}
+      else if(/(<\/body>)/i.test(h)){h=h.replace(/(<\/body>)/i,function(_,g){return twSc+g;});}
+      else{h=twSc+h;}
+      _pvVendorSeen['tailwind']=true;
+      console.log('[pvFix] injected Tailwind vendor script — '+_pvTwHits+' utility-class signatures detected but no Tailwind CDN reference found in the markup');
+    }
+  }
   // [pvFix] Defensive mechanical fixes for two ways the model's own generated markup can leave
   // the preview blank even when the CDN scripts are all present and correctly pointed at /vendor:
   // (a) JSX shipped in a plain <script> (no type="text/babel") — the browser parses it as plain
@@ -2683,7 +2723,7 @@ function _abTriggerBuild(){
   var feat=s.features.length?s.features.join(', '):'none';
   var prompt='Build a complete app.\nApp idea: '+(s.intentText||'')+'\nPlatform: '+s.platform+'\nTech stack: '+s.techStack+'\nFeatures: '+feat+'\nIMPORTANT: Fully implement a working, visible UI section for EVERY feature listed above (not just login). Each feature must have its own functional section inside the main app with real controls and basic working JavaScript logic. Do not stop after the login screen. Do not leave any feature as an empty placeholder or a comment.\nDesign style: '+s.designStyle+'\n'+styleGuide+'\n';
   if(s.techStack==='React'){
-    prompt+='Generate a SINGLE HTML file that uses React via CDN script tags so it runs directly in an iframe preview with no build step. Use exactly these script tags: <script src="https://unpkg.com/react@18.3.1/umd/react.production.min.js"><\/script> <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js"><\/script> <script src="https://unpkg.com/@babel/standalone@7.29.7/babel.min.js"><\/script> for React, ReactDOM, and in-browser JSX. JSX rules (hard requirements, the code will fail to parse otherwise): comments inside JSX must use {/* ... */}, never <!-- -->. Use className, not class. Use htmlFor, not for. No import or require statements anywhere — everything comes from the CDN globals React, ReactDOM. The script tag containing JSX MUST be <script type="text/babel"> — plain <script> with no type will make the browser parse JSX as JavaScript and crash on the first tag. The body MUST contain <div id="root"></div> before the script tags. Use ReactDOM.createRoot(document.getElementById(\'root\')).render(...), not the legacy ReactDOM.render. Tailwind\'s @apply does not work in a plain <style> tag with the CDN build — use utility classes directly, or <style type="text/tailwindcss"> if @apply is needed. Every component that is defined must actually be rendered. Return the full file in one ```html code block.';
+    prompt+='Generate a SINGLE HTML file that uses React via CDN script tags so it runs directly in an iframe preview with no build step. Use exactly these script tags: <script src="https://unpkg.com/react@18.3.1/umd/react.production.min.js"><\/script> <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js"><\/script> <script src="https://unpkg.com/@babel/standalone@7.29.7/babel.min.js"><\/script> for React, ReactDOM, and in-browser JSX. JSX rules (hard requirements, the code will fail to parse otherwise): comments inside JSX must use {/* ... */}, never <!-- -->. Use className, not class. Use htmlFor, not for. No import or require statements anywhere — everything comes from the CDN globals React, ReactDOM. The script tag containing JSX MUST be <script type="text/babel"> — plain <script> with no type will make the browser parse JSX as JavaScript and crash on the first tag. The body MUST contain <div id="root"></div> before the script tags. Use ReactDOM.createRoot(document.getElementById(\'root\')).render(...), not the legacy ReactDOM.render. Tailwind\'s @apply does not work in a plain <style> tag with the CDN build — use utility classes directly, or <style type="text/tailwindcss"> if @apply is needed. Every component that is defined must actually be rendered. Tailwind must be loaded with <script src="https://cdn.tailwindcss.com/3.4.17"><\/script> — never a <link> tag; the Tailwind CDN ships JavaScript, not a stylesheet, so a <link rel="stylesheet"> pointing at it will never apply any styling. Return the full file in one ```html code block.';
   }else{
     prompt+='Generate plain HTML/CSS/JS as a single HTML file. Return the full file in one ```html code block.';
   }
