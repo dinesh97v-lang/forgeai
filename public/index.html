@@ -1486,7 +1486,6 @@ function formatMarkdown(text){
     .replace(/>/g,'&gt;');
   // 2. Code blocks: ```lang\ncode``` — replace with dark box + copy button
   var blocks=[];
-  console.log('[diag] formatMarkdown t='+performance.now().toFixed(2)+' pass=step2-complete');
   s=s.replace(/```([^\n`]*)\n?([\s\S]*?)```/g,function(m,lang,code){
     var id='cb'+Math.random().toString(36).slice(2,10);
     var label=lang?'<div style="font-size:10px;color:#888;padding:6px 12px 2px;font-family:monospace">'+lang+'</div>':'';
@@ -1508,7 +1507,6 @@ function formatMarkdown(text){
   // limit on a large generation) before it ever wrote the closing fence, so step 2's regex
   // (which requires both fences) found no match at all. Render from the opening fence to the
   // end as a code block anyway, instead of leaving the raw ```lang marker visible as plain text.
-  console.log('[diag] formatMarkdown t='+performance.now().toFixed(2)+' pass=step2b-unterminated');
   s=s.replace(/```([^\n`]*)\n?([\s\S]*)$/,function(m,lang,code){
     var id='cb'+Math.random().toString(36).slice(2,10);
     var label=lang?'<div style="font-size:10px;color:#888;padding:6px 12px 2px;font-family:monospace">'+lang+'</div>':'';
@@ -1837,7 +1835,6 @@ var pvCode=''; var pvFiles={html:'',css:'',js:'',reactNative:{}};
 // so a literal "&lt;" in the source can't be double-decoded into "<".
 function pvStore(key,escapedCode){
   var s=(escapedCode||'').replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&amp;/g,'&');
-  console.log('[diag] pvStore t='+performance.now().toFixed(2)+' key='+key+' incomingLen='+(escapedCode?escapedCode.length:0)+' prevLen='+(pvFiles[key]!=null?pvFiles[key].length:null)+' terminated='+/```\s*$/.test(String(escapedCode||''))+'\n'+new Error().stack);
   pvFiles[key]=s;
 }
 function pvRnName(rawLang){
@@ -1879,7 +1876,6 @@ function pvDetectLang(rawLang, code){
 // storage throws on access. One definition so the two paths can't drift apart.
 var _PREVIEW_STORAGE_SHIM='(function(){function _mkStore(){var d={};return{getItem:function(k){return Object.prototype.hasOwnProperty.call(d,k)?d[k]:null;},setItem:function(k,v){d[String(k)]=String(v);},removeItem:function(k){delete d[String(k)];},clear:function(){d={};},key:function(i){return Object.keys(d)[i]||null;},get length(){return Object.keys(d).length;}};}try{window.localStorage;}catch(e){Object.defineProperty(window,"localStorage",{value:_mkStore(),configurable:true});}try{window.sessionStorage;}catch(e){Object.defineProperty(window,"sessionStorage",{value:_mkStore(),configurable:true});}})();';
 function pvBuild(){
-  console.log('[diag] pvBuild entry t='+performance.now().toFixed(2));
   var h=pvFiles.html; if(!h) return '';
   console.log('[pvBuild] html='+h.length+'ch css='+pvFiles.css.length+'ch js='+pvFiles.js.length+'ch');
   // Local refs fail silently in srcdoc — strip them; we inject inline below.
@@ -2091,7 +2087,6 @@ function pvLoadIframe(html){
   f.id='pv-iframe'; f.setAttribute('sandbox','allow-scripts');
   f.style.cssText='width:100%;height:100%;border:none;background:#fff';
   f.srcdoc=html; live.appendChild(f);
-  console.log('[diag] pvLoadIframe srcdoc assigned t='+performance.now().toFixed(2));
 }
 // JS-only fallback shell: wraps bare JS in a minimal page that captures
 // console.log / .error / .warn and displays each call as a visible line.
