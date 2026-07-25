@@ -1486,6 +1486,7 @@ function formatMarkdown(text){
     .replace(/>/g,'&gt;');
   // 2. Code blocks: ```lang\ncode``` — replace with dark box + copy button
   var blocks=[];
+  console.log('[diag] formatMarkdown t='+performance.now().toFixed(2)+' pass=step2-complete');
   s=s.replace(/```([^\n`]*)\n?([\s\S]*?)```/g,function(m,lang,code){
     var id='cb'+Math.random().toString(36).slice(2,10);
     var label=lang?'<div style="font-size:10px;color:#888;padding:6px 12px 2px;font-family:monospace">'+lang+'</div>':'';
@@ -1507,6 +1508,7 @@ function formatMarkdown(text){
   // limit on a large generation) before it ever wrote the closing fence, so step 2's regex
   // (which requires both fences) found no match at all. Render from the opening fence to the
   // end as a code block anyway, instead of leaving the raw ```lang marker visible as plain text.
+  console.log('[diag] formatMarkdown t='+performance.now().toFixed(2)+' pass=step2b-unterminated');
   s=s.replace(/```([^\n`]*)\n?([\s\S]*)$/,function(m,lang,code){
     var id='cb'+Math.random().toString(36).slice(2,10);
     var label=lang?'<div style="font-size:10px;color:#888;padding:6px 12px 2px;font-family:monospace">'+lang+'</div>':'';
@@ -1616,6 +1618,15 @@ function _abContinueBuild(msgs,aiDiv,attempt){
       }
       var cont=raw.replace(/^\s*```[^\n]*\n?/,''); // strip a stray opening fence of its own
       cont=_abStripOverlap(snippet,cont);
+      // Structural coherence guard: reject a continuation that looks like a fresh/unrelated
+      // document instead of a true continuation of the same partial file — a diff-format
+      // header, a second full-document marker, or a Node-style require() (this is a browser
+      // CDN single-file app; require must never appear).
+      if(/^(?:\+\+\+|---|@@)/m.test(cont)||/<!DOCTYPE|<html|root\.render\(/i.test(cont)||/\brequire\(/.test(cont)){
+        console.log('[pvBuild] continuation rejected: structural mismatch');
+        _unlockSend();
+        return;
+      }
       var verdict=_abContinuationVerdict(cont);
       var newCode=(info.code+'\n'+verdict.code).trim();
       var done=verdict.done&&_abLooksComplete(newCode);
@@ -1817,8 +1828,17 @@ function copyMsg(btn){
 }
 // ── Live Preview Panel ──────────────────────────────────────────────────────
 var pvCode=''; var pvFiles={html:'',css:'',js:'',reactNative:{}};
+// Decodes exactly the 3 entities formatMarkdown's escape step produces (&amp; &lt; &gt;),
+// via pure string replacement — no innerHTML/DOM parsing, so a stored full HTML document
+// (doctype/head/body/script) is never handed to the browser's HTML parser as markup, which
+// was corrupting content (relocating/splitting text, e.g. inserting a line break mid-
+// identifier) since that's an invalid nesting context for those structural elements.
+// Order is the exact reverse of the encode order (& first, < second, > third when encoding)
+// so a literal "&lt;" in the source can't be double-decoded into "<".
 function pvStore(key,escapedCode){
-  var d=document.createElement('div');d.innerHTML=escapedCode;pvFiles[key]=d.textContent;
+  var s=(escapedCode||'').replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&amp;/g,'&');
+  console.log('[diag] pvStore t='+performance.now().toFixed(2)+' key='+key+' incomingLen='+(escapedCode?escapedCode.length:0)+' prevLen='+(pvFiles[key]!=null?pvFiles[key].length:null)+' terminated='+/```\s*$/.test(String(escapedCode||''))+'\n'+new Error().stack);
+  pvFiles[key]=s;
 }
 function pvRnName(rawLang){
   var l=(rawLang||'').trim();
@@ -1859,12 +1879,54 @@ function pvDetectLang(rawLang, code){
 // storage throws on access. One definition so the two paths can't drift apart.
 var _PREVIEW_STORAGE_SHIM='(function(){function _mkStore(){var d={};return{getItem:function(k){return Object.prototype.hasOwnProperty.call(d,k)?d[k]:null;},setItem:function(k,v){d[String(k)]=String(v);},removeItem:function(k){delete d[String(k)];},clear:function(){d={};},key:function(i){return Object.keys(d)[i]||null;},get length(){return Object.keys(d).length;}};}try{window.localStorage;}catch(e){Object.defineProperty(window,"localStorage",{value:_mkStore(),configurable:true});}try{window.sessionStorage;}catch(e){Object.defineProperty(window,"sessionStorage",{value:_mkStore(),configurable:true});}})();';
 function pvBuild(){
+  console.log('[diag] pvBuild entry t='+performance.now().toFixed(2));
   var h=pvFiles.html; if(!h) return '';
   console.log('[pvBuild] html='+h.length+'ch css='+pvFiles.css.length+'ch js='+pvFiles.js.length+'ch');
   // Local refs fail silently in srcdoc — strip them; we inject inline below.
   // CDN refs (https://, http://, protocol-relative //) load fine in srcdoc — keep those.
   h=h.replace(/<link\b(?![^>]*\bhref\s*=\s*["'](?:https?:)?\/\/)[^>]*>/gi,'');
   h=h.replace(/<script\b(?![^>]*\bsrc\s*=\s*["'](?:https?:)?\/\/)[^>]*\bsrc\s*=\s*["'][^"']*["'][^>]*>\s*<\/script>/gi,'');
+  // [pvVendor] Rewrite CDN script tags (react/react-dom/babel-standalone/tailwind, any of
+  // unpkg.com/cdn.jsdelivr.net/esm.sh/cdn.tailwindcss.com, any version, dev or min) to local
+  // /vendor copies — the sandboxed srcdoc iframe gets a fresh opaque origin every render, so
+  // Chrome's partitioned HTTP cache never reuses the CDN download across previews. Runs after
+  // the local-ref strip above, so it only ever sees tags that already survived as absolute
+  // http(s) URLs. Also drops crossorigin, since the generated markup's crossorigin attribute
+  // forces a CORS-mode request for what's now a same-origin-to-us (but cross-origin-from-the-
+  // opaque-iframe) fetch, and express.static sends no Access-Control-Allow-Origin header.
+  var _pvVendorMap={'react-dom':'react-dom.production.min.js','react':'react.production.min.js','babel':'babel.min.js','tailwind':'tailwind.js'};
+  function _pvVendorLib(url){
+    var host='',path='';
+    try{var u=new URL(url,location.href);host=u.hostname.toLowerCase();path=u.pathname.toLowerCase();}catch(e){return null;}
+    if(['unpkg.com','cdn.jsdelivr.net','esm.sh','cdn.tailwindcss.com'].indexOf(host)===-1) return null;
+    if(host==='cdn.tailwindcss.com') return 'tailwind';
+    if(path.indexOf('react-dom')!==-1) return 'react-dom';
+    if(path.indexOf('babel')!==-1) return 'babel';
+    if(path.indexOf('react')!==-1) return 'react';
+    if(path.indexOf('tailwind')!==-1) return 'tailwind';
+    return null;
+  }
+  var _pvVendorSeen={};
+  h=h.replace(/<script\b([^>]*)>\s*<\/script>/gi,function(tag,attrs){
+    var srcMatch=/\bsrc\s*=\s*["']([^"']*)["']/i.exec(attrs);
+    if(!srcMatch) return tag;
+    var url=srcMatch[1];
+    var lib=_pvVendorLib(url);
+    if(!lib) return tag;
+    if(_pvVendorSeen[lib]){
+      console.log('[pvVendor] duplicate removed: '+url);
+      return '';
+    }
+    _pvVendorSeen[lib]=true;
+    var newSrc=location.origin+'/vendor/'+_pvVendorMap[lib];
+    var newAttrs=attrs.replace(srcMatch[0],'src="'+newSrc+'"');
+    if(/\bcrossorigin\b/i.test(newAttrs)){
+      newAttrs=newAttrs.replace(/\s*\bcrossorigin\b(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]*))?/i,'');
+      console.log('[pvVendor] crossorigin removed');
+    }
+    console.log('[pvVendor] '+url+' -> '+newSrc);
+    return '<script'+newAttrs+'><\/script>';
+  });
   var css=pvFiles.css, js=pvFiles.js;
   // Storage shim must install before ANY generated code runs — whether that code is already
   // inline in pvFiles.html (the common single-file case) or gets added below as separately-
@@ -2029,6 +2091,7 @@ function pvLoadIframe(html){
   f.id='pv-iframe'; f.setAttribute('sandbox','allow-scripts');
   f.style.cssText='width:100%;height:100%;border:none;background:#fff';
   f.srcdoc=html; live.appendChild(f);
+  console.log('[diag] pvLoadIframe srcdoc assigned t='+performance.now().toFixed(2));
 }
 // JS-only fallback shell: wraps bare JS in a minimal page that captures
 // console.log / .error / .warn and displays each call as a visible line.
