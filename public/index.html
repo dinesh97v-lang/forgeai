@@ -1826,6 +1826,7 @@ function copyMsg(btn){
 }
 // ── Live Preview Panel ──────────────────────────────────────────────────────
 var pvCode=''; var pvFiles={html:'',css:'',js:'',reactNative:{}};
+var _pvErrLog=[];
 // Decodes exactly the 3 entities formatMarkdown's escape step produces (&amp; &lt; &gt;),
 // via pure string replacement — no innerHTML/DOM parsing, so a stored full HTML document
 // (doctype/head/body/script) is never handed to the browser's HTML parser as markup, which
@@ -1875,6 +1876,14 @@ function pvDetectLang(rawLang, code){
 // and dw-preview-frame in _dwLoadPreview) — both run in a sandboxed opaque origin where real
 // storage throws on access. One definition so the two paths can't drift apart.
 var _PREVIEW_STORAGE_SHIM='(function(){function _mkStore(){var d={};return{getItem:function(k){return Object.prototype.hasOwnProperty.call(d,k)?d[k]:null;},setItem:function(k,v){d[String(k)]=String(v);},removeItem:function(k){delete d[String(k)];},clear:function(){d={};},key:function(i){return Object.keys(d)[i]||null;},get length(){return Object.keys(d).length;}};}try{window.localStorage;}catch(e){Object.defineProperty(window,"localStorage",{value:_mkStore(),configurable:true});}try{window.sessionStorage;}catch(e){Object.defineProperty(window,"sessionStorage",{value:_mkStore(),configurable:true});}})();';
+// Shared error-capture wrapper for BOTH preview iframes — same reasoning as the storage shim
+// above: one definition so the two paths can't drift apart. Parameterized by postMessage `type`
+// so each frame keeps its own distinct, unchanged message type (dw-err / pv-err); the parent's
+// message listener routes on iframe source, not on which wrapper produced the message.
+function _mkPreviewErrorWrapper(type){
+  return 'window.onerror=function(m,s,l){window.parent.postMessage({type:"'+type+'",msg:m,line:l},"*");return false;};'+
+    'window.addEventListener("unhandledrejection",function(e){window.parent.postMessage({type:"'+type+'",msg:String(e.reason),line:0},"*");});';
+}
 function pvBuild(){
   var h=pvFiles.html; if(!h) return '';
   console.log('[pvBuild] html='+h.length+'ch css='+pvFiles.css.length+'ch js='+pvFiles.js.length+'ch');
@@ -2000,7 +2009,7 @@ function pvBuild(){
   // Storage shim must install before ANY generated code runs — whether that code is already
   // inline in pvFiles.html (the common single-file case) or gets added below as separately-
   // extracted js — so splice it in first, at the earliest point available.
-  var shimSc='<script>'+_PREVIEW_STORAGE_SHIM+'<\/script>';
+  var shimSc='<script>'+_PREVIEW_STORAGE_SHIM+_mkPreviewErrorWrapper('pv-err')+'<\/script>';
   if(/(<\/head>)/i.test(h)){h=h.replace(/(<\/head>)/i,function(_,g){return shimSc+g;});}
   else if(/(<\/body>)/i.test(h)){h=h.replace(/(<\/body>)/i,function(_,g){return shimSc+g;});}
   else{h=shimSc+h;}
@@ -2156,10 +2165,39 @@ function pvLoadIframe(html){
   if(!live||!html) return;
   var old=document.getElementById('pv-iframe'); if(old) old.remove();
   var oldW=document.getElementById('pv-snack-wrap'); if(oldW) oldW.remove();
+  _pvErrLog=[];_pvUpdateErrStrip();
   var f=document.createElement('iframe');
   f.id='pv-iframe'; f.setAttribute('sandbox','allow-scripts');
   f.style.cssText='width:100%;height:100%;border:none;background:#fff';
   f.srcdoc=html; live.appendChild(f);
+}
+// Renders errors reported by the pv-iframe (via postMessage, see _mkPreviewErrorWrapper) as a
+// slim overlay strip at the top of the preview panel — visible but not blocking, and the app
+// underneath keeps rendering whatever it managed to. Click to expand full detail, same pattern
+// as the dw path's error badge (_dwUpdateErrBadge), just rendered in the parent panel chrome
+// instead of a dedicated badge element, since pv-live only ever holds the iframe itself.
+function _pvUpdateErrStrip(){
+  var live=document.getElementById('pv-live');
+  if(!live) return;
+  var strip=document.getElementById('pv-err-strip');
+  var n=_pvErrLog.length;
+  if(!n){
+    if(strip) strip.remove();
+    return;
+  }
+  if(!strip){
+    strip=document.createElement('div');
+    strip.id='pv-err-strip';
+    strip.style.cssText='position:absolute;top:0;left:0;right:0;z-index:20;font-family:monospace;font-size:11px';
+    live.style.position='relative';
+    live.appendChild(strip);
+  }
+  var detail=_pvErrLog.map(function(e){return esc(e.msg)+(e.line?' (line '+e.line+')':'');}).join('<br>');
+  strip.innerHTML=
+    '<div style="background:#dc2626;color:#fff;padding:4px 8px;cursor:pointer" onclick="var d=document.getElementById(\'pv-err-detail\');d.style.display=d.style.display===\'none\'?\'block\':\'none\'">'+
+      '&#9888; '+n+' error'+(n>1?'s':'')+' &#8212; click to expand'+
+    '</div>'+
+    '<div id="pv-err-detail" style="display:none;max-height:120px;overflow:auto;background:#450a0a;color:#fecaca;padding:6px 8px;word-break:break-word">'+detail+'</div>';
 }
 // JS-only fallback shell: wraps bare JS in a minimal page that captures
 // console.log / .error / .warn and displays each call as a visible line.
@@ -2438,15 +2476,18 @@ function _abStripScaffold(text){
 function _flTamilInput(s){return /[஀-௿]/.test(s);}
 // ── App Builder Flow (Phase 1) ────────────────────────────────────────────────
 function _abDetectIntent(text){var t=(text||'').toLowerCase();return /\b(build|create|make|develop|design|need|venum|pannu|pannanum|pananum|seyyanum|seiyanum|vendiyathu)\b/.test(t)&&/\b(app|application|website|tool|system)\b/.test(t);}
-// Narrower than _abDetectIntent: only fires the guided flow for clearly-specific build requests
-// (contains a descriptive word beyond the trigger pair itself), so ambiguous asks like
-// "can you build an app?" fall through to the server's conversational MENTOR MODE instead.
+// Narrower than _abDetectIntent: only fires the guided flow for clearly-specific build requests.
+// No longer requires one of a fixed five-word noun list (app/application/website/tool/system) —
+// that was too narrow ("habit tracker build pananum" has a clear verb and object but none of
+// those five words). Instead: a build verb PLUS at least 2 other meaningful (non-filler) words.
+// A real app idea is normally at least a two-word description ("habit tracker", "todo app",
+// "expense system"), while vague/unrelated asks that merely contain a trigger verb ("build my
+// confidence", "I need help") reduce to a single leftover word and correctly fall through to the
+// server's conversational MENTOR MODE instead.
 function _abIsSpecificBuildRequest(text){
   var t=(text||'').toLowerCase();
   if(!/\b(build|create|make|develop|design|need|venum|pannu|pannanum|pananum|seyyanum|seiyanum|vendiyathu)\b/.test(t)) return false;
-  if(!/\b(app|application|website|tool|system)\b/.test(t)) return false;
   var stop=['build','create','make','develop','design','venum','pannu','pannanum','seyyanum','seiyanum','vendiyathu',
-            'app','application','website','tool','system',
             'a','an','the','my','me','i','you','can','could','would','please',
             'for','to','of','some','something','need','want','oru','onnu','ready','mudiyuma','mudiumaa','pana','panra',
             'panalama','pananum','mudiuma','epdi','enna','u','plz',
@@ -2454,7 +2495,7 @@ function _abIsSpecificBuildRequest(text){
             'nama','namma','atha','adhu','idha','pathi','pesalamaa','pesalam','solren','sollu','konjam'];
   var words=t.replace(/[^a-z0-9\s]/g,' ').split(/\s+/).filter(Boolean);
   var meaningful=words.filter(function(w){return w.length>1&&stop.indexOf(w)===-1;});
-  return meaningful.length>0;
+  return meaningful.length>=2;
 }
 // Every guided-flow card gets navigation controls appended: "Back" (only once there's a
 // previous step to return to) and "Start over" (always) — same live bar as the real options,
@@ -2469,7 +2510,11 @@ function _abAsk(question,options){
   if(_abState)fullOptions.push('🔄 Start over');
   flRenderQuickReply({options:fullOptions},msgs,'live');
   msgs.scrollTop=msgs.scrollHeight;
-  chatHistory.push({role:'assistant',content:question,qrOptions:fullOptions});
+  // abQuestion distinguishes this as a genuine guided-flow pending question, not just any
+  // message with qrOptions — the server's own <<QUICK_REPLY>> mechanism attaches qrOptions to
+  // ordinary chat replies too, and the two are otherwise indistinguishable to the pending check
+  // in send()/initPageAll(). Internal bookkeeping only — never read by any rendering code.
+  chatHistory.push({role:'assistant',content:question,qrOptions:fullOptions,abQuestion:true});
   saveChat();chSync();
   _abSaveState();
 }
@@ -2732,14 +2777,20 @@ function _abTriggerBuild(){
   inp.value=prompt;
   _abBuildInFlight=true;
   try{ send(); }
-  catch(e){ _abBuildInFlight=false; throw e; }
+  catch(e){
+    _abBuildInFlight=false;
+    // send() threw before ever reaching the fetch call (so neither its .then nor .catch will
+    // ever run to clear step 6) — clear it here so this exact build attempt can't strand it.
+    if(_abState&&_abState.step===6){_abState=null;_abClearState();}
+    throw e;
+  }
 }
 function _abRenderPlanCard(){
   var s=_abState;
   var feat=s.features.length?s.features.join(', '):'(none)';
   var content='Here\'s your app plan:\n📱 Platform: '+s.platform+'\n⚙️ Stack: '+s.techStack+'\n✨ Features: '+feat+'\n🎨 Style: '+s.designStyle+'\nReady to build?';
   var qrOptions=['Build it 🚀','⬅ Back','Start over'];
-  chatHistory.push({role:'assistant',content:content,qrOptions:qrOptions});
+  chatHistory.push({role:'assistant',content:content,qrOptions:qrOptions,abQuestion:true});
   saveChat();chSync();
   var msgs=document.getElementById('chat-msgs');
   var div=document.createElement('div');div.className='msg';
@@ -2762,7 +2813,7 @@ function _abRenderFeatureSelect(){
     +'<button class="fl-qr-btn" onclick="flQrClick(this)" data-opt="🔄 Start over">🔄 Start over</button>';
   msgs.appendChild(bar);msgs.scrollTop=msgs.scrollHeight;
   _abArmBar(bar);
-  chatHistory.push({role:'assistant',content:'Which features do you need? Pick one or more, then tap Done.',qrOptions:opts.concat(['⬅ Back','🔄 Start over'])});
+  chatHistory.push({role:'assistant',content:'Which features do you need? Pick one or more, then tap Done.',qrOptions:opts.concat(['⬅ Back','🔄 Start over']),abQuestion:true});
   saveChat();chSync();
   _abSaveState();
 }
@@ -3234,18 +3285,25 @@ function send(){
     // DIFFERENT context that something forgot to clear — discard it here too, not just at page
     // load, so this new message is treated as fresh input instead of a stale-step "answer".
     var _abLast=chatHistory.length?chatHistory[chatHistory.length-1]:null;
-    var _abPending=_abLast&&_abLast.role==='assistant'&&Array.isArray(_abLast.qrOptions)&&_abLast.qrOptions.length>=2;
+    var _abPending=_abLast&&_abLast.role==='assistant'&&_abLast.abQuestion===true&&Array.isArray(_abLast.qrOptions)&&_abLast.qrOptions.length>=2;
     if(_abState&&!_abPending){
       console.log('[send] discarding stale _abState — no pending guided-flow question in this chat');
       _abState=null;_abClearState();_abLiveBar=null;
     }
-    var _abFa=_abState&&_abState.step<=5,_abNi=!_abState&&_abIsSpecificBuildRequest(t);
+    // A clearly well-formed new build request now wins outright, even over an active _abState —
+    // checked first, not gated on _abState already being falsy — so a leftover/stale/mid-flow
+    // state can never silently swallow a fresh, specific idea as if it were an answer to
+    // whatever step it happens to be on. If a flow WAS genuinely active, override it with a
+    // visible restart notice (_abResetWithNotice) rather than mixing the new idea into the old
+    // state silently; a bare step-answer with no independent build request still routes to
+    // _abHandleAnswer as before.
+    var _abNi=_abIsSpecificBuildRequest(t),_abFa=!_abNi&&_abState&&_abState.step<=5;
     if(_abFa||_abNi){
       var _abM=document.getElementById('chat-msgs'),_abU=document.createElement('div');
       _abU.className='msg u';_abU.innerHTML=renderUserBub({content:t});
       _abM.appendChild(_abU);inp.value='';rsz(inp);_abM.scrollTop=_abM.scrollHeight;
       chatHistory.push({role:'user',content:t});saveChat();chSync();
-      if(_abNi){_abStartWithIntro(t);}
+      if(_abNi){ if(_abState){_abResetWithNotice(t);}else{_abStartWithIntro(t);} }
       else{_abHandleAnswer(t);}
       return;
     }
@@ -3295,9 +3353,21 @@ function send(){
   if(attSnap)fetchBody.attachment={type:attSnap.type,name:attSnap.name,mimeType:attSnap.mimeType,data:attSnap.data};
   _lockSend();
   var origChatId=chCurId();
-  fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(fetchBody)})
+  // Build requests (step 6) get a client-side abort timeout: fetch() has no timeout of its own,
+  // so a request that hangs forever (server accepts the connection but never responds) would
+  // never resolve OR reject — leaving _abState.step:6 stranded, since neither the .then nor the
+  // .catch cleanup below would ever run. Aborting after a generous window makes the fetch reject
+  // like any other network failure, routing it through the existing .catch cleanup.
+  var _abBuildTimer=null,_fetchOpts={method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(fetchBody)};
+  if(_abState&&_abState.step===6){
+    var _abBuildAbort=new AbortController();
+    _fetchOpts.signal=_abBuildAbort.signal;
+    _abBuildTimer=setTimeout(function(){_abBuildAbort.abort();},90000);
+  }
+  fetch('/api/chat',_fetchOpts)
     .then(function(r){return r.json();})
     .then(function(d){
+      if(_abBuildTimer)clearTimeout(_abBuildTimer);
       var ty=document.getElementById('typ');if(ty)ty.remove();
       _abBuildInFlight=false;
       var sameChat=chCurId()===origChatId;
@@ -3366,6 +3436,7 @@ function send(){
       if(!_abWillContinue)_unlockSend();
     })
     .catch(function(){
+      if(_abBuildTimer)clearTimeout(_abBuildTimer);
       var ty=document.getElementById('typ');if(ty)ty.remove();
       _abBuildInFlight=false;
       if(chCurId()===origChatId){
@@ -3852,8 +3923,7 @@ function _dwLoadPreview(){
   // Inject error capture + smoke report script before </head>
   var inject='<script>'+
     _PREVIEW_STORAGE_SHIM+
-    'window.onerror=function(m,s,l){window.parent.postMessage({type:"dw-err",msg:m,line:l},"*");return false;};'+
-    'window.addEventListener("unhandledrejection",function(e){window.parent.postMessage({type:"dw-err",msg:String(e.reason),line:0},"*");});'+
+    _mkPreviewErrorWrapper('dw-err')+
     'window.addEventListener("load",function(){'+
       'var r={'+
         'buttons:document.querySelectorAll("button,input[type=button],input[type=submit]").length,'+
@@ -4940,7 +5010,7 @@ function initPageAll(){
   // answer to someone else's stale platform/stack/design question.
   (function(){
     var _abLast=chatHistory.length?chatHistory[chatHistory.length-1]:null;
-    var _abPending=_abLast&&_abLast.role==='assistant'&&Array.isArray(_abLast.qrOptions)&&_abLast.qrOptions.length>=2;
+    var _abPending=_abLast&&_abLast.role==='assistant'&&_abLast.abQuestion===true&&Array.isArray(_abLast.qrOptions)&&_abLast.qrOptions.length>=2;
     if(_abState&&!_abPending){
       console.log('[init] discarding stale _abState — restored session has no pending guided-flow question');
       _abState=null;_abClearState();
@@ -4972,14 +5042,24 @@ function initPageAll(){
     }
   });
   // One Prompt preview: handle postMessage from dw-preview-frame
+  // App Builder preview: handle postMessage from pv-iframe (same listener, routed by source)
   window.addEventListener('message',function(e){
     var frame=document.getElementById('dw-preview-frame');
-    if(!frame||e.source!==frame.contentWindow)return;
-    if(!e.data||typeof e.data!=='object')return;
-    if(e.data.type==='dw-err'){
-      _dwErrLog.push(e.data);_dwUpdateErrBadge();
-    }else if(e.data.type==='dw-smoke'){
-      _dwUpdateSmoke(e.data.r||{buttons:0,inputs:0,forms:0});
+    if(frame&&e.source===frame.contentWindow){
+      if(!e.data||typeof e.data!=='object')return;
+      if(e.data.type==='dw-err'){
+        _dwErrLog.push(e.data);_dwUpdateErrBadge();
+      }else if(e.data.type==='dw-smoke'){
+        _dwUpdateSmoke(e.data.r||{buttons:0,inputs:0,forms:0});
+      }
+      return;
+    }
+    var pvFrame=document.getElementById('pv-iframe');
+    if(pvFrame&&e.source===pvFrame.contentWindow){
+      if(!e.data||typeof e.data!=='object')return;
+      if(e.data.type==='pv-err'){
+        _pvErrLog.push(e.data);_pvUpdateErrStrip();
+      }
     }
   });
 
