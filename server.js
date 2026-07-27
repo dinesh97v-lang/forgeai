@@ -1761,6 +1761,44 @@ app.post('/api/code-check', requireAuth, async (req, res) => {
   }
 });
 
+// ============================================
+// APP BUILDER GUIDED FLOW — free-text option matcher fallback
+// ============================================
+async function abMatchOption(text, options) {
+  const sysMsg = 'The user is answering a multiple-choice question. Return the EXACT option string that matches their answer, or the literal word NONE. No explanation, no punctuation, nothing else.';
+  const userMsg = 'Options:\n' + options.map(o => '- ' + o).join('\n') + '\n\nUser answer: ' + text;
+  const resp = await axios.post(
+    'https://api.groq.com/openai/v1/chat/completions',
+    {
+      model: MODELS.GROQ_8B,
+      messages: [
+        { role: 'system', content: sysMsg },
+        { role: 'user', content: userMsg }
+      ],
+      max_tokens: 30,
+      temperature: 0
+    },
+    { headers: { Authorization: `Bearer ${GROQ_KEY}` }, timeout: 8000 }
+  );
+  const raw = (resp.data?.choices?.[0]?.message?.content || '').trim();
+  const match = options.find(o => o === raw);
+  return match || null;
+}
+
+app.post('/api/ab-match-option', requireAuth, async (req, res) => {
+  const { text, options } = req.body;
+  if (typeof text !== 'string' || !Array.isArray(options) || options.length === 0) {
+    return res.status(400).json({ error: 'text and options are required' });
+  }
+  try {
+    const match = await abMatchOption(text, options);
+    res.json({ match });
+  } catch (err) {
+    console.error('[ab-match-option]', err.message);
+    res.status(500).json({ match: null });
+  }
+});
+
 app.post('/api/code-fix', requireAuth, async (req, res) => {
   const { files, issues } = req.body;
   if (!Array.isArray(files) || files.length === 0) {

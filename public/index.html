@@ -2698,51 +2698,115 @@ function _abStartOverFlow(){
 // Validates every answer (click OR free-typed text) against the CURRENT step's actual options
 // before writing anything into _abState — a stale/garbage value used to silently overwrite
 // platform/techStack/designStyle and corrupt the eventual build prompt (index.html audit #3).
+// Model fallback for a step's free-text answer that all three deterministic _abMatchOption
+// tiers failed to match — most importantly Tamil-script input, which never shares a Latin-script
+// substring with the (always-English) option labels, so it can never match via those tiers alone.
+// Only ever called after _abMatchOption has already returned null, so the common path (click,
+// exact, case/emoji-insensitive, word-substring) stays fully synchronous and instant. Never
+// writes _abState itself — cb(matched) re-enters the exact same step-transition code a
+// synchronous match would have run; cb(null) means treat it like any other no-match.
+function _abTryModelFallback(text,options,cb){
+  var _t0=performance.now();
+  _lockSend();
+  var _abFallbackAbort=new AbortController();
+  var _abFallbackTimer=setTimeout(function(){_abFallbackAbort.abort();},6000);
+  function finish(result){
+    clearTimeout(_abFallbackTimer);
+    _unlockSend();
+    console.log('[abMatch] input='+JSON.stringify(text)+' optionsCount='+options.length+' result='+JSON.stringify(result)+' elapsedMs='+Math.round(performance.now()-_t0));
+    cb(result);
+  }
+  fetch('/api/ab-match-option',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:text,options:options}),signal:_abFallbackAbort.signal})
+    .then(function(r){return r.json();})
+    .then(function(d){
+      var m=(d&&typeof d.match==='string')?d.match:null;
+      finish(m&&options.indexOf(m)!==-1?m:null);
+    })
+    .catch(function(){finish(null);});
+}
 function _abHandleAnswer(t){
   if(!_abState)return false;
   var _tt=(t||'').trim();
   if(/^(?:🔄\s*)?start\s*over$|^restart$/i.test(_tt)){_abStartOverFlow();return true;}
   if(_abState.step>1&&/^(?:⬅\s*)?back$|^go\s*back$/i.test(_tt)){_abGoBack();return true;}
-  function reask(renderFn){
+  function reask(renderFn,opts){
     var isTa=_abDetectLang(_abState.intentText||'')!=='english';
     _abAck(isTa?'Sorry, puriyala 🙏 Kelvi options-la irundhu ondru pick pannunga:':'Sorry, didn\'t quite catch that 🙏 Please pick one of the options below:');
-    if(renderFn)renderFn();
+    if(renderFn){renderFn();}
+    else{
+      // No dedicated re-render here (the existing card/bar is already correct and visible) —
+      // the ack message _abAck just pushed is standing in for the pending question, so tag it
+      // the same way _abAsk tags its own questions. Without qrOptions/abQuestion, send()'s and
+      // initPageAll()'s pending check sees no live question on the last message and discards
+      // _abState as stale the next time the user answers.
+      var _lastMsg=chatHistory.length?chatHistory[chatHistory.length-1]:null;
+      if(_lastMsg&&_lastMsg.role==='assistant'){
+        _lastMsg.qrOptions=(opts||[]).slice();
+        _lastMsg.abQuestion=true;
+        saveChat();chSync();
+      }
+    }
   }
   if(_abState.step===1){
     var opts=['Phone only','Desktop only','Both'],m=_abMatchOption(t,opts);
-    if(!m){console.log('[_abHandleAnswer] step1 no match for '+JSON.stringify(t));reask(function(){_abAsk('Where should your app run?',opts);});return true;}
-    _abState.platform=m;_abState.step=2;_abAck(_abAckPick(_abAckLines.platform,m,'Got it! Now, which tech stack do you prefer?'));_abAsk('Which tech stack do you prefer?',['Simple HTML/CSS/JS','React']);return true;
+    function onMatch1(m){_abState.platform=m;_abState.step=2;_abAck(_abAckPick(_abAckLines.platform,m,'Got it! Now, which tech stack do you prefer?'));_abAsk('Which tech stack do you prefer?',['Simple HTML/CSS/JS','React']);}
+    if(m){onMatch1(m);return true;}
+    console.log('[_abHandleAnswer] step1 no match for '+JSON.stringify(t));
+    _abTryModelFallback(t,opts,function(matched){
+      if(matched){onMatch1(matched);}
+      else{reask(function(){_abAsk('Where should your app run?',opts);});}
+    });
+    return true;
   }
   if(_abState.step===2){
     var opts=['Simple HTML/CSS/JS','React'],m=_abMatchOption(t,opts);
-    if(!m){console.log('[_abHandleAnswer] step2 no match for '+JSON.stringify(t));reask(function(){_abAsk('Which tech stack do you prefer?',opts);});return true;}
-    _abState.techStack=m;_abState.step=3;_abAck(_abAckPick(_abAckLines.techStack,m,'Got it! Let\'s pick the features.'));_abRenderFeatureSelect();return true;
+    function onMatch2(m){_abState.techStack=m;_abState.step=3;_abAck(_abAckPick(_abAckLines.techStack,m,'Got it! Let\'s pick the features.'));_abRenderFeatureSelect();}
+    if(m){onMatch2(m);return true;}
+    console.log('[_abHandleAnswer] step2 no match for '+JSON.stringify(t));
+    _abTryModelFallback(t,opts,function(matched){
+      if(matched){onMatch2(matched);}
+      else{reask(function(){_abAsk('Which tech stack do you prefer?',opts);});}
+    });
+    return true;
   }
   if(_abState.step===3){
     var featOpts=['User Login','Data Storage','Search','Notifications','Payment','Maps','Charts','Chat'];
     var m=_abMatchOption(t,featOpts);
-    if(m){
+    function onMatch3(m){
       var bar=document.getElementById('ab-feat-bar');
       var btnEl=bar&&bar.querySelector('.fl-qr-btn[data-opt="'+m+'"]');
       if(btnEl){_abToggleFeature(btnEl);console.log('[_abHandleAnswer] step3 free-text matched feature: '+m);}
       else console.log('[_abHandleAnswer] step3 matched feature but its button was not found: '+m);
-      return true; // toggling a feature never advances the step — only Done does
     }
+    if(m){onMatch3(m);return true;} // toggling a feature never advances the step — only Done does
     if(/^(done|finish|ready|mudinjuchu|mudinchu|aayiduchu)$/i.test((t||'').trim())){_abFeatureDone();return true;}
     console.log('[_abHandleAnswer] step3 no match for '+JSON.stringify(t));
-    reask(null); // the feature bar is already on screen and unchanged — nothing to re-render
+    _abTryModelFallback(t,featOpts,function(matched){
+      if(matched){onMatch3(matched);}
+      else{reask(null,featOpts);} // the feature bar is already on screen and unchanged — nothing to re-render
+    });
     return true;
   }
   if(_abState.step===4){
     var opts=['Minimal','Colorful','Professional'],m=_abMatchOption(t,opts);
-    if(!m){console.log('[_abHandleAnswer] step4 no match for '+JSON.stringify(t));reask(function(){_abAsk('What design style do you prefer?',opts);});return true;}
-    _abState.designStyle=m;_abState.step=5;_abAck(_abAckPick(_abAckLines.designStyle,m,'Got it! Here\'s your plan.'));_abRenderPlanCard();return true;
+    function onMatch4(m){_abState.designStyle=m;_abState.step=5;_abAck(_abAckPick(_abAckLines.designStyle,m,'Got it! Here\'s your plan.'));_abRenderPlanCard();}
+    if(m){onMatch4(m);return true;}
+    console.log('[_abHandleAnswer] step4 no match for '+JSON.stringify(t));
+    _abTryModelFallback(t,opts,function(matched){
+      if(matched){onMatch4(matched);}
+      else{reask(function(){_abAsk('What design style do you prefer?',opts);});}
+    });
+    return true;
   }
   if(_abState.step===5){
     var opts=['Build it 🚀','Start over'],m=_abMatchOption(t,opts);
-    if(!m){console.log('[_abHandleAnswer] step5 no match for '+JSON.stringify(t));reask(function(){_abRenderPlanCard();});return true;}
-    if(m==='Start over'){_abStartOverFlow();}
-    else{_abTriggerBuild();}
+    function onMatch5(m){if(m==='Start over'){_abStartOverFlow();}else{_abTriggerBuild();}}
+    if(m){onMatch5(m);return true;}
+    console.log('[_abHandleAnswer] step5 no match for '+JSON.stringify(t));
+    _abTryModelFallback(t,opts,function(matched){
+      if(matched){onMatch5(matched);}
+      else{reask(null,opts);} // the plan card is already on screen and unchanged — nothing to re-render
+    });
     return true;
   }
   return false;
