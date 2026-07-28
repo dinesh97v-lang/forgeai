@@ -1192,7 +1192,21 @@ function enterMode(mode){
       ws.style.display='none';
       document.getElementById('app').classList.add('show');
       switchMode(mode);
-      try{chNewChat();}catch(e){}  // fresh entry always opens a new chat; fall back to restored state on error
+      // A returning user's session (already restored by initPageAll(), synchronously, before this
+      // screen was ever clickable) must not be silently wiped just because onAuthSuccess() shows
+      // this picker unconditionally on every reload — chatHistory.length>0 means a real, non-empty
+      // active chat was found and loaded, so "fresh entry" doesn't apply; only start a genuinely
+      // new chat when there's truly nothing to protect.
+      if(!chatHistory.length){
+        try{chNewChat();}catch(e){}  // fresh entry always opens a new chat; fall back to restored state on error
+      }else if(mode==='simple'&&_abState){
+        // The guided App Builder flow is Pro-mode-only (send()'s own gate is `!isSimple()`), so a
+        // flow that survives into Simple mode can never resume meaningfully and its discard-check
+        // never runs there either (same gate) — leaving _abUILock()'s ab-flow-active class stuck
+        // on indefinitely. Clear the flow state the same way chOpen()/chNewChat() do on any other
+        // context switch, but leave chatHistory/the active chat alone.
+        _abState=null;_abClearState();_abLiveBar=null;
+      }
     },400);
   },200);
 }
@@ -2668,6 +2682,97 @@ function _abResetWithNotice(newIntentText){
   _abUILock();
   _abAsk('Where should your app run?',['Phone only','Desktop only','Both']);
 }
+// Mid-flow override confirmation: a clearly well-formed NEW build request arrived while a flow
+// is genuinely active past step 1 — resetting outright (like _abResetWithNotice does at step 1)
+// would silently discard real progress (platform/tech stack/features/design already chosen) with
+// no undo, so ask first instead. _abState.step is never touched here — pendingOverride is an
+// orthogonal flag send() checks before its normal routing, not a sixth state-machine step, and
+// _abHandleAnswer's step dispatch never sees or processes this exchange at all.
+function _abBeginOverrideConfirm(newText){
+  var s=_abState;
+  var parts=[];
+  if(s.platform)parts.push(s.platform);
+  if(s.techStack)parts.push(s.techStack);
+  if(s.features&&s.features.length)parts.push(s.features.join(', '));
+  if(s.designStyle)parts.push(s.designStyle);
+  var lost=parts.length?parts.join(', '):'your current progress';
+  // Capture the still-pending step question's own qrOptions — the message just before the user's
+  // override-triggering message that send() already pushed — so "keep current progress" can tag
+  // its own ack the same way later without needing to know which step this is or duplicate its
+  // option list.
+  var _priorMsg=chatHistory.length>=2?chatHistory[chatHistory.length-2]:null;
+  var priorQrOptions=(_priorMsg&&_priorMsg.role==='assistant'&&Array.isArray(_priorMsg.qrOptions))?_priorMsg.qrOptions.slice():[];
+  _abState.pendingOverride={newText:newText,priorQrOptions:priorQrOptions};
+  var isTa=_abDetectLang(_abState.intentText||'')!=='english';
+  var question=isTa
+    ?('Idhu vera app idea maadhiri irukku! Ippo irukra progress ('+lost+') irukku — adha vittu new idea-la start pannava, illa ippo irukradha continue pannuvoma?')
+    :('That looks like a different app idea! You have progress so far ('+lost+') — start fresh with the new idea, or keep going with what you have?');
+  var opts=['Start fresh with new idea','Keep current progress'];
+  var msgs=document.getElementById('chat-msgs');
+  var div=document.createElement('div');div.className='msg';
+  div.innerHTML='<div class="mav ai">F</div><div><div class="bub">'+esc(question)+'</div></div>';
+  msgs.appendChild(div);
+  flRenderQuickReply({options:opts},msgs,'live');
+  msgs.scrollTop=msgs.scrollHeight;
+  chatHistory.push({role:'assistant',content:question,qrOptions:opts,abQuestion:true});
+  saveChat();chSync();
+  _abSaveState();
+}
+// Resolves the "start fresh or keep going" confirm question. Same tiered approach every guided-
+// flow step now uses: _abMatchOption first (instant, synchronous), then the model fallback if
+// that misses — so a Tamil-script or oddly-phrased reply doesn't dead-end on a destructive
+// decision — and only re-asks if both miss.
+function _abResolveOverrideConfirm(t){
+  var opts=['Start fresh with new idea','Keep current progress'];
+  var pending=_abState.pendingOverride;
+  function onConfirmMatch(m){
+    _abState.pendingOverride=null;
+    if(m==='Start fresh with new idea'){
+      _abResetWithNotice(pending.newText);
+    }else{
+      var isTa=_abDetectLang(_abState.intentText||'')!=='english';
+      _abAck(isTa?'Seri, continue pannalam! 👍':'Sure, continuing where you left off! 👍');
+      // The original step's bar is NOT still live at this point — rendering the confirm
+      // question's own bar above (flRenderQuickReply(...,'live')) armed it as the new live bar,
+      // which disabled whatever bar came before (_abArmBar's job). So the ack alone leaves
+      // nothing clickable; a fresh live bar for the pending step's own options is needed here —
+      // not a re-render of the step's full card/question (that's the duplicate-card defect fixed
+      // at step 5 previously), just the button row, via the same qrOptions captured when the
+      // confirm began. Clicking one of these buttons is indistinguishable from clicking the
+      // original bar — same option text, same flQrClick->send()->_abHandleAnswer path.
+      var _lastMsg=chatHistory.length?chatHistory[chatHistory.length-1]:null;
+      if(_lastMsg&&_lastMsg.role==='assistant'){
+        _lastMsg.qrOptions=(pending.priorQrOptions||[]).slice();
+        _lastMsg.abQuestion=true;
+        saveChat();chSync();
+      }
+      if(pending.priorQrOptions&&pending.priorQrOptions.length){
+        var _koMsgs=document.getElementById('chat-msgs');
+        flRenderQuickReply({options:pending.priorQrOptions},_koMsgs,'live');
+        _koMsgs.scrollTop=_koMsgs.scrollHeight;
+      }
+      _abSaveState();
+    }
+  }
+  var m=_abMatchOption(t,opts);
+  if(m){onConfirmMatch(m);return;}
+  console.log('[_abResolveOverrideConfirm] no match for '+JSON.stringify(t));
+  _abTryModelFallback(t,opts,function(matched){
+    if(matched){onConfirmMatch(matched);}
+    else{
+      // Neither tier matched — re-ask the same confirm question rather than silently doing
+      // either action, exactly like reask() elsewhere. pendingOverride stays set.
+      var isTa=_abDetectLang(_abState.intentText||'')!=='english';
+      _abAck(isTa?'Sorry, puriyala 🙏 Kelvi options-la irundhu ondru pick pannunga:':'Sorry, didn\'t quite catch that 🙏 Please pick one of the options below:');
+      var _lastMsg=chatHistory.length?chatHistory[chatHistory.length-1]:null;
+      if(_lastMsg&&_lastMsg.role==='assistant'){
+        _lastMsg.qrOptions=opts.slice();
+        _lastMsg.abQuestion=true;
+        saveChat();chSync();
+      }
+    }
+  });
+}
 // Step N's card is reached by answering step N-1's question — going Back means returning to
 // N-1 and clearing exactly the field that answer set, so it can be picked again.
 var _abStepDefs={
@@ -3354,6 +3459,17 @@ function send(){
       console.log('[send] discarding stale _abState — no pending guided-flow question in this chat');
       _abState=null;_abClearState();_abLiveBar=null;
     }
+    // A pending mid-flow override confirmation takes priority over everything else below — this
+    // reply answers "start fresh or keep going", not the guided-flow's own current step, so it
+    // must never reach _abHandleAnswer or the specific-build-request check.
+    if(_abState&&_abState.pendingOverride){
+      var _abM0=document.getElementById('chat-msgs'),_abU0=document.createElement('div');
+      _abU0.className='msg u';_abU0.innerHTML=renderUserBub({content:t});
+      _abM0.appendChild(_abU0);inp.value='';rsz(inp);_abM0.scrollTop=_abM0.scrollHeight;
+      chatHistory.push({role:'user',content:t});saveChat();chSync();
+      _abResolveOverrideConfirm(t);
+      return;
+    }
     // A clearly well-formed new build request now wins outright, even over an active _abState —
     // checked first, not gated on _abState already being falsy — so a leftover/stale/mid-flow
     // state can never silently swallow a fresh, specific idea as if it were an answer to
@@ -3367,7 +3483,7 @@ function send(){
       _abU.className='msg u';_abU.innerHTML=renderUserBub({content:t});
       _abM.appendChild(_abU);inp.value='';rsz(inp);_abM.scrollTop=_abM.scrollHeight;
       chatHistory.push({role:'user',content:t});saveChat();chSync();
-      if(_abNi){ if(_abState){_abResetWithNotice(t);}else{_abStartWithIntro(t);} }
+      if(_abNi){ if(_abState){ if(_abState.step>=2){_abBeginOverrideConfirm(t);}else{_abResetWithNotice(t);} }else{_abStartWithIntro(t);} }
       else{_abHandleAnswer(t);}
       return;
     }
