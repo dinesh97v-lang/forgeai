@@ -1764,8 +1764,11 @@ app.post('/api/code-check', requireAuth, async (req, res) => {
 // ============================================
 // APP BUILDER GUIDED FLOW — free-text option matcher fallback
 // ============================================
-async function abMatchOption(text, options) {
-  const sysMsg = 'The user is answering a multiple-choice question. Return the EXACT option string that matches their answer, or the literal word NONE. No explanation, no punctuation, nothing else.';
+async function abMatchOption(text, options, question) {
+  const hasQuestion = typeof question === 'string' && question.trim().length > 0;
+  const sysMsg = hasQuestion
+    ? `The user was asked: "${question.trim()}" — they are answering with one of the listed options. Return the EXACT option string that answers THAT question, or the literal word NONE if their message is not an answer to it. No explanation, no punctuation, nothing else.`
+    : 'The user is answering a multiple-choice question. Return the EXACT option string that matches their answer, or the literal word NONE. No explanation, no punctuation, nothing else.';
   const userMsg = 'Options:\n' + options.map(o => '- ' + o).join('\n') + '\n\nUser answer: ' + text;
   const resp = await axios.post(
     'https://api.groq.com/openai/v1/chat/completions',
@@ -1786,12 +1789,12 @@ async function abMatchOption(text, options) {
 }
 
 app.post('/api/ab-match-option', requireAuth, async (req, res) => {
-  const { text, options } = req.body;
+  const { text, options, question } = req.body;
   if (typeof text !== 'string' || !Array.isArray(options) || options.length === 0) {
     return res.status(400).json({ error: 'text and options are required' });
   }
   try {
-    const match = await abMatchOption(text, options);
+    const match = await abMatchOption(text, options, question);
     res.json({ match });
   } catch (err) {
     console.error('[ab-match-option]', err.message);

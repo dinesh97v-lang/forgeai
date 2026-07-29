@@ -2725,6 +2725,11 @@ function _abBeginOverrideConfirm(newText){
 function _abResolveOverrideConfirm(t){
   var opts=['Start fresh with new idea','Keep current progress'];
   var pending=_abState.pendingOverride;
+  // The confirm question itself is the second-to-last chatHistory entry at this point — send()
+  // already pushed the user's reply (t) as the last one before calling this function — so this
+  // retrieves the exact text actually shown, the same way pending.priorQrOptions was captured.
+  var _confirmMsg=chatHistory.length>=2?chatHistory[chatHistory.length-2]:null;
+  var confirmQuestion=(_confirmMsg&&_confirmMsg.role==='assistant')?_confirmMsg.content:'';
   function onConfirmMatch(m){
     _abState.pendingOverride=null;
     if(m==='Start fresh with new idea'){
@@ -2757,7 +2762,7 @@ function _abResolveOverrideConfirm(t){
   var m=_abMatchOption(t,opts);
   if(m){onConfirmMatch(m);return;}
   console.log('[_abResolveOverrideConfirm] no match for '+JSON.stringify(t));
-  _abTryModelFallback(t,opts,function(matched){
+  _abTryModelFallback(t,opts,confirmQuestion,function(matched){
     if(matched){onConfirmMatch(matched);}
     else{
       // Neither tier matched — re-ask the same confirm question rather than silently doing
@@ -2810,7 +2815,7 @@ function _abStartOverFlow(){
 // exact, case/emoji-insensitive, word-substring) stays fully synchronous and instant. Never
 // writes _abState itself — cb(matched) re-enters the exact same step-transition code a
 // synchronous match would have run; cb(null) means treat it like any other no-match.
-function _abTryModelFallback(text,options,cb){
+function _abTryModelFallback(text,options,question,cb){
   var _t0=performance.now();
   _lockSend();
   var _abFallbackAbort=new AbortController();
@@ -2818,10 +2823,10 @@ function _abTryModelFallback(text,options,cb){
   function finish(result){
     clearTimeout(_abFallbackTimer);
     _unlockSend();
-    console.log('[abMatch] input='+JSON.stringify(text)+' optionsCount='+options.length+' result='+JSON.stringify(result)+' elapsedMs='+Math.round(performance.now()-_t0));
+    console.log('[abMatch] input='+JSON.stringify(text)+' question='+JSON.stringify(question)+' optionsCount='+options.length+' result='+JSON.stringify(result)+' elapsedMs='+Math.round(performance.now()-_t0));
     cb(result);
   }
-  fetch('/api/ab-match-option',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:text,options:options}),signal:_abFallbackAbort.signal})
+  fetch('/api/ab-match-option',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:text,options:options,question:question}),signal:_abFallbackAbort.signal})
     .then(function(r){return r.json();})
     .then(function(d){
       var m=(d&&typeof d.match==='string')?d.match:null;
@@ -2857,7 +2862,7 @@ function _abHandleAnswer(t){
     function onMatch1(m){_abState.platform=m;_abState.step=2;_abAck(_abAckPick(_abAckLines.platform,m,'Got it! Now, which tech stack do you prefer?'));_abAsk('Which tech stack do you prefer?',['Simple HTML/CSS/JS','React']);}
     if(m){onMatch1(m);return true;}
     console.log('[_abHandleAnswer] step1 no match for '+JSON.stringify(t));
-    _abTryModelFallback(t,opts,function(matched){
+    _abTryModelFallback(t,opts,'Where should your app run?',function(matched){
       if(matched){onMatch1(matched);}
       else{reask(function(){_abAsk('Where should your app run?',opts);});}
     });
@@ -2868,7 +2873,7 @@ function _abHandleAnswer(t){
     function onMatch2(m){_abState.techStack=m;_abState.step=3;_abAck(_abAckPick(_abAckLines.techStack,m,'Got it! Let\'s pick the features.'));_abRenderFeatureSelect();}
     if(m){onMatch2(m);return true;}
     console.log('[_abHandleAnswer] step2 no match for '+JSON.stringify(t));
-    _abTryModelFallback(t,opts,function(matched){
+    _abTryModelFallback(t,opts,'Which tech stack do you prefer?',function(matched){
       if(matched){onMatch2(matched);}
       else{reask(function(){_abAsk('Which tech stack do you prefer?',opts);});}
     });
@@ -2886,7 +2891,7 @@ function _abHandleAnswer(t){
     if(m){onMatch3(m);return true;} // toggling a feature never advances the step — only Done does
     if(/^(done|finish|ready|mudinjuchu|mudinchu|aayiduchu)$/i.test((t||'').trim())){_abFeatureDone();return true;}
     console.log('[_abHandleAnswer] step3 no match for '+JSON.stringify(t));
-    _abTryModelFallback(t,featOpts,function(matched){
+    _abTryModelFallback(t,featOpts,'Which features do you need? Pick one or more, then tap Done.',function(matched){
       if(matched){onMatch3(matched);}
       else{reask(null,featOpts);} // the feature bar is already on screen and unchanged — nothing to re-render
     });
@@ -2897,7 +2902,7 @@ function _abHandleAnswer(t){
     function onMatch4(m){_abState.designStyle=m;_abState.step=5;_abAck(_abAckPick(_abAckLines.designStyle,m,'Got it! Here\'s your plan.'));_abRenderPlanCard();}
     if(m){onMatch4(m);return true;}
     console.log('[_abHandleAnswer] step4 no match for '+JSON.stringify(t));
-    _abTryModelFallback(t,opts,function(matched){
+    _abTryModelFallback(t,opts,'What design style do you prefer?',function(matched){
       if(matched){onMatch4(matched);}
       else{reask(function(){_abAsk('What design style do you prefer?',opts);});}
     });
@@ -2908,7 +2913,7 @@ function _abHandleAnswer(t){
     function onMatch5(m){if(m==='Start over'){_abStartOverFlow();}else{_abTriggerBuild();}}
     if(m){onMatch5(m);return true;}
     console.log('[_abHandleAnswer] step5 no match for '+JSON.stringify(t));
-    _abTryModelFallback(t,opts,function(matched){
+    _abTryModelFallback(t,opts,'Ready to build?',function(matched){
       if(matched){onMatch5(matched);}
       else{reask(null,opts);} // the plan card is already on screen and unchanged — nothing to re-render
     });
