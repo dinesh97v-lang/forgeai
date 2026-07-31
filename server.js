@@ -585,7 +585,7 @@ async function rewriteSearchQuery(userPrompt, history) {
 // ============================================
 // GROQ API — parameterized model
 // ============================================
-async function callGroqModel(model, prompt, sysPrompt, history = [], maxTokensOverride = null, timeoutMs = 30000) {
+async function callGroqModel(model, prompt, sysPrompt, history = [], maxTokensOverride = null, timeoutMs = 30000, returnFull = false) {
   const MAX_OUT = { [MODELS.GROQ_8B]: 1500, [MODELS.GROQ_70B]: 4096, [MODELS.GROQ_SCOUT]: 8192 };
   const maxTok = maxTokensOverride ?? MAX_OUT[model] ?? 2048;
   const response = await axios.post(
@@ -606,13 +606,14 @@ async function callGroqModel(model, prompt, sysPrompt, history = [], maxTokensOv
   );
   try { updateGroqQuota(model, response.headers); } catch (e) { console.warn('[quota-track]', e.message); }
   console.log(`[callGroqModel] model=${model} maxTokens=${maxTok} finishReason=${response.data.choices[0].finish_reason || 'unknown'} outputLength=${response.data.choices[0].message.content.length}`);
+  if (returnFull) return { text: response.data.choices[0].message.content, finishReason: response.data.choices[0].finish_reason || null, usage: response.data.usage || null };
   return response.data.choices[0].message.content;
 }
 
 // ============================================
 // GEMINI API — parameterized model
 // ============================================
-async function callGeminiModel(model, prompt, sysPrompt, history = [], maxTokensOverride = null, timeoutMs = 60000) {
+async function callGeminiModel(model, prompt, sysPrompt, history = [], maxTokensOverride = null, timeoutMs = 60000, returnFull = false) {
   const contents = history.map(msg => ({
     role: msg.role === 'assistant' ? 'model' : 'user',
     parts: [{ text: msg.content }]
@@ -635,6 +636,7 @@ async function callGeminiModel(model, prompt, sysPrompt, history = [], maxTokens
     throw new Error(`Gemini returned no text — finishReason: ${reason}, response: ${JSON.stringify(response.data).slice(0, 300)}`);
   }
   console.log(`[callGeminiModel] model=${model} maxOutputTokens=${maxTokensOverride ?? 8192} finishReason=${candidate.finishReason || 'unknown'} outputLength=${candidate.content.parts[0].text.length}`);
+  if (returnFull) return { text: candidate.content.parts[0].text, finishReason: candidate.finishReason || null, usage: response.data.usageMetadata || null };
   return candidate.content.parts[0].text;
 }
 
@@ -1540,22 +1542,80 @@ DOES NOT APPLY TO: bug fixes, small snippets, single functions, adding one featu
 
 
 // ============================================
-// APP BUILDER — conversational intro before the guided-flow platform card
+// APP BUILDER — conversational intro + generated guided-flow questions + build hints
 // One pinned call (never GEM_LITE, never 8B): Gemini Flash for Tamil/Thanglish,
-// 70B for English. Short timeout — this is a warm-up line, not a full generation;
-// the client falls back to the plain platform card if this fails or is slow.
+// 70B for English. The client falls back to its own fixed question sequence if this
+// fails, times out, or returns a questions array that doesn't validate.
 // ============================================
-const APP_BUILD_INTRO_PROMPT = `You are a warm, encouraging startup mentor talking to a non-coder who just said they want to build an app. Reply in the SAME language/style the user wrote in (Tanglish/Tamil in, Tanglish/Tamil out; English in, English out — never mix, never switch).
+const APP_BUILD_INTRO_PROMPT = `You are a warm, encouraging startup mentor talking to a non-coder who just said they want to build an app. Everything you write (the intro, and every question/label/option) must be in the SAME language/style the user wrote in (Tanglish/Tamil in, Tanglish/Tamil out; English in, English out — never mix, never switch), except where noted below.
 
-Write a short, warm reply that warmly acknowledges their specific app idea by name (reference what they actually said, never generic filler), gives a genuinely useful take in 2-4 sentences covering who the app is likely for, which 1-2 features matter most for a first version, and one practical tip a real mentor would give, then ends with exactly one natural, energetic transition line into starting the build (e.g. "Let's get started — first, where should it run?"), translated into the user's language/style. Do not write any code, mockup, or technical detail. Do not ask more than one question total — the transition line is that one question. Do not output any quick-reply/button markup, just plain conversational text, and keep the whole reply under 80 words.
+Return ONLY a single JSON object, nothing else — no markdown code fences, no prose before or after it — in exactly this shape:
+{
+  "intro": "<short warm reply, see INTRO rules>",
+  "questions": [
+    {"question":"<question text shown to the user>","label":"<2-3 word noun phrase, in English>","options":["<option>","<option>"],"multi":false},
+    ... 3 to 5 of these total ...
+  ],
+  "buildHints": {"techStack":"React or Plain HTML/CSS/JS","styleGuide":"Minimal or Colorful or Professional"}
+}
 
-Output ONLY the reply itself, starting directly with its first word — no labels, no checklists, no numbered or bulleted lists, no "Yes"/"No" confirmations, no restating or verifying these instructions in any form.
+INTRO rules: warmly acknowledge their specific app idea by name (reference what they actually said, never generic filler), give a genuinely useful take in 2-4 sentences covering who the app is likely for, which 1-2 features matter most for a first version, and one practical tip a real mentor would give, then end with exactly one natural, energetic transition line into starting the build. Do not write any code, mockup, or technical detail. Do not ask a question in the intro text itself — the questions array is where the actual questions go. Keep it under 80 words.
 
-Example (Tanglish input "supermarket inventory app build panannum"):
-"Super idea! Supermarket-ku fresh stock, expiry dates track panradhu konjam kashtama irukum — idha automate pannuna nalla time & money mudhalum. Low-stock alerts oda barcode scan feature first version-ku romba useful-a irukum. Start pannalam — indha app enga run aganum?"
+QUESTIONS rules: produce 3 to 5 questions tailored ENTIRELY to this specific request — never a generic fixed set. Each "question" and each "options" entry must be in the user's language/style; each "label" must be a short English noun phrase for a plan-summary card (e.g. "Features", "Storage", "Integrations"). "options" has 2 to 4 short choices. Set "multi":true only when picking several at once genuinely makes sense (e.g. a features-style question); false otherwise. Do not ask about platform (phone/desktop/web) unless it's genuinely ambiguous for this specific request — most non-consumer-facing tools (backend services, CLIs, API/key management, internal scripts) have no meaningful "platform" and must not be asked this. Ask about whatever actually matters for THIS request instead (e.g. an API-key management system might be asked about which providers to support, or how keys should be stored — never about phone/desktop).
+
+BUILDHINTS rules: your own inference, independent of what you asked the user. "techStack" must be EXACTLY the string "React" or EXACTLY the string "Plain HTML/CSS/JS" — nothing else. "styleGuide" must be EXACTLY "Minimal", "Colorful", or "Professional" — nothing else. Both are always in English regardless of the user's language.
+
+Output ONLY the JSON object, starting directly with "{" — no labels, no restating or verifying these instructions in any form.
 
 Example (English input "I want to build a supermarket inventory app"):
-"Nice one! Inventory tracking is one of those things that quietly eats hours every week for small shops — getting it right early saves a lot of pain later. For a first version, I'd focus on stock levels and low-stock alerts rather than everything at once. Let's get started — where should this run?"`;
+{"intro":"Nice one! Inventory tracking is one of those things that quietly eats hours every week for small shops — getting it right early saves a lot of pain later. For a first version, I'd focus on stock levels and low-stock alerts rather than everything at once. Let's get started!","questions":[{"question":"Where should this run?","label":"Platform","options":["Phone only","Desktop only","Both"],"multi":false},{"question":"Which features matter most for version one?","label":"Features","options":["Stock levels","Low-stock alerts","Barcode scan","Supplier tracking"],"multi":true},{"question":"What style should it have?","label":"Design Style","options":["Minimal","Colorful","Professional"],"multi":false}],"buildHints":{"techStack":"React","styleGuide":"Minimal"}}
+
+Example (English input "own api key system develop pananum"):
+{"intro":"Solid idea — managing API keys safely is something almost every dev tool ends up needing, and getting the storage and rotation story right early saves a lot of pain later. For a first version, I'd focus on secure storage and easy key rotation rather than every possible integration. Let's get started!","questions":[{"question":"Which providers should it support?","label":"Providers","options":["OpenAI only","Multiple providers","Any provider (custom)"],"multi":false},{"question":"How should keys be stored?","label":"Storage","options":["Environment variables","Encrypted database","Secrets vault service"],"multi":false},{"question":"Which features matter most for version one?","label":"Features","options":["Key rotation","Usage tracking","Access control","Audit log"],"multi":true}],"buildHints":{"techStack":"Plain HTML/CSS/JS","styleGuide":"Professional"}}`;
+
+const AB_ALLOWED_TECH_STACK = ['React', 'Plain HTML/CSS/JS'];
+const AB_ALLOWED_STYLE_GUIDE = ['Minimal', 'Colorful', 'Professional'];
+
+// Model replies occasionally wrap JSON in prose or a markdown fence despite instructions —
+// try a direct parse first, then recover via balanced-brace extraction of the first {...} block.
+function _abExtractJson(raw) {
+  try { return JSON.parse(raw); } catch (e) {}
+  const s = typeof raw === 'string' ? raw.indexOf('{') : -1;
+  if (s === -1) return null;
+  let depth = 0, end = -1;
+  for (let i = s; i < raw.length; i++) {
+    if (raw[i] === '{') depth++;
+    else if (raw[i] === '}') { depth--; if (depth === 0) { end = i; break; } }
+  }
+  if (end === -1) return null;
+  try { return JSON.parse(raw.slice(s, end + 1)); } catch (e) { return null; }
+}
+
+// All-or-nothing: any single entry failing invalidates the whole array, so the client falls
+// back to its fixed sequence rather than rendering a partially-broken flow.
+function _abValidateQuestions(questions) {
+  if (!Array.isArray(questions) || questions.length < 3 || questions.length > 5) return null;
+  const cleaned = [];
+  for (const q of questions) {
+    if (!q || typeof q.question !== 'string' || !q.question.trim()) return null;
+    if (typeof q.label !== 'string' || !q.label.trim()) return null;
+    if (!Array.isArray(q.options) || q.options.length < 2 || q.options.length > 4) return null;
+    if (!q.options.every(o => typeof o === 'string' && o.trim())) return null;
+    if (typeof q.multi !== 'boolean') return null;
+    cleaned.push({ question: q.question.trim(), label: q.label.trim(), options: q.options.map(o => o.trim()), multi: q.multi });
+  }
+  return cleaned;
+}
+
+// Per-field coercion, not all-or-nothing: buildHints must always come back complete so the
+// client never needs to fall back to its own index/label-based inference for real generated
+// questions — only a missing or out-of-set value gets defaulted, whichever field that is.
+function _abCoerceBuildHints(buildHints) {
+  const bh = buildHints || {};
+  const techStack = AB_ALLOWED_TECH_STACK.includes(bh.techStack) ? bh.techStack : 'Plain HTML/CSS/JS';
+  const styleGuide = AB_ALLOWED_STYLE_GUIDE.includes(bh.styleGuide) ? bh.styleGuide : 'Professional';
+  return { techStack, styleGuide };
+}
 
 app.post('/api/app-build-intro', requireAuth, async (req, res) => {
   if (rlCheck(req.session.userId, req.session.userPlan)) {
@@ -1568,8 +1628,8 @@ app.post('/api/app-build-intro', requireAuth, async (req, res) => {
   const model = (lang === 'tamil' || lang === 'thanglish') ? MODELS.GEM_FLASH : MODELS.GROQ_70B;
 
   const callOnce = () => model === MODELS.GEM_FLASH
-    ? callGeminiModel(model, ideaText, APP_BUILD_INTRO_PROMPT, [], 800, 10000)
-    : callGroqModel(model, ideaText, APP_BUILD_INTRO_PROMPT, [], 800, 10000);
+    ? callGeminiModel(model, ideaText, APP_BUILD_INTRO_PROMPT, [], 3000, 10000, true)
+    : callGroqModel(model, ideaText, APP_BUILD_INTRO_PROMPT, [], 3000, 10000, true);
 
   try {
     let reply, usedRetry = false;
@@ -1577,17 +1637,31 @@ app.post('/api/app-build-intro', requireAuth, async (req, res) => {
       reply = await callOnce();
     } catch (err1) {
       // Transient upstream failure (e.g. Gemini 503 "overloaded") — one retry after a short
-      // delay before giving up. Existing graceful client-side fallback (skip intro, go straight
-      // to the platform card) is unchanged if this retry also fails.
+      // delay before giving up. Existing graceful client-side fallback (skip intro, use the
+      // fixed question sequence) is unchanged if this retry also fails.
       console.error('[app-build-intro] attempt 1 failed:', err1.message);
       await new Promise(resolve => setTimeout(resolve, 1000));
       usedRetry = true;
       reply = await callOnce();
       console.log('[app-build-intro] attempt 2 (retry) succeeded');
     }
-    // Temporary diagnostic logging (Batch 5 investigation) — remove once the truncation cause is confirmed.
-    console.log(`[app-build-intro] success — model=${model} maxTokensRequested=800 outputLength=${reply.trim().length}${usedRetry ? ' (after retry)' : ''}`);
-    res.json({ intro: reply.trim(), model, lang });
+    // Truncation visibility: Gemini uses 'STOP'/'MAX_TOKENS', Groq uses 'stop'/'length' —
+    // normalise case before comparing so a normal lowercase Groq 'stop' isn't misread as an
+    // error. Logs only; the existing 503 path below is unchanged either way.
+    const normalizedFinish = (reply.finishReason || 'UNKNOWN').toString().toUpperCase();
+    if (normalizedFinish !== 'STOP') {
+      console.error(`[app-build-intro] non-STOP finish — model=${model} lang=${lang} finishReason=${normalizedFinish} usage=${JSON.stringify(reply.usage || null)}`);
+    }
+    const parsed = _abExtractJson(reply.text);
+    const questions = parsed ? _abValidateQuestions(parsed.questions) : null;
+    if (!questions) {
+      console.error(`[app-build-intro] questions validation failed — model=${model} parsedOk=${!!parsed} rawLen=${reply.text.trim().length}`);
+      return res.status(503).json({ error: 'questions unavailable' });
+    }
+    const buildHints = _abCoerceBuildHints(parsed.buildHints);
+    const intro = (parsed.intro && typeof parsed.intro === 'string') ? parsed.intro.trim() : '';
+    console.log(`[app-build-intro] success — model=${model} questions=${questions.length} buildHints=${JSON.stringify(buildHints)}${usedRetry ? ' (after retry)' : ''}`);
+    res.json({ intro, questions, buildHints, model, lang });
   } catch (err) {
     console.error('[app-build-intro] failed after retry:', err.message);
     res.status(503).json({ error: 'intro unavailable' });

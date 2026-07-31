@@ -2429,19 +2429,37 @@ var _abState=null;
 // Every fresh _abState object must carry chatId so ownership is a fact, not a heuristic — routing
 // creation through here makes a future call site forgetting the field structurally impossible.
 function _abNewState(fields){fields.chatId=chCurId();return fields;}
-// Static stand-in for the model-generated questions[] this shape will eventually carry — today's
-// fixed 4-question sequence, re-expressed in the new shape. No dispatch code reads this yet.
+// Shared labels — referenced both by _abDefaultQuestions below and by
+// _abDeriveFallbackBuildHints, so the two can never drift out of sync with each other.
+var _AB_LABEL_TECH_STACK='Tech Stack';
+var _AB_LABEL_DESIGN_STYLE='Design Style';
+// Fallback stand-in for the model-generated questions[] this shape carries — used whenever the
+// question-generation call fails or returns something invalid. label is the short plan-card name;
+// ackKey (present only on single-select entries) is the _abAckLines table key for this question's
+// ack text — both are absent-safe, since generated questions never carry either.
 var _abDefaultQuestions=[
-  {question:'Where should your app run?',options:['Phone only','Desktop only','Both'],multi:false},
-  {question:'Which tech stack do you prefer?',options:['Simple HTML/CSS/JS','React'],multi:false},
-  {question:'Which features do you need? Pick one or more, then tap Done.',options:['User Login','Data Storage','Search','Notifications','Payment','Maps','Charts','Chat'],multi:true},
-  {question:'What design style do you prefer?',options:['Minimal','Colorful','Professional'],multi:false}
+  {question:'Where should your app run?',label:'Platform',ackKey:'platform',options:['Phone only','Desktop only','Both'],multi:false},
+  {question:'Which tech stack do you prefer?',label:_AB_LABEL_TECH_STACK,ackKey:'techStack',options:['Simple HTML/CSS/JS','React'],multi:false},
+  {question:'Which features do you need? Pick one or more, then tap Done.',label:'Features',options:['User Login','Data Storage','Search','Notifications','Payment','Maps','Charts','Chat'],multi:true},
+  {question:'What design style do you prefer?',label:_AB_LABEL_DESIGN_STYLE,ackKey:'designStyle',options:['Minimal','Colorful','Professional'],multi:false}
 ];
-// TEMPORARY bridge, valid only while _abDefaultQuestions stays this exact static array in this
-// exact order (pieces 2-5) — mirrors each question index onto the named field _abTriggerBuild's
-// build prompt and _abAckLines's ack lookup still read directly. Deleted in piece 6/7 once both
-// of those stop depending on fixed field names.
-var _abLegacyFieldOrder=['platform','techStack','features','designStyle'];
+// Derives build-relevant hints from the fallback array's own answers, by label (not position),
+// since a generated question set's order can never be assumed. Only ever used when buildHints
+// wasn't provided (i.e. we're on the fallback array) — real generated questions always carry
+// buildHints straight from the server.
+function _abDeriveFallbackBuildHints(s){
+  var techStack='Plain HTML/CSS/JS',styleGuide='Professional';
+  for(var _abI=0;_abI<s.questions.length;_abI++){
+    if(s.questions[_abI].label===_AB_LABEL_TECH_STACK&&s.answers[_abI])techStack=s.answers[_abI];
+    if(s.questions[_abI].label===_AB_LABEL_DESIGN_STYLE&&s.answers[_abI])styleGuide=s.answers[_abI];
+  }
+  // Normalise to the same allowed sets _abCoerceBuildHints enforces server-side, so the
+  // invariant "buildHints values are always in the allowed sets" holds for both producers,
+  // regardless of the option text a question happens to use.
+  if(techStack!=='React')techStack='Plain HTML/CSS/JS';
+  if(styleGuide!=='Minimal'&&styleGuide!=='Colorful'&&styleGuide!=='Professional')styleGuide='Professional';
+  return {techStack:techStack,styleGuide:styleGuide};
+}
 function _abUILock(){document.body.classList.add('ab-flow-active');}
 function _abUIUnlock(){document.body.classList.remove('ab-flow-active');}
 function _abSaveState(){console.log('[abstate-diag] _abSaveState',JSON.stringify(_abState));_abUILock();try{localStorage.setItem('forgeai_ab_state',JSON.stringify(_abState));}catch(e){console.log('[abstate-diag] _abSaveState FAILED',e&&e.name,e&&e.message);}}
@@ -2875,8 +2893,6 @@ function _abGoBack(){
   if(_abState.step<1)return; // no Back from the first question
   _abState.step--;
   _abState.answers[_abState.step]=undefined;
-  var legacyField=_abLegacyFieldOrder[_abState.step];
-  if(legacyField)_abState[legacyField]=(legacyField==='features')?[]:'';
   var isTa=_abDetectLang(_abState.intentText||'')!=='english';
   _abAck(isTa?'Seri, adha maathi pick pannalam 🔙':'Sure, let\'s revisit that 🔙');
   var qDef=_abState.questions[_abState.step];
@@ -2978,7 +2994,6 @@ function _abHandleAnswer(t){
   }
   if(_abState.phase==='asking'){
     var qDef=_abState.questions[_abState.step];
-    var legacyField=_abLegacyFieldOrder[_abState.step];
     if(qDef.multi){
       var m=_abMatchOption(t,qDef.options);
       function onMatchMulti(m){
@@ -2999,8 +3014,7 @@ function _abHandleAnswer(t){
       var opts=qDef.options,m=_abMatchOption(t,opts);
       function onMatchSingle(m){
         _abState.answers[_abState.step]=m;
-        if(legacyField)_abState[legacyField]=m;
-        var lookup=(legacyField&&_abAckLines[legacyField])||{};
+        var lookup=(qDef.ackKey&&_abAckLines[qDef.ackKey])||{};
         _abAck(_abAckPick(lookup,m,'Got it!'));
         _abState.step++;
         if(_abState.step>=_abState.questions.length){
@@ -3039,6 +3053,9 @@ function _abHandleAnswer(t){
 var _abBuildInFlight=false;
 function _abTriggerBuild(){
   _abState.phase='building';
+  // Real generated questions always carry buildHints from the server (piece 4). Absent means
+  // we're on the fallback array — derive it from that array's own answers instead.
+  if(!_abState.buildHints)_abState.buildHints=_abDeriveFallbackBuildHints(_abState);
   _abClearState(); // a build in flight can't be meaningfully resumed after a reload — don't persist the building phase
   var msgs=document.getElementById('chat-msgs');
   var buildingContent='Building your app… ⏳';
@@ -3048,12 +3065,17 @@ function _abTriggerBuild(){
   div.innerHTML='<div class="mav ai">F</div><div><div class="bub">'+esc(buildingContent)+'</div></div>';
   msgs.appendChild(div);msgs.scrollTop=msgs.scrollHeight;
   var s=_abState;
-  var styleGuide=s.designStyle==='Minimal'?'DESIGN SYSTEM (mandatory):\n- Include Tailwind CSS via CDN: <script src="https://cdn.tailwindcss.com/3.4.17"><\/script>\n- Layout: max-w-4xl mx-auto container, card-based sections with bg-white rounded-xl shadow-lg p-6, page background #F8FAFC, clean white cards, subtle shadows (shadow-md), no gradients\n- Header: flat solid header (primary #0F172A slate-900) with white text, text-2xl font-bold, rounded-t-xl\n- Buttons: rounded-lg px-4 py-2 font-medium, hover state darkening, transition-all duration-200\n- Inputs: rounded-lg border border-gray-300 px-4 py-2 focus:ring-2 focus:outline-none, ring color accent #334155 slate-700\n- All interactive elements need hover/focus states with transition-all duration-200\n- Icons: use inline SVG only, always with this exact structure: <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-5 h-5"> with a simple <path> or basic shapes inside. Examples: plus icon path d="M12 5v14M5 12h14", search icon: <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>, trash icon path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6". Never output raw unicode symbols, HTML entities, or emoji as icons. If unsure of an icon path, use the plus icon or omit the icon and use text only.\n- Empty states: centered muted message with icon when lists are empty\n- Progress indicators (bars/percentages) where relevant\n- Mobile responsive: stacked on small screens, grid/flex-row on md+\n- Typography: text-2xl font-bold titles, text-sm text-gray-500 secondary text\n- Auth flow (mandatory if login/signup feature exists): wrap the login screen in <div id="login-screen"> and ALL main app content in <div id="main-app" class="hidden">. On successful login, run: document.getElementById(\'login-screen\').classList.add(\'hidden\'); document.getElementById(\'main-app\').classList.remove(\'hidden\'); Include a logout button in the main app header that reverses this. The page must load showing ONLY the login screen.'
-    :s.designStyle==='Colorful'?'DESIGN SYSTEM (mandatory):\n- Include Tailwind CSS via CDN: <script src="https://cdn.tailwindcss.com/3.4.17"><\/script>\n- Layout: max-w-4xl mx-auto container, card-based sections with bg-white rounded-xl shadow-lg p-6, page background light gray/white\n- Header: gradient header (indigo-600 to purple-600) with white text, text-2xl font-bold, rounded-t-xl\n- Buttons: rounded-lg px-4 py-2 font-medium, hover state darkening, transition-all duration-200\n- Inputs: rounded-lg border border-gray-300 px-4 py-2 focus:ring-2 focus:outline-none, ring color indigo-500\n- All interactive elements need hover/focus states with transition-all duration-200\n- Icons: use inline SVG only, always with this exact structure: <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-5 h-5"> with a simple <path> or basic shapes inside. Examples: plus icon path d="M12 5v14M5 12h14", search icon: <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>, trash icon path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6". Never output raw unicode symbols, HTML entities, or emoji as icons. If unsure of an icon path, use the plus icon or omit the icon and use text only.\n- Empty states: centered muted message with icon when lists are empty\n- Progress indicators (bars/percentages) where relevant\n- Mobile responsive: stacked on small screens, grid/flex-row on md+\n- Typography: text-2xl font-bold titles, text-sm text-gray-500 secondary text\n- Auth flow (mandatory if login/signup feature exists): wrap the login screen in <div id="login-screen"> and ALL main app content in <div id="main-app" class="hidden">. On successful login, run: document.getElementById(\'login-screen\').classList.add(\'hidden\'); document.getElementById(\'main-app\').classList.remove(\'hidden\'); Include a logout button in the main app header that reverses this. The page must load showing ONLY the login screen.'
+  var styleGuide=s.buildHints.styleGuide==='Minimal'?'DESIGN SYSTEM (mandatory):\n- Include Tailwind CSS via CDN: <script src="https://cdn.tailwindcss.com/3.4.17"><\/script>\n- Layout: max-w-4xl mx-auto container, card-based sections with bg-white rounded-xl shadow-lg p-6, page background #F8FAFC, clean white cards, subtle shadows (shadow-md), no gradients\n- Header: flat solid header (primary #0F172A slate-900) with white text, text-2xl font-bold, rounded-t-xl\n- Buttons: rounded-lg px-4 py-2 font-medium, hover state darkening, transition-all duration-200\n- Inputs: rounded-lg border border-gray-300 px-4 py-2 focus:ring-2 focus:outline-none, ring color accent #334155 slate-700\n- All interactive elements need hover/focus states with transition-all duration-200\n- Icons: use inline SVG only, always with this exact structure: <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-5 h-5"> with a simple <path> or basic shapes inside. Examples: plus icon path d="M12 5v14M5 12h14", search icon: <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>, trash icon path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6". Never output raw unicode symbols, HTML entities, or emoji as icons. If unsure of an icon path, use the plus icon or omit the icon and use text only.\n- Empty states: centered muted message with icon when lists are empty\n- Progress indicators (bars/percentages) where relevant\n- Mobile responsive: stacked on small screens, grid/flex-row on md+\n- Typography: text-2xl font-bold titles, text-sm text-gray-500 secondary text\n- Auth flow (mandatory if login/signup feature exists): wrap the login screen in <div id="login-screen"> and ALL main app content in <div id="main-app" class="hidden">. On successful login, run: document.getElementById(\'login-screen\').classList.add(\'hidden\'); document.getElementById(\'main-app\').classList.remove(\'hidden\'); Include a logout button in the main app header that reverses this. The page must load showing ONLY the login screen.'
+    :s.buildHints.styleGuide==='Colorful'?'DESIGN SYSTEM (mandatory):\n- Include Tailwind CSS via CDN: <script src="https://cdn.tailwindcss.com/3.4.17"><\/script>\n- Layout: max-w-4xl mx-auto container, card-based sections with bg-white rounded-xl shadow-lg p-6, page background light gray/white\n- Header: gradient header (indigo-600 to purple-600) with white text, text-2xl font-bold, rounded-t-xl\n- Buttons: rounded-lg px-4 py-2 font-medium, hover state darkening, transition-all duration-200\n- Inputs: rounded-lg border border-gray-300 px-4 py-2 focus:ring-2 focus:outline-none, ring color indigo-500\n- All interactive elements need hover/focus states with transition-all duration-200\n- Icons: use inline SVG only, always with this exact structure: <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-5 h-5"> with a simple <path> or basic shapes inside. Examples: plus icon path d="M12 5v14M5 12h14", search icon: <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>, trash icon path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6". Never output raw unicode symbols, HTML entities, or emoji as icons. If unsure of an icon path, use the plus icon or omit the icon and use text only.\n- Empty states: centered muted message with icon when lists are empty\n- Progress indicators (bars/percentages) where relevant\n- Mobile responsive: stacked on small screens, grid/flex-row on md+\n- Typography: text-2xl font-bold titles, text-sm text-gray-500 secondary text\n- Auth flow (mandatory if login/signup feature exists): wrap the login screen in <div id="login-screen"> and ALL main app content in <div id="main-app" class="hidden">. On successful login, run: document.getElementById(\'login-screen\').classList.add(\'hidden\'); document.getElementById(\'main-app\').classList.remove(\'hidden\'); Include a logout button in the main app header that reverses this. The page must load showing ONLY the login screen.'
     :'DESIGN SYSTEM (mandatory):\n- Include Tailwind CSS via CDN: <script src="https://cdn.tailwindcss.com/3.4.17"><\/script>\n- Layout: max-w-4xl mx-auto container, card-based sections with bg-white rounded-xl shadow-lg p-6, page background #F9FAFB\n- Header: gradient header (from-slate-800 to-blue-900, primary #1E3A5F navy) with white text, text-2xl font-bold, rounded-t-xl\n- Buttons: rounded-lg px-4 py-2 font-medium, hover state darkening, transition-all duration-200\n- Inputs: rounded-lg border border-gray-300 px-4 py-2 focus:ring-2 focus:outline-none, ring color accent #3B82F6 blue-500\n- All interactive elements need hover/focus states with transition-all duration-200\n- Icons: use inline SVG only, always with this exact structure: <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-5 h-5"> with a simple <path> or basic shapes inside. Examples: plus icon path d="M12 5v14M5 12h14", search icon: <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>, trash icon path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6". Never output raw unicode symbols, HTML entities, or emoji as icons. If unsure of an icon path, use the plus icon or omit the icon and use text only.\n- Empty states: centered muted message with icon when lists are empty\n- Progress indicators (bars/percentages) where relevant\n- Mobile responsive: stacked on small screens, grid/flex-row on md+\n- Typography: text-2xl font-bold titles, text-sm text-gray-500 secondary text\n- Auth flow (mandatory if login/signup feature exists): wrap the login screen in <div id="login-screen"> and ALL main app content in <div id="main-app" class="hidden">. On successful login, run: document.getElementById(\'login-screen\').classList.add(\'hidden\'); document.getElementById(\'main-app\').classList.remove(\'hidden\'); Include a logout button in the main app header that reverses this. The page must load showing ONLY the login screen.';
-  var feat=s.features.length?s.features.join(', '):'none';
-  var prompt='Build a complete app.\nApp idea: '+(s.intentText||'')+'\nPlatform: '+s.platform+'\nTech stack: '+s.techStack+'\nFeatures: '+feat+'\nIMPORTANT: Fully implement a working, visible UI section for EVERY feature listed above (not just login). Each feature must have its own functional section inside the main app with real controls and basic working JavaScript logic. Do not stop after the login screen. Do not leave any feature as an empty placeholder or a comment.\nDesign style: '+s.designStyle+'\n'+styleGuide+'\n';
-  if(s.techStack==='React'){
+  var qa=[];
+  for(var _abQI=0;_abQI<s.questions.length;_abQI++){
+    var _abAns=s.answers[_abQI];
+    var _abAnsLabel=Array.isArray(_abAns)?(_abAns.length?_abAns.join(', '):'none'):(_abAns||'none');
+    qa.push('Q: '+s.questions[_abQI].question+'\nA: '+_abAnsLabel);
+  }
+  var prompt='Build a complete app.\nApp idea: '+(s.intentText||'')+'\n'+qa.join('\n')+'\nIMPORTANT: Fully implement a working, visible UI section for EVERY feature or requirement mentioned above (not just login). Each must have its own functional section inside the main app with real controls and basic working JavaScript logic. Do not stop after the login screen. Do not leave anything as an empty placeholder or a comment.\n'+styleGuide+'\n';
+  if(s.buildHints.techStack==='React'){
     prompt+='Generate a SINGLE HTML file that uses React via CDN script tags so it runs directly in an iframe preview with no build step. Use exactly these script tags: <script src="https://unpkg.com/react@18.3.1/umd/react.production.min.js"><\/script> <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js"><\/script> <script src="https://unpkg.com/@babel/standalone@7.29.7/babel.min.js"><\/script> for React, ReactDOM, and in-browser JSX. JSX rules (hard requirements, the code will fail to parse otherwise): comments inside JSX must use {/* ... */}, never <!-- -->. Use className, not class. Use htmlFor, not for. No import or require statements anywhere — everything comes from the CDN globals React, ReactDOM. The script tag containing JSX MUST be <script type="text/babel"> — plain <script> with no type will make the browser parse JSX as JavaScript and crash on the first tag. The body MUST contain <div id="root"></div> before the script tags. Use ReactDOM.createRoot(document.getElementById(\'root\')).render(...), not the legacy ReactDOM.render. Tailwind\'s @apply does not work in a plain <style> tag with the CDN build — use utility classes directly, or <style type="text/tailwindcss"> if @apply is needed. Every component that is defined must actually be rendered. Tailwind must be loaded with <script src="https://cdn.tailwindcss.com/3.4.17"><\/script> — never a <link> tag; the Tailwind CDN ships JavaScript, not a stylesheet, so a <link rel="stylesheet"> pointing at it will never apply any styling. Return the full file in one ```html code block.';
   }else{
     prompt+='Generate plain HTML/CSS/JS as a single HTML file. Return the full file in one ```html code block.';
@@ -3076,8 +3098,9 @@ function _abRenderPlanCard(){
   var lines=[];
   for(var _abI=0;_abI<s.questions.length;_abI++){
     var _abA=s.answers[_abI];
-    var _abLabel=Array.isArray(_abA)?(_abA.length?_abA.join(', '):'(none)'):(_abA||'(none)');
-    lines.push(s.questions[_abI].question+' '+_abLabel);
+    var _abAnsLabel=Array.isArray(_abA)?(_abA.length?_abA.join(', '):'(none)'):(_abA||'(none)');
+    var _abQLabel=s.questions[_abI].label||s.questions[_abI].question;
+    lines.push(_abQLabel+': '+_abAnsLabel);
   }
   var content='Here\'s your app plan:\n'+lines.join('\n')+'\nReady to build?';
   var qrOptions=['Build it 🚀','⬅ Back','Start over'];
@@ -3135,8 +3158,6 @@ function _abFeatureDone(){
   msgs.appendChild(u);msgs.scrollTop=msgs.scrollHeight;
   chatHistory.push({role:'user',content:label});
   saveChat();chSync();
-  var legacyField=_abLegacyFieldOrder[_abState.step];
-  if(legacyField)_abState[legacyField]=picked.slice();
   _abState.step++;
   _abAck(_abFeatureAck(picked));
   if(_abState.step>=_abState.questions.length){
