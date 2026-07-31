@@ -2613,7 +2613,10 @@ function _abStartWithIntro(t){
     _abAsk('Where should your app run?',['Phone only','Desktop only','Both']);
   };
   var fetchP=fetch('/api/app-build-intro',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ideaText:t})}).then(function(r){return r.json();}).catch(function(){return null;});
-  var timeoutP=new Promise(function(resolve){setTimeout(function(){resolve(null);},12000);});
+  // Must stay above the server's worst case (per-attempt timeout x2 + retry delay,
+  // server.js /api/app-build-intro) — a ceiling below that abandons a retry that would
+  // have succeeded, silently dropping the user to the fixed fallback question set.
+  var timeoutP=new Promise(function(resolve){setTimeout(function(){resolve(null);},35000);});
   Promise.race([fetchP,timeoutP]).then(function(d){
     var ty=document.getElementById('ab-intro-typ');if(ty)ty.remove();
     if(_abState!==_abSession){console.log('[_abStartWithIntro] stale session — discarding intro response, not persisting');return;}

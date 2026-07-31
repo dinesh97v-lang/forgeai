@@ -1628,29 +1628,34 @@ app.post('/api/app-build-intro', requireAuth, async (req, res) => {
   const model = (lang === 'tamil' || lang === 'thanglish') ? MODELS.GEM_FLASH : MODELS.GROQ_70B;
 
   const callOnce = () => model === MODELS.GEM_FLASH
-    ? callGeminiModel(model, ideaText, APP_BUILD_INTRO_PROMPT, [], 3000, 10000, true)
-    : callGroqModel(model, ideaText, APP_BUILD_INTRO_PROMPT, [], 3000, 10000, true);
+    ? callGeminiModel(model, ideaText, APP_BUILD_INTRO_PROMPT, [], 3000, 15000, true)
+    : callGroqModel(model, ideaText, APP_BUILD_INTRO_PROMPT, [], 3000, 15000, true);
 
+  let attemptStart = Date.now();
   try {
-    let reply, usedRetry = false;
+    let reply, usedRetry = false, attemptDurationMs;
     try {
       reply = await callOnce();
+      attemptDurationMs = Date.now() - attemptStart;
+      console.log(`[app-build-intro] attempt 1 succeeded — duration=${attemptDurationMs}ms`);
     } catch (err1) {
       // Transient upstream failure (e.g. Gemini 503 "overloaded") — one retry after a short
       // delay before giving up. Existing graceful client-side fallback (skip intro, use the
       // fixed question sequence) is unchanged if this retry also fails.
-      console.error('[app-build-intro] attempt 1 failed:', err1.message);
+      console.error(`[app-build-intro] attempt 1 failed after ${Date.now() - attemptStart}ms:`, err1.message);
       await new Promise(resolve => setTimeout(resolve, 1000));
       usedRetry = true;
+      attemptStart = Date.now();
       reply = await callOnce();
-      console.log('[app-build-intro] attempt 2 (retry) succeeded');
+      attemptDurationMs = Date.now() - attemptStart;
+      console.log(`[app-build-intro] attempt 2 (retry) succeeded — duration=${attemptDurationMs}ms`);
     }
     // Truncation visibility: Gemini uses 'STOP'/'MAX_TOKENS', Groq uses 'stop'/'length' —
     // normalise case before comparing so a normal lowercase Groq 'stop' isn't misread as an
     // error. Logs only; the existing 503 path below is unchanged either way.
     const normalizedFinish = (reply.finishReason || 'UNKNOWN').toString().toUpperCase();
     if (normalizedFinish !== 'STOP') {
-      console.error(`[app-build-intro] non-STOP finish — model=${model} lang=${lang} finishReason=${normalizedFinish} usage=${JSON.stringify(reply.usage || null)}`);
+      console.error(`[app-build-intro] non-STOP finish — model=${model} lang=${lang} finishReason=${normalizedFinish} durationMs=${attemptDurationMs} usage=${JSON.stringify(reply.usage || null)}`);
     }
     const parsed = _abExtractJson(reply.text);
     const questions = parsed ? _abValidateQuestions(parsed.questions) : null;
@@ -1660,10 +1665,10 @@ app.post('/api/app-build-intro', requireAuth, async (req, res) => {
     }
     const buildHints = _abCoerceBuildHints(parsed.buildHints);
     const intro = (parsed.intro && typeof parsed.intro === 'string') ? parsed.intro.trim() : '';
-    console.log(`[app-build-intro] success — model=${model} questions=${questions.length} buildHints=${JSON.stringify(buildHints)}${usedRetry ? ' (after retry)' : ''}`);
+    console.log(`[app-build-intro] success — model=${model} questions=${questions.length} buildHints=${JSON.stringify(buildHints)} durationMs=${attemptDurationMs}${usedRetry ? ' (after retry)' : ''}`);
     res.json({ intro, questions, buildHints, model, lang });
   } catch (err) {
-    console.error('[app-build-intro] failed after retry:', err.message);
+    console.error(`[app-build-intro] failed after retry (last attempt duration=${Date.now() - attemptStart}ms):`, err.message);
     res.status(503).json({ error: 'intro unavailable' });
   }
 });
