@@ -1733,7 +1733,7 @@ function saveEdit(btn){
   var histIdx=msgIdx-(hasWelcome?1:0);
   chatHistory=chatHistory.slice(0,histIdx);
   saveChat();
-  if(_abState&&_abState.step<=5){
+  if(_abState&&_abState.phase!=='building'){
     console.log('[saveEdit] guided-flow reset branch firing — _abState.step='+_abState.step+' newText='+JSON.stringify(newText));
     var _seu=document.createElement('div');_seu.className='msg u';
     _seu.innerHTML=renderUserBub({content:newText});
@@ -1758,7 +1758,7 @@ function regenMsg(btn){
   var histForApi=chatHistory.slice(0,histIdx-1).slice(-10);
   chatHistory=chatHistory.slice(0,histIdx);
   saveChat();
-  if(_abState&&_abState.step<=5){_abResetWithNotice();return;}
+  if(_abState&&_abState.phase!=='building'){_abResetWithNotice();return;}
   var typ=document.createElement('div');typ.id='typ';typ.className='msg';
   typ.innerHTML='<div class="mav ai">F</div><div class="bub"><div class="typing"><div class="dot"></div><div class="dot"></div><div class="dot"></div></div></div>';
   msgs.appendChild(typ);msgs.scrollTop=msgs.scrollHeight;
@@ -1824,8 +1824,8 @@ function resendMsg(btn){
   // Refuse and leave everything untouched: there's no way to know whether the user actually
   // wants to abandon the newer flow, and it's already resumable/restartable via the Back/Start
   // over controls added on its own card.
-  if(origMsg&&origMsg.isBuilderBuild&&origMsg.fullPrompt&&_abState&&_abState.step<=5){
-    console.log('[resendMsg] refusing build-resend — a newer guided flow (step '+_abState.step+') is active, leaving it untouched');
+  if(origMsg&&origMsg.isBuilderBuild&&origMsg.fullPrompt&&_abState&&_abState.phase!=='building'){
+    console.log('[resendMsg] refusing build-resend — a newer guided flow (phase '+_abState.phase+') is active, leaving it untouched');
     var isTa=_abDetectLang(_abState.intentText||'')!=='english';
     var notice=isTa?'Ippo nee oru pudhu app-build flow-la irukka 🙏 Adha mudichitu (illa adhoda card-la 🔄 Start over podunga), appuram indha pazhaya build-a resend pannunga.':'You\'re in the middle of a newer app-build flow right now 🙏 Please finish it (or tap 🔄 Start over on its card) before resending this older build.';
     var _rfu=document.createElement('div');_rfu.className='msg';
@@ -1840,12 +1840,12 @@ function resendMsg(btn){
   // App Builder build-trigger message: replay the stored full prompt, not the short displayed label —
   // and bridge through _abState so send() attaches maxTokensOverride/appBuilderBuild without re-running intent detection.
   if(origMsg&&origMsg.isBuilderBuild&&origMsg.fullPrompt){
-    _abState=_abNewState({step:6,intentText:(origMsg.content||'').replace(/^🚀 Build: /,'')});
+    _abState=_abNewState({phase:'building',intentText:(origMsg.content||'').replace(/^🚀 Build: /,'')});
     document.getElementById('chat-in').value=origMsg.fullPrompt;
     send();
     return;
   }
-  if(_abState&&_abState.step<=5){
+  if(_abState&&_abState.phase!=='building'){
     console.log('[resendMsg] guided-flow reset branch firing — _abState.step='+_abState.step+' text='+JSON.stringify(text));
     var _sru=document.createElement('div');_sru.className='msg u';
     _sru.innerHTML=renderUserBub({content:text});
@@ -2429,6 +2429,19 @@ var _abState=null;
 // Every fresh _abState object must carry chatId so ownership is a fact, not a heuristic — routing
 // creation through here makes a future call site forgetting the field structurally impossible.
 function _abNewState(fields){fields.chatId=chCurId();return fields;}
+// Static stand-in for the model-generated questions[] this shape will eventually carry — today's
+// fixed 4-question sequence, re-expressed in the new shape. No dispatch code reads this yet.
+var _abDefaultQuestions=[
+  {question:'Where should your app run?',options:['Phone only','Desktop only','Both'],multi:false},
+  {question:'Which tech stack do you prefer?',options:['Simple HTML/CSS/JS','React'],multi:false},
+  {question:'Which features do you need? Pick one or more, then tap Done.',options:['User Login','Data Storage','Search','Notifications','Payment','Maps','Charts','Chat'],multi:true},
+  {question:'What design style do you prefer?',options:['Minimal','Colorful','Professional'],multi:false}
+];
+// TEMPORARY bridge, valid only while _abDefaultQuestions stays this exact static array in this
+// exact order (pieces 2-5) — mirrors each question index onto the named field _abTriggerBuild's
+// build prompt and _abAckLines's ack lookup still read directly. Deleted in piece 6/7 once both
+// of those stop depending on fixed field names.
+var _abLegacyFieldOrder=['platform','techStack','features','designStyle'];
 function _abUILock(){document.body.classList.add('ab-flow-active');}
 function _abUIUnlock(){document.body.classList.remove('ab-flow-active');}
 function _abSaveState(){console.log('[abstate-diag] _abSaveState',JSON.stringify(_abState));_abUILock();try{localStorage.setItem('forgeai_ab_state',JSON.stringify(_abState));}catch(e){console.log('[abstate-diag] _abSaveState FAILED',e&&e.name,e&&e.message);}}
@@ -2436,7 +2449,7 @@ function _abClearState(){console.trace('[abstate-diag] _abClearState called');_a
 function _abRestoreState(){
   try{
     var raw=localStorage.getItem('forgeai_ab_state');
-    if(raw){var parsed=JSON.parse(raw);if(parsed&&typeof parsed.step==='number'&&parsed.step<=5){_abState=parsed;_abUILock();}}
+    if(raw){var parsed=JSON.parse(raw);if(parsed&&typeof parsed.step==='number'&&parsed.phase&&parsed.phase!=='building'){_abState=parsed;_abUILock();}}
   }catch(e){console.warn('[_abRestoreState] failed:',e.message);}
 }
 _abRestoreState();
@@ -2551,7 +2564,7 @@ function _abAsk(question,options){
   div.innerHTML='<div class="mav ai">F</div><div><div class="bub">'+esc(question)+'</div></div>';
   msgs.appendChild(div);
   var fullOptions=options.slice();
-  if(_abState&&_abState.step>1)fullOptions.push('⬅ Back');
+  if(_abState&&_abState.step>0)fullOptions.push('⬅ Back');
   if(_abState)fullOptions.push('🔄 Start over');
   flRenderQuickReply({options:fullOptions},msgs,'live');
   msgs.scrollTop=msgs.scrollHeight;
@@ -2571,7 +2584,7 @@ function _abStartWithIntro(t){
   // this intro fetch is still in flight, _abState!==_abSession becomes true and the stale response
   // below is discarded entirely — it must never render, persist, or re-ask the platform question
   // on top of whatever the newer action already established.
-  var _abSession=_abState=_abNewState({step:1,platform:'',techStack:'',features:[],designStyle:'',intentText:t});
+  var _abSession=_abState=_abNewState({step:0,phase:'asking',questions:_abDefaultQuestions.slice(),answers:[],intentText:t});
   _abUILock();
   var msgs=document.getElementById('chat-msgs');
   var typ=document.createElement('div');typ.id='ab-intro-typ';typ.className='msg';
@@ -2709,7 +2722,7 @@ function _abResetWithNotice(newIntentText){
   div.innerHTML='<div class="mav ai">F</div><div><div class="bub">'+esc(notice)+'</div></div>';
   msgs.appendChild(div);msgs.scrollTop=msgs.scrollHeight;
   chatHistory.push({role:'assistant',content:notice});saveChat();chSync();
-  _abState=_abNewState({step:1,platform:'',techStack:'',features:[],designStyle:'',intentText:prevIntent});
+  _abState=_abNewState({step:0,phase:'asking',questions:_abDefaultQuestions.slice(),answers:[],intentText:prevIntent});
   _abUILock();
   _abAsk('Where should your app run?',['Phone only','Desktop only','Both']);
 }
@@ -2722,10 +2735,11 @@ function _abResetWithNotice(newIntentText){
 function _abBeginOverrideConfirm(newText){
   var s=_abState;
   var parts=[];
-  if(s.platform)parts.push(s.platform);
-  if(s.techStack)parts.push(s.techStack);
-  if(s.features&&s.features.length)parts.push(s.features.join(', '));
-  if(s.designStyle)parts.push(s.designStyle);
+  for(var _abI=0;_abI<s.step;_abI++){
+    var _abA=s.answers[_abI];
+    if(Array.isArray(_abA)){if(_abA.length)parts.push(_abA.join(', '));}
+    else if(_abA)parts.push(_abA);
+  }
   var lost=parts.length?parts.join(', '):'your current progress';
   // Capture the still-pending step question's own qrOptions — the message just before the user's
   // override-triggering message that send() already pushed — so "keep current progress" can tag
@@ -2813,12 +2827,13 @@ function _abResolveOverrideConfirm(t){
 // same step. "Start over" routes to the existing start-over action unchanged. "Options-la pick
 // pannen" clears pendingEscape, resets nullStreak (so the next no-match on this step gets two
 // fresh tries again, not an immediate re-escape), and re-offers the current step's card via the
-// same path reask() itself uses: _abAsk for steps 1/2/4 (stripping the ⬅ Back/🔄 Start over
-// entries _abAsk would otherwise append a second time, since pendingEscape.opts already includes
-// them from the tagged chatHistory message it was captured from), or the re-tag-in-place branch
-// for steps 3/5 (their reask() branch tags with the raw, unextended options to begin with, so no
-// stripping is needed there). Uses _abMatchOption only, no model-fallback tier, to keep this one
-// decision point mechanical; not specified either way in the task, flagging as a scope choice.
+// same path reask() itself uses: _abAsk for single-select questions (stripping the ⬅ Back/🔄
+// Start over entries _abAsk would otherwise append a second time, since pendingEscape.opts
+// already includes them from the tagged chatHistory message it was captured from), or the
+// re-tag-in-place branch for multi-select questions and the confirm step (their reask() branch
+// tags with the raw, unextended options to begin with, so no stripping is needed there). Uses
+// _abMatchOption only, no model-fallback tier, to keep this one decision point mechanical; not
+// specified either way in the task, flagging as a scope choice.
 function _abResolveEscape(t){
   var opts=['Options-la pick pannen','Start over'];
   var pending=_abState.pendingEscape;
@@ -2830,7 +2845,8 @@ function _abResolveEscape(t){
   if(m==='Options-la pick pannen'){
     _abState.pendingEscape=null;
     _abState.nullStreak=null;
-    if(_abState.step===1||_abState.step===2||_abState.step===4){
+    var _abQDef=(_abState.phase==='asking')?_abState.questions[_abState.step]:null;
+    if(_abQDef&&!_abQDef.multi){
       var _rawOpts=(pending.opts||[]).filter(function(o){return o!=='⬅ Back'&&o!=='🔄 Start over';});
       _abAsk(pending.question,_rawOpts);
     }else{
@@ -2852,29 +2868,25 @@ function _abResolveEscape(t){
     saveChat();chSync();
   }
 }
-// Step N's card is reached by answering step N-1's question — going Back means returning to
-// N-1 and clearing exactly the field that answer set, so it can be picked again.
-var _abStepDefs={
-  2:{clearField:'platform',prevStep:1,render:function(){_abAsk('Where should your app run?',['Phone only','Desktop only','Both']);}},
-  3:{clearField:'techStack',prevStep:2,render:function(){_abAsk('Which tech stack do you prefer?',['Simple HTML/CSS/JS','React']);}},
-  4:{clearField:'features',prevStep:3,render:function(){_abRenderFeatureSelect();}},
-  5:{clearField:'designStyle',prevStep:4,render:function(){_abAsk('What design style do you prefer?',['Minimal','Colorful','Professional']);}}
-};
+// Question N is reached by answering question N-1 — going Back means returning to N-1 and
+// clearing exactly the answer that led here, so it can be picked again.
 function _abGoBack(){
-  if(!_abState)return;
-  var def=_abStepDefs[_abState.step];
-  if(!def)return; // no Back from step 1
-  if(def.clearField==='features')_abState.features=[];else _abState[def.clearField]='';
-  _abState.step=def.prevStep;
+  if(!_abState||_abState.phase!=='asking')return;
+  if(_abState.step<1)return; // no Back from the first question
+  _abState.step--;
+  _abState.answers[_abState.step]=undefined;
+  var legacyField=_abLegacyFieldOrder[_abState.step];
+  if(legacyField)_abState[legacyField]=(legacyField==='features')?[]:'';
   var isTa=_abDetectLang(_abState.intentText||'')!=='english';
   _abAck(isTa?'Seri, adha maathi pick pannalam 🔙':'Sure, let\'s revisit that 🔙');
-  def.render();
+  var qDef=_abState.questions[_abState.step];
+  if(qDef.multi){_abRenderFeatureSelect();}else{_abAsk(qDef.question,qDef.options);}
 }
 function _abStartOverFlow(){
   if(!_abState)return;
   var prevIntent=_abState.intentText;
   _abClearState();
-  _abState=_abNewState({step:1,platform:'',techStack:'',features:[],designStyle:'',intentText:prevIntent});
+  _abState=_abNewState({step:0,phase:'asking',questions:_abDefaultQuestions.slice(),answers:[],intentText:prevIntent});
   var isTa=_abDetectLang(prevIntent||'')!=='english';
   _abAck(isTa?'Seri, mudhal irundhu start pannalam! 🔄':'Sure, let\'s start fresh! 🔄');
   _abAsk('Where should your app run?',['Phone only','Desktop only','Both']);
@@ -2912,7 +2924,7 @@ function _abHandleAnswer(t){
   if(!_abState)return false;
   var _tt=(t||'').trim();
   if(/^(?:🔄\s*)?start\s*over$|^restart$/i.test(_tt)){_abStartOverFlow();return true;}
-  if(_abState.step>1&&/^(?:⬅\s*)?back$|^go\s*back$/i.test(_tt)){_abGoBack();return true;}
+  if(_abState.step>0&&/^(?:⬅\s*)?back$|^go\s*back$/i.test(_tt)){_abGoBack();return true;}
   function reask(renderFn,opts){
     // Consecutive no-match tracking for the CURRENT step only. A real match advances _abState.step,
     // so the next reask (for a different step) sees nullStreak.step differ from _abState.step and
@@ -2964,64 +2976,57 @@ function _abHandleAnswer(t){
       }
     }
   }
-  if(_abState.step===1){
-    var opts=['Phone only','Desktop only','Both'],m=_abMatchOption(t,opts);
-    function onMatch1(m){_abState.platform=m;_abState.step=2;_abAck(_abAckPick(_abAckLines.platform,m,'Got it! Now, which tech stack do you prefer?'));_abAsk('Which tech stack do you prefer?',['Simple HTML/CSS/JS','React']);}
-    if(m){onMatch1(m);return true;}
-    console.log('[_abHandleAnswer] step1 no match for '+JSON.stringify(t));
-    _abTryModelFallback(t,opts,'Where should your app run?',function(matched){
-      if(matched){onMatch1(matched);}
-      else{reask(function(){_abAsk('Where should your app run?',opts);});}
-    });
-    return true;
-  }
-  if(_abState.step===2){
-    var opts=['Simple HTML/CSS/JS','React'],m=_abMatchOption(t,opts);
-    function onMatch2(m){_abState.techStack=m;_abState.step=3;_abAck(_abAckPick(_abAckLines.techStack,m,'Got it! Let\'s pick the features.'));_abRenderFeatureSelect();}
-    if(m){onMatch2(m);return true;}
-    console.log('[_abHandleAnswer] step2 no match for '+JSON.stringify(t));
-    _abTryModelFallback(t,opts,'Which tech stack do you prefer?',function(matched){
-      if(matched){onMatch2(matched);}
-      else{reask(function(){_abAsk('Which tech stack do you prefer?',opts);});}
-    });
-    return true;
-  }
-  if(_abState.step===3){
-    var featOpts=['User Login','Data Storage','Search','Notifications','Payment','Maps','Charts','Chat'];
-    var m=_abMatchOption(t,featOpts);
-    function onMatch3(m){
-      var bar=document.getElementById('ab-feat-bar');
-      var btnEl=bar&&bar.querySelector('.fl-qr-btn[data-opt="'+m+'"]');
-      if(btnEl){_abToggleFeature(btnEl);console.log('[_abHandleAnswer] step3 free-text matched feature: '+m);}
-      else console.log('[_abHandleAnswer] step3 matched feature but its button was not found: '+m);
+  if(_abState.phase==='asking'){
+    var qDef=_abState.questions[_abState.step];
+    var legacyField=_abLegacyFieldOrder[_abState.step];
+    if(qDef.multi){
+      var m=_abMatchOption(t,qDef.options);
+      function onMatchMulti(m){
+        var bar=document.getElementById('ab-feat-bar');
+        var btnEl=bar&&bar.querySelector('.fl-qr-btn[data-opt="'+m+'"]');
+        if(btnEl){_abToggleFeature(btnEl);console.log('[_abHandleAnswer] step'+_abState.step+' free-text matched feature: '+m);}
+        else console.log('[_abHandleAnswer] step'+_abState.step+' matched feature but its button was not found: '+m);
+      }
+      if(m){onMatchMulti(m);return true;} // toggling a feature never advances the step — only Done does
+      if(/^(done|finish|ready|mudinjuchu|mudinchu|aayiduchu)$/i.test((t||'').trim())){_abFeatureDone();return true;}
+      console.log('[_abHandleAnswer] step'+_abState.step+' no match for '+JSON.stringify(t));
+      _abTryModelFallback(t,qDef.options,qDef.question,function(matched){
+        if(matched){onMatchMulti(matched);}
+        else{reask(null,qDef.options);} // the feature bar is already on screen and unchanged — nothing to re-render
+      });
+      return true;
+    }else{
+      var opts=qDef.options,m=_abMatchOption(t,opts);
+      function onMatchSingle(m){
+        _abState.answers[_abState.step]=m;
+        if(legacyField)_abState[legacyField]=m;
+        var lookup=(legacyField&&_abAckLines[legacyField])||{};
+        _abAck(_abAckPick(lookup,m,'Got it!'));
+        _abState.step++;
+        if(_abState.step>=_abState.questions.length){
+          _abState.phase='confirm';
+          _abRenderPlanCard();
+        }else{
+          var nextDef=_abState.questions[_abState.step];
+          if(nextDef.multi){_abRenderFeatureSelect();}else{_abAsk(nextDef.question,nextDef.options);}
+        }
+      }
+      if(m){onMatchSingle(m);return true;}
+      console.log('[_abHandleAnswer] step'+_abState.step+' no match for '+JSON.stringify(t));
+      _abTryModelFallback(t,opts,qDef.question,function(matched){
+        if(matched){onMatchSingle(matched);}
+        else{reask(function(){_abAsk(qDef.question,opts);});}
+      });
+      return true;
     }
-    if(m){onMatch3(m);return true;} // toggling a feature never advances the step — only Done does
-    if(/^(done|finish|ready|mudinjuchu|mudinchu|aayiduchu)$/i.test((t||'').trim())){_abFeatureDone();return true;}
-    console.log('[_abHandleAnswer] step3 no match for '+JSON.stringify(t));
-    _abTryModelFallback(t,featOpts,'Which features do you need? Pick one or more, then tap Done.',function(matched){
-      if(matched){onMatch3(matched);}
-      else{reask(null,featOpts);} // the feature bar is already on screen and unchanged — nothing to re-render
-    });
-    return true;
   }
-  if(_abState.step===4){
-    var opts=['Minimal','Colorful','Professional'],m=_abMatchOption(t,opts);
-    function onMatch4(m){_abState.designStyle=m;_abState.step=5;_abAck(_abAckPick(_abAckLines.designStyle,m,'Got it! Here\'s your plan.'));_abRenderPlanCard();}
-    if(m){onMatch4(m);return true;}
-    console.log('[_abHandleAnswer] step4 no match for '+JSON.stringify(t));
-    _abTryModelFallback(t,opts,'What design style do you prefer?',function(matched){
-      if(matched){onMatch4(matched);}
-      else{reask(function(){_abAsk('What design style do you prefer?',opts);});}
-    });
-    return true;
-  }
-  if(_abState.step===5){
+  if(_abState.phase==='confirm'){
     var opts=['Build it 🚀','Start over'],m=_abMatchOption(t,opts);
-    function onMatch5(m){if(m==='Start over'){_abStartOverFlow();}else{_abTriggerBuild();}}
-    if(m){onMatch5(m);return true;}
-    console.log('[_abHandleAnswer] step5 no match for '+JSON.stringify(t));
+    function onMatchConfirm(m){if(m==='Start over'){_abStartOverFlow();}else{_abTriggerBuild();}}
+    if(m){onMatchConfirm(m);return true;}
+    console.log('[_abHandleAnswer] confirm no match for '+JSON.stringify(t));
     _abTryModelFallback(t,opts,'Ready to build?',function(matched){
-      if(matched){onMatch5(matched);}
+      if(matched){onMatchConfirm(matched);}
       else{reask(null,opts);} // the plan card is already on screen and unchanged — nothing to re-render
     });
     return true;
@@ -3033,8 +3038,8 @@ function _abHandleAnswer(t){
 // itself would otherwise look like a fresh, specific build request and restart the flow.
 var _abBuildInFlight=false;
 function _abTriggerBuild(){
-  _abState.step=6;
-  _abClearState(); // a build in flight can't be meaningfully resumed after a reload — don't persist step 6
+  _abState.phase='building';
+  _abClearState(); // a build in flight can't be meaningfully resumed after a reload — don't persist the building phase
   var msgs=document.getElementById('chat-msgs');
   var buildingContent='Building your app… ⏳';
   chatHistory.push({role:'assistant',content:buildingContent});
@@ -3061,15 +3066,20 @@ function _abTriggerBuild(){
   catch(e){
     _abBuildInFlight=false;
     // send() threw before ever reaching the fetch call (so neither its .then nor .catch will
-    // ever run to clear step 6) — clear it here so this exact build attempt can't strand it.
-    if(_abState&&_abState.step===6){_abState=null;_abClearState();}
+    // ever run to clear the building phase) — clear it here so this exact build attempt can't strand it.
+    if(_abState&&_abState.phase==='building'){_abState=null;_abClearState();}
     throw e;
   }
 }
 function _abRenderPlanCard(){
   var s=_abState;
-  var feat=s.features.length?s.features.join(', '):'(none)';
-  var content='Here\'s your app plan:\n📱 Platform: '+s.platform+'\n⚙️ Stack: '+s.techStack+'\n✨ Features: '+feat+'\n🎨 Style: '+s.designStyle+'\nReady to build?';
+  var lines=[];
+  for(var _abI=0;_abI<s.questions.length;_abI++){
+    var _abA=s.answers[_abI];
+    var _abLabel=Array.isArray(_abA)?(_abA.length?_abA.join(', '):'(none)'):(_abA||'(none)');
+    lines.push(s.questions[_abI].question+' '+_abLabel);
+  }
+  var content='Here\'s your app plan:\n'+lines.join('\n')+'\nReady to build?';
   var qrOptions=['Build it 🚀','⬅ Back','Start over'];
   chatHistory.push({role:'assistant',content:content,qrOptions:qrOptions,abQuestion:true});
   saveChat();chSync();
@@ -3082,11 +3092,12 @@ function _abRenderPlanCard(){
   _abSaveState();
 }
 function _abRenderFeatureSelect(){
+  var qDef=_abState.questions[_abState.step];
   var msgs=document.getElementById('chat-msgs');
   var div=document.createElement('div');div.className='msg';
-  div.innerHTML='<div class="mav ai">F</div><div><div class="bub">'+esc('Which features do you need? Pick one or more, then tap Done.')+'</div></div>';
+  div.innerHTML='<div class="mav ai">F</div><div><div class="bub">'+esc(qDef.question)+'</div></div>';
   msgs.appendChild(div);
-  var opts=['User Login','Data Storage','Search','Notifications','Payment','Maps','Charts','Chat'];
+  var opts=qDef.options;
   var bar=document.createElement('div');bar.className='fl-qr-bar';bar.id='ab-feat-bar';
   bar.innerHTML=opts.map(function(o){return '<button class="fl-qr-btn" onclick="_abToggleFeature(this)" data-opt="'+esc(o)+'">'+esc(o)+'</button>';}).join('')
     +'<button class="fl-qr-btn" style="background:var(--accent);color:#fff;border-color:var(--accent)" onclick="_abFeatureDone()">Done &rarr;</button>'
@@ -3094,31 +3105,47 @@ function _abRenderFeatureSelect(){
     +'<button class="fl-qr-btn" onclick="flQrClick(this)" data-opt="🔄 Start over">🔄 Start over</button>';
   msgs.appendChild(bar);msgs.scrollTop=msgs.scrollHeight;
   _abArmBar(bar);
-  chatHistory.push({role:'assistant',content:'Which features do you need? Pick one or more, then tap Done.',qrOptions:opts.concat(['⬅ Back','🔄 Start over']),abQuestion:true});
+  chatHistory.push({role:'assistant',content:qDef.question,qrOptions:opts.concat(['⬅ Back','🔄 Start over']),abQuestion:true});
   saveChat();chSync();
   _abSaveState();
 }
 function _abToggleFeature(btn){
-  if(!_abState||_abState.step!==3)return;
+  if(!_abState||_abState.phase!=='asking')return;
+  var qDef=_abState.questions[_abState.step];
+  if(!qDef||!qDef.multi)return;
+  if(!Array.isArray(_abState.answers[_abState.step]))_abState.answers[_abState.step]=[];
+  var arr=_abState.answers[_abState.step];
   var opt=btn.dataset.opt;
-  var idx=_abState.features.indexOf(opt);
-  if(idx===-1){_abState.features.push(opt);btn.style.background='var(--accent)';btn.style.color='#fff';}
-  else{_abState.features.splice(idx,1);btn.style.background='';btn.style.color='';}
+  var idx=arr.indexOf(opt);
+  if(idx===-1){arr.push(opt);btn.style.background='var(--accent)';btn.style.color='#fff';}
+  else{arr.splice(idx,1);btn.style.background='';btn.style.color='';}
+  _abSaveState(); // persists every toggle immediately — previously only "Done" saved, so a reload mid-selection silently lost picks
 }
 function _abFeatureDone(){
-  if(!_abState||_abState.step!==3)return;
+  if(!_abState||_abState.phase!=='asking')return;
+  var qDef=_abState.questions[_abState.step];
+  if(!qDef||!qDef.multi)return;
   var bar=document.getElementById('ab-feat-bar');
   if(bar)bar.querySelectorAll('button').forEach(function(b){b.disabled=true;});
-  var label=_abState.features.length?_abState.features.join(', '):'(no features selected)';
+  var picked=_abState.answers[_abState.step]||[];
+  var label=picked.length?picked.join(', '):'(no features selected)';
   var msgs=document.getElementById('chat-msgs');
   var u=document.createElement('div');u.className='msg u';
   u.innerHTML=renderUserBub({content:label});
   msgs.appendChild(u);msgs.scrollTop=msgs.scrollHeight;
   chatHistory.push({role:'user',content:label});
   saveChat();chSync();
-  _abState.step=4;
-  _abAck(_abFeatureAck(_abState.features));
-  _abAsk('What design style do you prefer?',['Minimal','Colorful','Professional']);
+  var legacyField=_abLegacyFieldOrder[_abState.step];
+  if(legacyField)_abState[legacyField]=picked.slice();
+  _abState.step++;
+  _abAck(_abFeatureAck(picked));
+  if(_abState.step>=_abState.questions.length){
+    _abState.phase='confirm';
+    _abRenderPlanCard();
+  }else{
+    var nextDef=_abState.questions[_abState.step];
+    if(nextDef.multi){_abRenderFeatureSelect();}else{_abAsk(nextDef.question,nextDef.options);}
+  }
 }
 function flParseQuickReply(text){
   // Normalize all known close-tag variants to canonical <<END_QUICK_REPLY>>
@@ -3203,7 +3230,7 @@ function flQrClick(btn){
   // Belt-and-braces alongside the bar-disabling in _abArmBar/_abDisableBar: a stale bar should
   // already be disabled and unclickable, but if one somehow still fires (e.g. a click queued
   // just before disabling took effect), don't let it feed a wrong-step answer into _abState.
-  if(_abState&&_abState.step<=5&&_abLiveBar&&bar!==_abLiveBar){
+  if(_abState&&_abState.phase!=='building'&&_abLiveBar&&bar!==_abLiveBar){
     console.log('[flQrClick] ignoring click from a non-current guided-flow bar');
     return;
   }
@@ -3218,7 +3245,7 @@ function flQrClick(btn){
     u.innerHTML=renderUserBub({content:opt});
     msgs.appendChild(u);msgs.scrollTop=msgs.scrollHeight;
     chatHistory.push({role:'user',content:opt});saveChat();chSync();
-    _abState=_abNewState({step:1,platform:'',techStack:'',features:[],designStyle:'',intentText:(lastUserMsg&&lastUserMsg.content)||''});
+    _abState=_abNewState({step:0,phase:'asking',questions:_abDefaultQuestions.slice(),answers:[],intentText:(lastUserMsg&&lastUserMsg.content)||''});
     _abUILock();
     _abAsk('Where should your app run?',['Phone only','Desktop only','Both']);
     return;
@@ -3552,7 +3579,7 @@ function _buildChatFetchBody(body){
   // 8192 is gemini-flash-latest's actual per-call output ceiling (the Gemini API path is not
   // clamped by _MODEL_OUTPUT_BUDGET server-side) — safe to send even when Groq ends up serving
   // the request, since Groq models are separately clamped to their own lower budget regardless.
-  if(_abState&&_abState.step===6){body.maxTokensOverride=8192;body.appBuilderBuild=true;}
+  if(_abState&&_abState.phase==='building'){body.maxTokensOverride=8192;body.appBuilderBuild=true;}
   return body;
 }
 function send(){
@@ -3600,13 +3627,13 @@ function send(){
     // visible restart notice (_abResetWithNotice) rather than mixing the new idea into the old
     // state silently; a bare step-answer with no independent build request still routes to
     // _abHandleAnswer as before.
-    var _abNi=_abIsSpecificBuildRequest(t),_abFa=!_abNi&&_abState&&_abState.step<=5;
+    var _abNi=_abIsSpecificBuildRequest(t),_abFa=!_abNi&&_abState&&_abState.phase!=='building';
     if(_abFa||_abNi){
       var _abM=document.getElementById('chat-msgs'),_abU=document.createElement('div');
       _abU.className='msg u';_abU.innerHTML=renderUserBub({content:t});
       _abM.appendChild(_abU);inp.value='';rsz(inp);_abM.scrollTop=_abM.scrollHeight;
       chatHistory.push({role:'user',content:t});saveChat();chSync();
-      if(_abNi){ if(_abState){ if(_abState.step>=2){_abBeginOverrideConfirm(t);}else{_abResetWithNotice(t);} }else{_abStartWithIntro(t);} }
+      if(_abNi){ if(_abState){ if(_abState.step>=1){_abBeginOverrideConfirm(t);}else{_abResetWithNotice(t);} }else{_abStartWithIntro(t);} }
       else{_abHandleAnswer(t);}
       return;
     }
@@ -3615,7 +3642,7 @@ function send(){
   var qtSnap=qtText;
   var attSnap=attachData; // snapshot before clearing
   // App Builder build-trigger message: show a short friendly label instead of the full prompt (API still gets the full prompt via apiPrompt/t below)
-  var displayT=(_abState&&_abState.step===6)?('🚀 Build: '+(_abState.intentText||'')):t;
+  var displayT=(_abState&&_abState.phase==='building')?('🚀 Build: '+(_abState.intentText||'')):t;
   var u=document.createElement('div');u.className='msg u';
   // Live display: pass thumb so image shows inline this session
   var _liveThumb=attSnap&&attSnap.type==='image'?(attSnap.thumb||(attSnap.data&&attSnap.mimeType?'data:'+attSnap.mimeType+';base64,'+attSnap.data:null)):attSnap?attSnap.thumb:null;
@@ -3641,7 +3668,7 @@ function send(){
   // Store placeholder only (no base64 image data in localStorage)
   if(attSnap)msgObj.attachment={type:attSnap.type,name:attSnap.name};
   // App Builder build-trigger message: keep the full prompt so Resend can replay it instead of the short label
-  if(_abState&&_abState.step===6){msgObj.fullPrompt=apiPrompt;msgObj.isBuilderBuild=true;}
+  if(_abState&&_abState.phase==='building'){msgObj.fullPrompt=apiPrompt;msgObj.isBuilderBuild=true;}
   chatHistory.push(msgObj);
   saveChat();chSync();
   var fetchBody=_buildChatFetchBody({prompt:apiPrompt||'',history:histForApi,enterpriseMode:enterpriseMode,simpleMode:isSimple()});
@@ -3658,11 +3685,11 @@ function send(){
   var origChatId=chCurId();
   // Build requests (step 6) get a client-side abort timeout: fetch() has no timeout of its own,
   // so a request that hangs forever (server accepts the connection but never responds) would
-  // never resolve OR reject — leaving _abState.step:6 stranded, since neither the .then nor the
-  // .catch cleanup below would ever run. Aborting after a generous window makes the fetch reject
-  // like any other network failure, routing it through the existing .catch cleanup.
+  // never resolve OR reject — leaving _abState in the building phase stranded, since neither the
+  // .then nor the .catch cleanup below would ever run. Aborting after a generous window makes the
+  // fetch reject like any other network failure, routing it through the existing .catch cleanup.
   var _abBuildTimer=null,_fetchOpts={method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(fetchBody)};
-  if(_abState&&_abState.step===6){
+  if(_abState&&_abState.phase==='building'){
     var _abBuildAbort=new AbortController();
     _fetchOpts.signal=_abBuildAbort.signal;
     _abBuildTimer=setTimeout(function(){_abBuildAbort.abort();},90000);
@@ -3732,7 +3759,7 @@ function send(){
         // _abContinueBuild takes over the send lock from here — do NOT unlock below in this case.
         _abWillContinue=!!(fetchBody.appBuilderBuild&&_abFenceOpenUnclosed(_reply));
         if(_abWillContinue)_abContinueBuild(msgs,ai,1);
-        if(_abState&&_abState.step===6){_abState=null;_abClearState();}
+        if(_abState&&_abState.phase==='building'){_abState=null;_abClearState();}
       }else{
         chSaveToOrigin(origChatId,{role:'assistant',content:_reply});
       }
@@ -3747,7 +3774,7 @@ function send(){
         ai.innerHTML='<div class="mav ai">F</div><div><div class="bub" style="color:var(--danger)">Connection error — is the server running?</div>'+aiActBar()+'</div>';
         msgs.appendChild(ai);msgs.scrollTop=msgs.scrollHeight;
       }
-      if(_abState&&_abState.step===6){_abState=null;_abClearState();}
+      if(_abState&&_abState.phase==='building'){_abState=null;_abClearState();}
       _unlockSend();
     });
 }
