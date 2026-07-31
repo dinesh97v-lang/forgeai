@@ -2594,40 +2594,46 @@ function _abAsk(question,options){
   saveChat();chSync();
   _abSaveState();
 }
-// Fresh, specific build request: one-time warm conversational intro before the platform card.
-// Always falls through to the same card, with or without the intro (server error, timeout, anything).
-function _abStartWithIntro(t){
+// Shared entry point for every "start a fresh guided flow from this intent text" site.
+// _abStartWithIntro, _abResetWithNotice, _abStartOverFlow, and flQrClick's CTA handoff all
+// call this instead of each independently seeding _abDefaultQuestions and firing their own
+// fetch — one place to adopt a real generated question set means one place that can ever
+// drift out of sync with the fallback array, instead of four.
+// Always falls through to the fixed sequence, with or without a valid response (server
+// error, timeout, malformed questions — anything).
+function _abBeginGeneratedFlow(intentText){
   // _abSession identifies THIS specific flow attempt by object identity. If a reset/restart
   // (resend, edit, CTA handoff, a fresh build request) replaces _abState with a new object while
   // this intro fetch is still in flight, _abState!==_abSession becomes true and the stale response
   // below is discarded entirely — it must never render, persist, or re-ask the platform question
   // on top of whatever the newer action already established.
-  var _abSession=_abState=_abNewState({step:0,phase:'asking',questions:_abDefaultQuestions.slice(),answers:[],intentText:t});
+  var _abSession=_abState=_abNewState({step:0,phase:'asking',questions:_abDefaultQuestions.slice(),answers:[],intentText:intentText});
   _abUILock();
   var msgs=document.getElementById('chat-msgs');
   var typ=document.createElement('div');typ.id='ab-intro-typ';typ.className='msg';
   typ.innerHTML='<div class="mav ai">F</div><div class="bub"><div class="typing"><div class="dot"></div><div class="dot"></div><div class="dot"></div></div></div>';
   msgs.appendChild(typ);msgs.scrollTop=msgs.scrollHeight;
   var proceedToCard=function(){
-    if(_abState!==_abSession){console.log('[_abStartWithIntro] stale session at proceedToCard — discarding');return;}
-    _abAsk('Where should your app run?',['Phone only','Desktop only','Both']);
+    if(_abState!==_abSession){console.log('[_abBeginGeneratedFlow] stale session at proceedToCard — discarding');return;}
+    var qDef=_abState.questions[0];
+    if(qDef.multi){_abRenderFeatureSelect();}else{_abAsk(qDef.question,qDef.options);}
   };
-  var fetchP=fetch('/api/app-build-intro',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ideaText:t})}).then(function(r){return r.json();}).catch(function(){return null;});
+  var fetchP=fetch('/api/app-build-intro',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ideaText:intentText})}).then(function(r){return r.json();}).catch(function(){return null;});
   // Must stay above the server's worst case (per-attempt timeout x2 + retry delay,
   // server.js /api/app-build-intro) — a ceiling below that abandons a retry that would
   // have succeeded, silently dropping the user to the fixed fallback question set.
   var timeoutP=new Promise(function(resolve){setTimeout(function(){resolve(null);},35000);});
   Promise.race([fetchP,timeoutP]).then(function(d){
     var ty=document.getElementById('ab-intro-typ');if(ty)ty.remove();
-    if(_abState!==_abSession){console.log('[_abStartWithIntro] stale session — discarding intro response, not persisting');return;}
+    if(_abState!==_abSession){console.log('[_abBeginGeneratedFlow] stale session — discarding intro response, not persisting');return;}
     // Store the server's own detection so every ack in this flow reuses the SAME verdict instead
     // of re-running a second, independent detection call — the two can never be guaranteed to
     // agree forever (e.g. a stale client copy vs a freshly-updated server word list).
     if(d&&d.lang)_abState.introLang=d.lang;
     var _rawIntro=d&&d.intro?d.intro:'';
-    console.log('[_abStartWithIntro] raw intro reply — length='+_rawIntro.length+' text='+JSON.stringify(_rawIntro));
+    console.log('[_abBeginGeneratedFlow] raw intro reply — length='+_rawIntro.length+' text='+JSON.stringify(_rawIntro));
     var _cleanIntro=_rawIntro?_abStripScaffold(_rawIntro):'';
-    console.log('[_abStartWithIntro] after scaffold-strip — length='+_cleanIntro.length+' text='+JSON.stringify(_cleanIntro));
+    console.log('[_abBeginGeneratedFlow] after scaffold-strip — length='+_cleanIntro.length+' text='+JSON.stringify(_cleanIntro));
     if(_cleanIntro){
       var div=document.createElement('div');div.className='msg';
       div.innerHTML='<div class="mav ai">F</div><div><div class="bub">'+formatMarkdown(_cleanIntro)+'</div></div>';
@@ -2636,9 +2642,19 @@ function _abStartWithIntro(t){
     }
     // If stripping left nothing (the whole reply was scaffold), just skip the intro bubble
     // entirely — same graceful fallback already used for a failed/timed-out intro call.
+    // Adopt the real generated set only on a valid, non-empty array — anything else (field
+    // absent, not an array, empty) leaves the synchronously-seeded fallback in place untouched.
+    if(d&&Array.isArray(d.questions)&&d.questions.length){
+      console.log('[_abBeginGeneratedFlow] adopting '+d.questions.length+' generated questions'+(d.buildHints?' with buildHints '+JSON.stringify(d.buildHints):' (no buildHints)'));
+      _abState.questions=d.questions;
+      _abState.answers=[];
+      if(d.buildHints)_abState.buildHints=d.buildHints;
+    }
     proceedToCard();
   });
 }
+// Fresh, specific build request: one-time warm conversational intro before the first card.
+function _abStartWithIntro(t){_abBeginGeneratedFlow(t);}
 // Short, warm, pre-written acknowledgment lines shown before the next guided-flow card —
 // zero API calls, keyed to the fixed button option just selected, 2-3 variations per language
 // to avoid repetition. Language picked via _abDetectLang() on the conversation's intentText.
@@ -2743,9 +2759,7 @@ function _abResetWithNotice(newIntentText){
   div.innerHTML='<div class="mav ai">F</div><div><div class="bub">'+esc(notice)+'</div></div>';
   msgs.appendChild(div);msgs.scrollTop=msgs.scrollHeight;
   chatHistory.push({role:'assistant',content:notice});saveChat();chSync();
-  _abState=_abNewState({step:0,phase:'asking',questions:_abDefaultQuestions.slice(),answers:[],intentText:prevIntent});
-  _abUILock();
-  _abAsk('Where should your app run?',['Phone only','Desktop only','Both']);
+  _abBeginGeneratedFlow(prevIntent);
 }
 // Mid-flow override confirmation: a clearly well-formed NEW build request arrived while a flow
 // is genuinely active past step 1 — resetting outright (like _abResetWithNotice does at step 1)
@@ -2905,10 +2919,9 @@ function _abStartOverFlow(){
   if(!_abState)return;
   var prevIntent=_abState.intentText;
   _abClearState();
-  _abState=_abNewState({step:0,phase:'asking',questions:_abDefaultQuestions.slice(),answers:[],intentText:prevIntent});
   var isTa=_abDetectLang(prevIntent||'')!=='english';
   _abAck(isTa?'Seri, mudhal irundhu start pannalam! 🔄':'Sure, let\'s start fresh! 🔄');
-  _abAsk('Where should your app run?',['Phone only','Desktop only','Both']);
+  _abBeginGeneratedFlow(prevIntent);
 }
 // Validates every answer (click OR free-typed text) against the CURRENT step's actual options
 // before writing anything into _abState — a stale/garbage value used to silently overwrite
@@ -3269,9 +3282,7 @@ function flQrClick(btn){
     u.innerHTML=renderUserBub({content:opt});
     msgs.appendChild(u);msgs.scrollTop=msgs.scrollHeight;
     chatHistory.push({role:'user',content:opt});saveChat();chSync();
-    _abState=_abNewState({step:0,phase:'asking',questions:_abDefaultQuestions.slice(),answers:[],intentText:(lastUserMsg&&lastUserMsg.content)||''});
-    _abUILock();
-    _abAsk('Where should your app run?',['Phone only','Desktop only','Both']);
+    _abBeginGeneratedFlow((lastUserMsg&&lastUserMsg.content)||'');
     return;
   }
   var inp=document.getElementById('chat-in');
