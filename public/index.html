@@ -3045,6 +3045,15 @@ function _abHandleAnswer(t){
       console.log('[_abHandleAnswer] step'+_abState.step+' no match for '+JSON.stringify(t));
       _abTryModelFallback(t,opts,qDef.question,function(matched){
         if(matched){onMatchSingle(matched);}
+        else if(_tt){
+          // Neither tier matched anything in options — for single-select only, accept the
+          // typed text as the answer verbatim rather than reasking. Last resort, not first:
+          // a typed answer that clearly meant one of the options already canonicalised to it
+          // above. options.indexOf(answers[step])===-1 is how a reader can tell this was free
+          // text later, with no shape change and nothing to keep in sync.
+          console.log('[_abHandleAnswer] step'+_abState.step+' accepting free-text answer: '+JSON.stringify(_tt));
+          onMatchSingle(_tt);
+        }
         else{reask(function(){_abAsk(qDef.question,opts);});}
       });
       return true;
