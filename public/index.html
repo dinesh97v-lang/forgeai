@@ -391,6 +391,7 @@ body.ab-flow-active .mac[onclick^="regenMsg"]{display:none!important}
 .fl-dchip{font-size:11px;padding:4px 10px;border:1px solid var(--border);border-radius:14px;color:var(--text2);cursor:pointer;background:var(--bg);font-family:inherit;transition:all .15s;white-space:nowrap;text-align:left;position:relative}
 .fl-dchip:hover{background:var(--bg3);color:var(--text);border-color:var(--border2);transform:scale(1.15);z-index:1}
 .fl-qr-bar{display:flex;flex-wrap:wrap;gap:5px;padding:5px 0 4px 36px}
+.ab-pin-strip{display:none;flex-wrap:wrap;gap:5px;align-items:center;padding:6px 14px;border-top:1px solid var(--border);flex-shrink:0}
 .fl-qr-btn{font-size:11px;padding:6px 12px;min-height:44px;border:1px solid var(--accent);border-radius:14px;color:var(--accent);cursor:pointer;background:var(--bg);font-family:inherit;transition:transform 0.15s ease,box-shadow 0.15s ease,background .15s,color .15s;text-align:left;line-height:1.3}
 .fl-qr-btn:hover:not(:disabled){background:var(--accent);color:white;transform:scale(1.06);box-shadow:0 4px 12px rgba(0,0,0,.15)}
 .fl-qr-btn:active:not(:disabled){transform:scale(.98)}
@@ -745,6 +746,7 @@ body.ab-flow-active .mac[onclick^="regenMsg"]{display:none!important}
         <div class="pill" onclick="ask(this.dataset.q)" data-q="Run security vulnerability scan">🔒 Security</div>
         <div class="pill" onclick="ask(this.dataset.q)" data-q="Generate API documentation">📄 Docs</div>
       </div>
+      <div class="ab-pin-strip" id="ab-pin-strip"></div>
       <div class="cin-area">
         <input type="file" id="attach-img-input" accept="image/jpeg,image/png,image/webp" style="display:none" onchange="attachHandle(this.files[0])">
         <input type="file" id="attach-file-input" accept=".txt,.md,.csv,.json,.js,.py,.html,.css" style="display:none" onchange="attachHandle(this.files[0])">
@@ -1490,7 +1492,11 @@ function chOpen(id){
         }
         // Live only if this card belongs to the chat _abState now carries (chatId, set/rehydrated
         // above) AND is genuinely the still-pending question (last message, tagged) — otherwise replay.
-        if(m.role!=='user'&&Array.isArray(m.qrOptions)&&m.qrOptions.length>=2){
+        // Single-select questions never get a transcript bar at all (recreated or otherwise) — the
+        // pinned strip represents them, derived fresh from _abState after this loop. abKind is only
+        // present on messages saved by this build or later; older saves fall back to the pre-strip
+        // behavior of always recreating a bar, which is safe since it's exactly what they were.
+        if(m.role!=='user'&&Array.isArray(m.qrOptions)&&m.qrOptions.length>=2&&m.abKind!=='single'){
           var _abOpenLive=_abState&&_abState.chatId===id&&m.abQuestion===true&&i===chatHistory.length-1;
           var _abOpenBar=flRenderQuickReply({options:m.qrOptions},cm,_abOpenLive?'live':'replay');
           if(_abOpenLive){_abLiveBar=_abOpenBar;_abUILock();}
@@ -1500,13 +1506,15 @@ function chOpen(id){
     cm.scrollTop=cm.scrollHeight;
     scanChatFiles();
   }
-  if(_abState&&_abState.chatId===id&&!_abLiveBar){
-    // Alive and genuinely owned by this chat, but nothing above armed a bar for it — its
-    // invariant is broken (no live pending question), the same failure the IIFE discards in
-    // initPageAll. Won't heal on a later visit, so discard for good.
+  if(_abState&&_abState.chatId===id&&!_abLiveBar&&!_abStripPending()){
+    // Alive and genuinely owned by this chat, but nothing above armed a bar for it, and the pinned
+    // strip has nothing pending either — its invariant is broken (no live pending question), the
+    // same failure the IIFE discards in initPageAll. Won't heal on a later visit, so discard for good.
     console.log('[chOpen] discarding stale _abState — no pending guided-flow question in this chat');
     _abState=null;_abClearState();
   }
+  if(_abState&&_abState.chatId===id)_abUILock();
+  _abRenderPinnedStrip();
   chDraw();
   var ni=document.querySelector((isSimple()?'#simple-nav':'#pro-nav')+' .ni');if(ni)go('chat',ni);
 }
@@ -2466,8 +2474,8 @@ function _abDeriveFallbackBuildHints(s){
 }
 function _abUILock(){document.body.classList.add('ab-flow-active');}
 function _abUIUnlock(){document.body.classList.remove('ab-flow-active');}
-function _abSaveState(){console.log('[abstate-diag] _abSaveState',JSON.stringify(_abState));_abUILock();try{localStorage.setItem('forgeai_ab_state',JSON.stringify(_abState));}catch(e){console.log('[abstate-diag] _abSaveState FAILED',e&&e.name,e&&e.message);}}
-function _abClearState(){console.trace('[abstate-diag] _abClearState called');_abUIUnlock();try{localStorage.removeItem('forgeai_ab_state');}catch(e){}}
+function _abSaveState(){console.log('[abstate-diag] _abSaveState',JSON.stringify(_abState));_abUILock();try{localStorage.setItem('forgeai_ab_state',JSON.stringify(_abState));}catch(e){console.log('[abstate-diag] _abSaveState FAILED',e&&e.name,e&&e.message);}_abRenderPinnedStrip();}
+function _abClearState(){console.trace('[abstate-diag] _abClearState called');_abUIUnlock();try{localStorage.removeItem('forgeai_ab_state');}catch(e){}_abRenderPinnedStrip();}
 function _abRestoreState(){
   try{
     var raw=localStorage.getItem('forgeai_ab_state');
@@ -2492,6 +2500,42 @@ function _abEnableBar(bar){
 function _abArmBar(bar){
   if(_abLiveBar&&_abLiveBar!==bar)_abDisableBar(_abLiveBar);
   _abLiveBar=bar;
+}
+// True only when there's a currently-pending SINGLE-select generated question with nothing else
+// overriding it — the one case the pinned strip (not a transcript bar) is responsible for. A pure
+// read of _abState; no separate tracking variable, so it can never drift out of sync with it.
+// Multi-select, override-confirm, escape-offer and the plan card all stay transcript bars and are
+// deliberately excluded here — they're unaffected by this predicate.
+function _abStripPending(){
+  return !!(_abState&&_abState.phase==='asking'&&_abState.questions&&_abState.questions[_abState.step]&&!_abState.questions[_abState.step].multi&&!_abState.pendingOverride&&!_abState.pendingEscape);
+}
+// Redraws the pinned strip from current _abState — called after every _abSaveState/_abClearState,
+// so it never needs its own update site wired in alongside each flow transition. #chat-pills (the
+// general shortcut row) hides while the strip is showing so the two never stack.
+function _abRenderPinnedStrip(){
+  var strip=document.getElementById('ab-pin-strip');
+  var pillsEl=document.getElementById('chat-pills');
+  if(!strip)return;
+  if(!_abStripPending()){
+    strip.style.display='none';
+    strip.innerHTML='';
+    if(pillsEl)pillsEl.style.display='';
+    return;
+  }
+  var qDef=_abState.questions[_abState.step];
+  var opts=qDef.options.slice();
+  if(_abState.step>0)opts.push('⬅ Back');
+  opts.push('🔄 Start over');
+  strip.innerHTML=opts.map(function(o){return '<button class="fl-qr-btn" onclick="_abPinStripClick(this)" data-opt="'+esc(o)+'">'+esc(o)+'</button>';}).join('');
+  strip.style.display='flex';
+  if(pillsEl)pillsEl.style.display='none';
+}
+function _abPinStripClick(btn){
+  if(_sendPending)return;
+  var strip=document.getElementById('ab-pin-strip');
+  strip.querySelectorAll('button').forEach(function(b){b.disabled=true;});
+  var inp=document.getElementById('chat-in');
+  if(inp){inp.value=btn.dataset.opt;send();}
 }
 // Validates a guided-flow answer (click OR free-typed text) against the options actually offered
 // for the current step. Exact/case-insensitive match wins; otherwise a loose word-level match
@@ -2588,13 +2632,13 @@ function _abAsk(question,options){
   var fullOptions=options.slice();
   if(_abState&&_abState.step>0)fullOptions.push('⬅ Back');
   if(_abState)fullOptions.push('🔄 Start over');
-  flRenderQuickReply({options:fullOptions},msgs,'live');
   msgs.scrollTop=msgs.scrollHeight;
   // abQuestion distinguishes this as a genuine guided-flow pending question, not just any
   // message with qrOptions — the server's own <<QUICK_REPLY>> mechanism attaches qrOptions to
   // ordinary chat replies too, and the two are otherwise indistinguishable to the pending check
-  // in send()/initPageAll(). Internal bookkeeping only — never read by any rendering code.
-  chatHistory.push({role:'assistant',content:question,qrOptions:fullOptions,abQuestion:true});
+  // in send()/initPageAll(). abKind:'single' additionally tells the restore loops this question
+  // is represented by the pinned strip, not a transcript bar — no bar is rendered for it here.
+  chatHistory.push({role:'assistant',content:question,qrOptions:fullOptions,abQuestion:true,abKind:'single'});
   saveChat();chSync();
   _abSaveState();
 }
@@ -2798,7 +2842,7 @@ function _abBeginOverrideConfirm(newText){
   msgs.appendChild(div);
   flRenderQuickReply({options:opts},msgs,'live');
   msgs.scrollTop=msgs.scrollHeight;
-  chatHistory.push({role:'assistant',content:question,qrOptions:opts,abQuestion:true});
+  chatHistory.push({role:'assistant',content:question,qrOptions:opts,abQuestion:true,abKind:'confirm'});
   saveChat();chSync();
   _abSaveState();
 }
@@ -2829,13 +2873,21 @@ function _abResolveOverrideConfirm(t){
       // at step 5 previously), just the button row, via the same qrOptions captured when the
       // confirm began. Clicking one of these buttons is indistinguishable from clicking the
       // original bar — same option text, same flQrClick->send()->_abHandleAnswer path.
+      // Whether a bar needs redrawing here depends on the interrupted step's own type — _abState.step
+      // never moved during the override, so questions[step] is still that same step's definition.
+      // Single-select needs nothing: the pinned strip already reflects it, derived fresh from
+      // _abState the moment pendingOverride clears above. Multi-select is unaffected by the strip
+      // and still needs its transcript bar restored, exactly as before this change.
+      var _abKOQDef=_abState.questions[_abState.step];
+      var _abKOMulti=!!(_abKOQDef&&_abKOQDef.multi);
       var _lastMsg=chatHistory.length?chatHistory[chatHistory.length-1]:null;
       if(_lastMsg&&_lastMsg.role==='assistant'){
         _lastMsg.qrOptions=(pending.priorQrOptions||[]).slice();
         _lastMsg.abQuestion=true;
+        _lastMsg.abKind=_abKOMulti?'multi':'single';
         saveChat();chSync();
       }
-      if(pending.priorQrOptions&&pending.priorQrOptions.length){
+      if(_abKOMulti&&pending.priorQrOptions&&pending.priorQrOptions.length){
         var _koMsgs=document.getElementById('chat-msgs');
         flRenderQuickReply({options:pending.priorQrOptions},_koMsgs,'live');
         _koMsgs.scrollTop=_koMsgs.scrollHeight;
@@ -3027,7 +3079,7 @@ function _abHandleAnswer(t){
       escMsgs.scrollTop=escMsgs.scrollHeight;
       // Tagged abQuestion:true with its own qrOptions so send()'s stale-state discard doesn't
       // null _abState before the user answers this.
-      chatHistory.push({role:'assistant',content:escMsg,qrOptions:escLabels,abQuestion:true});
+      chatHistory.push({role:'assistant',content:escMsg,qrOptions:escLabels,abQuestion:true,abKind:'escape'});
       saveChat();chSync();
       _abSaveState();
       return;
@@ -3186,7 +3238,7 @@ function _abRenderPlanCard(){
   }
   var content='Here\'s your app plan:\n'+lines.join('\n')+'\nReady to build?';
   var qrOptions=['Build it 🚀','⬅ Back','Start over'];
-  chatHistory.push({role:'assistant',content:content,qrOptions:qrOptions,abQuestion:true});
+  chatHistory.push({role:'assistant',content:content,qrOptions:qrOptions,abQuestion:true,abKind:'plan'});
   saveChat();chSync();
   var msgs=document.getElementById('chat-msgs');
   var div=document.createElement('div');div.className='msg';
@@ -3210,7 +3262,7 @@ function _abRenderFeatureSelect(){
     +'<button class="fl-qr-btn" onclick="flQrClick(this)" data-opt="🔄 Start over">🔄 Start over</button>';
   msgs.appendChild(bar);msgs.scrollTop=msgs.scrollHeight;
   _abArmBar(bar);
-  chatHistory.push({role:'assistant',content:qDef.question,qrOptions:opts.concat(['⬅ Back','🔄 Start over']),abQuestion:true});
+  chatHistory.push({role:'assistant',content:qDef.question,qrOptions:opts.concat(['⬅ Back','🔄 Start over']),abQuestion:true,abKind:'multi'});
   saveChat();chSync();
   _abSaveState();
 }
@@ -5424,8 +5476,11 @@ function initPageAll(){
           }
           // Render every historical card disabled by default — re-armed below, but only the
           // ONE bar belonging to _abState's current step, and only if _abState survives the
-          // stale-discard check just past this loop.
-          if(m.role!=='user'&&Array.isArray(m.qrOptions)&&m.qrOptions.length>=2){
+          // stale-discard check just past this loop. Single-select questions are skipped entirely —
+          // the pinned strip represents the current one, derived fresh from _abState after this
+          // IIFE resolves. abKind is only present on messages saved by this build or later; older
+          // saves fall back to always recreating a bar, which is safe since that's what they were.
+          if(m.role!=='user'&&Array.isArray(m.qrOptions)&&m.qrOptions.length>=2&&m.abKind!=='single'){
             var _abRestoreLive=_abState&&_abState.chatId===activeId&&m.abQuestion===true&&i===chatHistory.length-1;
             _abLastQrBar=flRenderQuickReply({options:m.qrOptions},cm,_abRestoreLive?'live':'replay');
           }
@@ -5439,6 +5494,8 @@ function initPageAll(){
   // Three-way, mirroring chOpen's ownership branches: chatId decides WHOSE flow this is; the
   // tag/last-message check (only meaningful once chatId already matches) decides whether it's
   // still genuinely pending, or a broken invariant (e.g. resendMsg's untagged-notice defect).
+  // _abPending is read from the message's own tag, not from _abLastQrBar, so it stays correct even
+  // when the pending question is single-select and no bar was rendered for it above.
   (function(){
     var _abLast=chatHistory.length?chatHistory[chatHistory.length-1]:null;
     var _abPending=_abLast&&_abLast.role==='assistant'&&_abLast.abQuestion===true&&Array.isArray(_abLast.qrOptions)&&_abLast.qrOptions.length>=2;
@@ -5458,8 +5515,14 @@ function initPageAll(){
       _abUILock();
       _abEnableBar(_abLastQrBar);
       _abLiveBar=_abLastQrBar;
+    }else{
+      // Survived both checks but no bar exists — the pending question is single-select and is
+      // represented by the pinned strip instead. _abRestoreState() already locked the UI when it
+      // first parsed this state, so nothing further is needed here.
+      console.log('[init] pending question is single-select — pinned strip will represent it, step='+_abState.step);
     }
   })();
+  _abRenderPinnedStrip();
   chDraw();
   prjDraw();
 
