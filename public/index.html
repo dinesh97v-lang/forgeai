@@ -468,6 +468,10 @@ body.ab-flow-active .mac[onclick^="regenMsg"]{display:none!important}
 .dw-stage.skipped{color:var(--text3);opacity:.5}
 .dw-stage.pending{color:var(--text3)}
 .qt-msg{background:rgba(0,0,0,.1);border-left:3px solid rgba(255,255,255,.6);border-radius:0 4px 4px 0;padding:4px 8px;margin-bottom:5px;font-size:10.5px;color:inherit;line-height:1.4;white-space:pre-wrap;word-break:break-word;max-height:52px;overflow:hidden}
+/* Same structure as .qt-msg (the user-side quote-reply snippet), colours adapted for
+   the assistant bubble's light background instead of the user bubble's tinted one —
+   the reasoned-ack tie-back naming which question it answers. */
+.ab-tieback{background:var(--bg2);border-left:3px solid var(--accent);border-radius:0 4px 4px 0;padding:4px 8px;margin-bottom:5px;font-size:10.5px;color:var(--text2);line-height:1.4;white-space:pre-wrap;word-break:break-word;max-height:52px;overflow:hidden}
 /* ── Auth Screen ── */
 .auth-screen{position:fixed;inset:0;background:var(--bg3);display:none;align-items:center;justify-content:center;z-index:2000;padding:20px}
 .auth-box{background:var(--bg);border:1px solid var(--border);border-radius:var(--rlg);padding:36px 32px;width:100%;max-width:380px;box-shadow:0 4px 24px rgba(0,0,0,.08)}
@@ -2952,6 +2956,43 @@ function _abTryModelFallback(text,options,question,cb){
     })
     .catch(function(){finish(null);});
 }
+// Fire-and-forget reasoned response for a single-select answer — deliberately does NOT
+// call _lockSend/_unlockSend (unlike _abTryModelFallback above): the next question has
+// already rendered by the time this is kicked off, and locking here would make
+// "non-blocking" a fiction. No options-membership validation either — a reasoned
+// response isn't one of a fixed set, there's nothing to validate it against.
+// cb(null) on failure, timeout, or a quota-guarded skip — all three look identical to
+// the caller, which renders nothing in that case.
+function _abGenerateReasonedAck(question,answer,priorQA,cb){
+  var _t0=performance.now();
+  var _abAckAbort=new AbortController();
+  var _abAckTimer=setTimeout(function(){_abAckAbort.abort();},5000);
+  function finish(result){
+    clearTimeout(_abAckTimer);
+    console.log('[abReasonedAck] question='+JSON.stringify(question)+' answer='+JSON.stringify(answer)+' result='+JSON.stringify(result)+' elapsedMs='+Math.round(performance.now()-_t0));
+    cb(result);
+  }
+  fetch('/api/ab-reasoned-ack',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({question:question,answer:answer,priorQA:priorQA}),signal:_abAckAbort.signal})
+    .then(function(r){return r.json();})
+    .then(function(d){
+      var ack=(d&&typeof d.ack==='string'&&d.ack.trim())?d.ack.trim():null;
+      finish(ack);
+    })
+    .catch(function(){finish(null);});
+}
+// Renders the reasoned-ack bubble with a structural tie-back to the question it answers
+// — mirrors what quotedText does for user bubbles (renderUserBub), since concurrent acks
+// can resolve out of order and a text-only reference isn't reliable enough to tell them
+// apart. Does not use _abAck (shared by many other callers) — this is its own render.
+function _abRenderReasonedAck(questionText,ackText){
+  var _clean=_abStripScaffold(ackText)||ackText;
+  var qHtml='<div class="ab-tieback">'+esc(questionText.length>200?questionText.slice(0,200)+'…':questionText)+'</div>';
+  var msgs=document.getElementById('chat-msgs');
+  var div=document.createElement('div');div.className='msg';
+  div.innerHTML='<div class="mav ai">F</div><div><div class="bub">'+qHtml+esc(_clean)+'</div></div>';
+  msgs.appendChild(div);msgs.scrollTop=msgs.scrollHeight;
+  chatHistory.push({role:'assistant',content:_clean,tieback:questionText});saveChat();chSync();
+}
 function _abHandleAnswer(t){
   if(!_abState)return false;
   var _tt=(t||'').trim();
@@ -3029,9 +3070,19 @@ function _abHandleAnswer(t){
     }else{
       var opts=qDef.options,m=_abMatchOption(t,opts);
       function onMatchSingle(m){
+        // Captured before anything advances, so the reasoned-ack callback (which lands
+        // later, asynchronously) can tell whether this exact answer is still current —
+        // identity covers a different flow entirely (reset/restart/chat-switch); the
+        // per-step answer check covers the same flow having gone Back and re-answered
+        // this specific question differently in the meantime.
+        var _abAckSession=_abState,_abAckStep=_abState.step,_abAckAnswer=m,_abAckQuestion=qDef.question;
+        var _abPriorQA=[];
+        for(var _abPQI=0;_abPQI<_abAckStep;_abPQI++){
+          var _abPQA=_abState.answers[_abPQI];
+          if(_abPQA===undefined)continue;
+          _abPriorQA.push({question:_abState.questions[_abPQI].question,answer:Array.isArray(_abPQA)?_abPQA.join(', '):_abPQA});
+        }
         _abState.answers[_abState.step]=m;
-        var lookup=(qDef.ackKey&&_abAckLines[qDef.ackKey])||{};
-        _abAck(_abAckPick(lookup,m,'Got it!'));
         _abState.step++;
         if(_abState.step>=_abState.questions.length){
           _abState.phase='confirm';
@@ -3040,6 +3091,12 @@ function _abHandleAnswer(t){
           var nextDef=_abState.questions[_abState.step];
           if(nextDef.multi){_abRenderFeatureSelect();}else{_abAsk(nextDef.question,nextDef.options);}
         }
+        _abGenerateReasonedAck(_abAckQuestion,_abAckAnswer,_abPriorQA,function(ackText){
+          if(!ackText)return;
+          if(_abState!==_abAckSession)return;
+          if(_abState.answers[_abAckStep]!==_abAckAnswer)return;
+          _abRenderReasonedAck(_abAckQuestion,ackText);
+        });
       }
       if(m){onMatchSingle(m);return true;}
       console.log('[_abHandleAnswer] step'+_abState.step+' no match for '+JSON.stringify(t));

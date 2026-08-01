@@ -1881,6 +1881,54 @@ app.post('/api/ab-match-option', requireAuth, async (req, res) => {
   }
 });
 
+// ============================================
+// APP BUILDER — reasoned response for a guided-flow answer
+// Pinned to GROQ_70B regardless of language, same override reasoning as
+// abMatchOption pins GROQ_8B: this fires once per single-select answer (3-5 times
+// per flow), so it must stay off the 250/day Gemini path entirely — verified via
+// direct calls (see conversation) that GROQ_8B's language-following and content
+// quality were not reliable enough for this, but GROQ_70B's were.
+// ============================================
+const AB_REASONED_ACK_PROMPT = `You are a helpful product mentor guiding a non-technical founder through building an app. They were just asked a question during a guided app-planning flow and gave an answer. Write a short, warm, substantive reply (1-2 sentences) that acknowledges their specific choice, explains one concrete implication or tradeoff of that choice, and if relevant briefly recommends something to keep in mind. Reply in the SAME language/style as the answer (Tamil script in, Tamil script out; Thanglish in, Thanglish out; English in, English out — never switch or mix). Do not ask a new question. Do not repeat the question back verbatim. Output ONLY the reply text, nothing else, no labels.`;
+
+// Decorative and non-blocking — the first thing shed under quota pressure rather than
+// competing with essential features (general chat, the English app-build-intro path)
+// for the same 1,000/day GROQ_70B cap. 0.2 is deliberately a wider margin than
+// isLowQuota's 0.05 "must route around" threshold: this feature should back off well
+// before ever contributing to that critical line, not right at it.
+const AB_REASONED_ACK_QUOTA_THRESHOLD = 0.2;
+
+app.post('/api/ab-reasoned-ack', requireAuth, async (req, res) => {
+  const { question, answer, priorQA } = req.body;
+  if (typeof question !== 'string' || !question.trim() || typeof answer !== 'string' || !answer.trim()) {
+    return res.status(400).json({ error: 'question and answer are required' });
+  }
+  const q = quotaState[MODELS.GROQ_70B];
+  if (q.limit !== Infinity && q.remaining < q.limit * AB_REASONED_ACK_QUOTA_THRESHOLD) {
+    console.log(`[ab-reasoned-ack] skipped — quota guard, remaining=${q.remaining}/${q.limit}`);
+    return res.json({ ack: null, skipped: true });
+  }
+  let priorText = '';
+  if (Array.isArray(priorQA) && priorQA.length) {
+    priorText = 'Earlier in this conversation:\n' + priorQA.map(qa => `Q: ${qa.question}\nA: ${qa.answer}`).join('\n') + '\n\n';
+  }
+  const userMsg = priorText + `Question: ${question}\nAnswer: ${answer}`;
+  try {
+    const resp = await axios.post(
+      'https://api.groq.com/openai/v1/chat/completions',
+      { model: MODELS.GROQ_70B, messages: [{ role: 'system', content: AB_REASONED_ACK_PROMPT }, { role: 'user', content: userMsg }], max_tokens: 300, temperature: 0.7 },
+      { headers: { Authorization: `Bearer ${GROQ_KEY}` }, timeout: 4500 }
+    );
+    try { updateGroqQuota(MODELS.GROQ_70B, resp.headers); } catch (e) { console.warn('[quota-track]', e.message); }
+    const ack = (resp.data?.choices?.[0]?.message?.content || '').trim();
+    console.log(`[ab-reasoned-ack] success — model=${MODELS.GROQ_70B} outputLength=${ack.length}`);
+    res.json({ ack: ack || null });
+  } catch (err) {
+    console.error('[ab-reasoned-ack]', err.message);
+    res.status(500).json({ ack: null });
+  }
+});
+
 app.post('/api/code-fix', requireAuth, async (req, res) => {
   const { files, issues } = req.body;
   if (!Array.isArray(files) || files.length === 0) {
