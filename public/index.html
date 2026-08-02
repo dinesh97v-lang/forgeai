@@ -2509,6 +2509,21 @@ function _abArmBar(bar){
 function _abStripPending(){
   return !!(_abState&&_abState.phase==='asking'&&_abState.questions&&_abState.questions[_abState.step]&&!_abState.questions[_abState.step].multi&&!_abState.pendingOverride&&!_abState.pendingEscape);
 }
+// Is the question _abState believes is pending still the most recent thing said to the user?
+// Walks backward over consecutive assistant messages from the end, stopping at the first user
+// message — bounded so it can only find something said since the user's last turn, never reach
+// into an earlier, already-resolved exchange (e.g. a completed flow's plan card, buried behind
+// everything said since). Anything that appends an untagged assistant message after the real
+// pending question (a reasoned ack, a resend-refusal notice, any future feature) is transparent
+// to this scan as long as no user message sits between the two — no per-feature tagging needed.
+function _abTailHasPendingTag(){
+  for(var i=chatHistory.length-1;i>=0;i--){
+    var m=chatHistory[i];
+    if(m.role==='user')return false;
+    if(m.role==='assistant'&&m.abQuestion===true&&Array.isArray(m.qrOptions)&&m.qrOptions.length>=2)return true;
+  }
+  return false;
+}
 // Redraws the pinned strip from current _abState — called after every _abSaveState/_abClearState,
 // so it never needs its own update site wired in alongside each flow transition. #chat-pills (the
 // general shortcut row) hides while the strip is showing so the two never stack.
@@ -3741,12 +3756,12 @@ function send(){
   var t=inp.value.trim();if(!t&&!attachData){_abBuildInFlight=false;return;}
   console.log('[ab-diag] appBuilder='+FEATURES.appBuilder+' simple='+isSimple()+' _abState='+JSON.stringify(_abState)+' detectIntent='+_abDetectIntent(t)+' specificBuildRequest='+_abIsSpecificBuildRequest(t));
   if(FEATURES.appBuilder&&!isSimple()&&!_abBuildInFlight){
-    // Belt-and-braces: if _abState is active but the chat's last assistant message isn't
-    // genuinely the pending guided-flow question (or the chat is empty), it belongs to a
-    // DIFFERENT context that something forgot to clear — discard it here too, not just at page
-    // load, so this new message is treated as fresh input instead of a stale-step "answer".
-    var _abLast=chatHistory.length?chatHistory[chatHistory.length-1]:null;
-    var _abPending=_abLast&&_abLast.role==='assistant'&&_abLast.abQuestion===true&&Array.isArray(_abLast.qrOptions)&&_abLast.qrOptions.length>=2;
+    // Belt-and-braces: if _abState is active but the tagged pending question isn't still the
+    // most recent thing said (bounded scan, see _abTailHasPendingTag) — or the chat is empty —
+    // it belongs to a DIFFERENT context that something forgot to clear — discard it here too,
+    // not just at page load, so this new message is treated as fresh input instead of a
+    // stale-step "answer".
+    var _abPending=_abTailHasPendingTag();
     if(_abState&&(!_abPending||_abState.chatId!==chCurId())){
       console.log('[send] discarding stale _abState — no pending guided-flow question in this chat');
       _abState=null;_abClearState();_abLiveBar=null;
@@ -5492,13 +5507,12 @@ function initPageAll(){
   }
   _abLiveBar=null;
   // Three-way, mirroring chOpen's ownership branches: chatId decides WHOSE flow this is; the
-  // tag/last-message check (only meaningful once chatId already matches) decides whether it's
-  // still genuinely pending, or a broken invariant (e.g. resendMsg's untagged-notice defect).
-  // _abPending is read from the message's own tag, not from _abLastQrBar, so it stays correct even
-  // when the pending question is single-select and no bar was rendered for it above.
+  // bounded tag scan (only meaningful once chatId already matches, see _abTailHasPendingTag)
+  // decides whether it's still genuinely pending, or a broken invariant. _abPending is read from
+  // chatHistory itself, not from _abLastQrBar, so it stays correct even when the pending question
+  // is single-select and no bar was rendered for it above.
   (function(){
-    var _abLast=chatHistory.length?chatHistory[chatHistory.length-1]:null;
-    var _abPending=_abLast&&_abLast.role==='assistant'&&_abLast.abQuestion===true&&Array.isArray(_abLast.qrOptions)&&_abLast.qrOptions.length>=2;
+    var _abPending=_abTailHasPendingTag();
     if(!_abState)return;
     if(_abState.chatId!==activeId){
       // Belongs to a different chat than the one just restored — park it, the blob must survive.
