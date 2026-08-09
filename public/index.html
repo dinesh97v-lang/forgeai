@@ -2446,14 +2446,13 @@ function _abNewState(fields){fields.chatId=chCurId();return fields;}
 var _AB_LABEL_TECH_STACK='Tech Stack';
 var _AB_LABEL_DESIGN_STYLE='Design Style';
 // Fallback stand-in for the model-generated questions[] this shape carries — used whenever the
-// question-generation call fails or returns something invalid. label is the short plan-card name;
-// ackKey (present only on single-select entries) is the _abAckLines table key for this question's
-// ack text — both are absent-safe, since generated questions never carry either.
+// question-generation call fails or returns something invalid. label is the short plan-card name,
+// absent-safe since generated questions don't always carry one.
 var _abDefaultQuestions=[
-  {question:'Where should your app run?',label:'Platform',ackKey:'platform',options:['Phone only','Desktop only','Both'],multi:false},
-  {question:'Which tech stack do you prefer?',label:_AB_LABEL_TECH_STACK,ackKey:'techStack',options:['Simple HTML/CSS/JS','React'],multi:false},
+  {question:'Where should your app run?',label:'Platform',options:['Phone only','Desktop only','Both'],multi:false},
+  {question:'Which tech stack do you prefer?',label:_AB_LABEL_TECH_STACK,options:['Simple HTML/CSS/JS','React'],multi:false},
   {question:'Which features do you need? Pick one or more, then tap Done.',label:'Features',options:['User Login','Data Storage','Search','Notifications','Payment','Maps','Charts','Chat'],multi:true},
-  {question:'What design style do you prefer?',label:_AB_LABEL_DESIGN_STYLE,ackKey:'designStyle',options:['Minimal','Colorful','Professional'],multi:false}
+  {question:'What design style do you prefer?',label:_AB_LABEL_DESIGN_STYLE,options:['Minimal','Colorful','Professional'],multi:false}
 ];
 // Derives build-relevant hints from the fallback array's own answers, by label (not position),
 // since a generated question set's order can never be assumed. Only ever used when buildHints
@@ -2718,49 +2717,6 @@ function _abBeginGeneratedFlow(intentText){
 }
 // Fresh, specific build request: one-time warm conversational intro before the first card.
 function _abStartWithIntro(t){_abBeginGeneratedFlow(t);}
-// Short, warm, pre-written acknowledgment lines shown before the next guided-flow card —
-// zero API calls, keyed to the fixed button option just selected, 2-3 variations per language
-// to avoid repetition. Language picked via _abDetectLang() on the conversation's intentText.
-var _abAckLines={
-  platform:{
-    'Phone only':{
-      en:['Nice, mobile-first! 📱 Now, which tech stack do you prefer?','Phone app it is! Great choice — let\'s pick a tech stack next.','Got it — phone only 📱 Now, what tech stack works best?'],
-      ta:['Nice, mobile-first! 📱 Ippo, which tech stack venum?','Phone app-a? Super choice! Let\'s pick a tech stack next.','Got it — phone only 📱 Now, tech stack eppadi irukanum?']
-    },
-    'Desktop only':{
-      en:['Desktop app, solid choice! 💻 Let\'s pick the tech stack next.','Nice, desktop-focused! Now, which tech stack do you prefer?','Got it — desktop only 💻 Next up: tech stack.'],
-      ta:['Desktop app-a, solid choice! 💻 Ippo tech stack pick pannalam.','Nice, desktop-focused! Let\'s decide the tech stack next.','Got it — desktop only 💻 Now for the tech stack...']
-    },
-    'Both':{
-      en:['Great choice! Works everywhere 💪 — now, which tech stack do you prefer?','Both platforms — smart move! 🙌 Now let\'s pick the tech stack.','Nice, maximum reach! 🌐 Next up: tech stack.'],
-      ta:['Nalla choice! Rendu platform-layum use pannalam 💪 — ippo which tech stack?','Both platforms — smart move! 🙌 Now let\'s pick the tech stack.','Great, works everywhere! 🌐 Next up: tech stack.']
-    }
-  },
-  techStack:{
-    'Simple HTML/CSS/JS':{
-      en:['Simple and solid! ⚡ Now, which features do you need?','Nice, lightweight approach! Let\'s pick the features now.','Good call — keeps it fast and simple. Which features matter most?'],
-      ta:['Simple and solid! ⚡ Ippo, which features venum unga app-ku?','Nice, lightweight approach! Let\'s pick the features now.','Good call — keeps it fast and simple. Now, features eppadi irukanum?']
-    },
-    'React':{
-      en:['React — nice, modern choice! ⚛️ Now let\'s pick the features.','Great pick for a dynamic UI! Now let\'s choose the features.','React it is! 🚀 Next: which features do you need?'],
-      ta:['React-a? Nice, modern choice! ⚛️ Ippo features pick pannalam.','Great pick for a dynamic UI! Now let\'s choose the features.','React it is! 🚀 Next: which features do you need?']
-    }
-  },
-  designStyle:{
-    'Minimal':{
-      en:['Clean and minimal — love it! ✨ Let\'s see your app plan...','Nice, less-is-more approach! Here\'s your plan...','Minimal it is! 🤍 Ready to see the summary?'],
-      ta:['Clean and minimal — love it! ✨ Let\'s see your app plan...','Nice, less-is-more approach! Here\'s your plan...','Minimal it is! 🤍 Ready to see the summary?']
-    },
-    'Colorful':{
-      en:['Colorful and vibrant — fun choice! 🎨 Let\'s check your app plan...','Nice, bold and lively! Here\'s your plan...','Love the colorful vibe! 🌈 Here\'s what we\'ve got...'],
-      ta:['Colorful and vibrant — fun choice! 🎨 Let\'s check your app plan...','Nice, bold and lively! Here\'s your plan...','Love the colorful vibe! 🌈 Here\'s what we\'ve got...']
-    },
-    'Professional':{
-      en:['Professional look — solid choice! 💼 Let\'s see your app plan...','Nice, clean business style! Here\'s your plan...','Professional it is! 📊 Ready for the summary...'],
-      ta:['Professional look — solid choice! 💼 Let\'s see your app plan...','Nice, clean business style! Here\'s your plan...','Professional it is! 📊 Ready for the summary...']
-    }
-  }
-};
 function _abPick(arr){return arr[Math.floor(Math.random()*arr.length)];}
 // Client-side mirror of server.js's detectLanguage() — same logic, so guided-flow acknowledgments
 // match the language the user is actually writing in, with zero API calls.
@@ -2783,13 +2739,6 @@ function _abDetectLang(text){
 function _abFlowIsTa(){
   var lang=(_abState&&_abState.introLang)?_abState.introLang:_abDetectLang((_abState&&_abState.intentText)||'');
   return lang!=='english';
-}
-function _abAckPick(lookup,option,fallbackText){
-  var entry=lookup[option];
-  if(!entry)return fallbackText;
-  var isTa=_abFlowIsTa();
-  var arr=isTa?(entry.ta||entry.en):entry.en;
-  return arr&&arr.length?_abPick(arr):fallbackText;
 }
 function _abAck(text){
   // Ack text is always our own static template today (never model-generated), so this is a
