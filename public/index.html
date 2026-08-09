@@ -2564,7 +2564,9 @@ function _abMatchOption(t,options){
   for(var i=0;i<options.length;i++){if(stripEmoji(options[i])===normNoEmoji)return options[i];}
   for(var i=0;i<options.length;i++){
     var words=stripEmoji(options[i]).split(/[\s\/]+/).filter(function(w){return w.length>2;});
-    for(var j=0;j<words.length;j++){if(normNoEmoji.indexOf(words[j])!==-1)return options[i];}
+    for(var j=0;j<words.length;j++){
+      if(normNoEmoji.indexOf(words[j])!==-1&&words[j].length/normNoEmoji.length>=0.25)return options[i];
+    }
   }
   return null;
 }
