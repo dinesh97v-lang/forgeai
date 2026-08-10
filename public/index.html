@@ -3240,8 +3240,18 @@ function _abToggleFeature(btn){
   var arr=_abState.answers[_abState.step];
   var opt=btn.dataset.opt;
   var idx=arr.indexOf(opt);
-  if(idx===-1){arr.push(opt);btn.style.background='var(--accent)';btn.style.color='#fff';}
-  else{arr.splice(idx,1);btn.style.background='';btn.style.color='';}
+  if(idx===-1){arr.push(opt);btn.style.background='var(--accent)';btn.style.color='#fff';_abAck('Added: '+opt);}
+  else{arr.splice(idx,1);btn.style.background='';btn.style.color='';_abAck('Removed: '+opt);}
+  // _abAck pushed an untagged assistant line — same pattern reask() uses (index.html:3056-3068):
+  // retroactively stamp qrOptions/abQuestion onto it so it stands in for the pending multi-select
+  // question, otherwise send()'s staleness tail-scan sees an untagged last message and discards
+  // _abState as stale on the user's next message.
+  var _lastMsg=chatHistory.length?chatHistory[chatHistory.length-1]:null;
+  if(_lastMsg&&_lastMsg.role==='assistant'){
+    _lastMsg.qrOptions=qDef.options.concat(['⬅ Back','🔄 Start over']);
+    _lastMsg.abQuestion=true;
+    saveChat();chSync();
+  }
   _abSaveState(); // persists every toggle immediately — previously only "Done" saved, so a reload mid-selection silently lost picks
 }
 function _abFeatureDone(){
