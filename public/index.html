@@ -2932,6 +2932,10 @@ function _abResolveEscape(t){
       if(_lastMsg&&_lastMsg.role==='assistant'){
         _lastMsg.qrOptions=(pending.opts||[]).slice();
         _lastMsg.abQuestion=true;
+        // Same abKind stamp as reask()'s retagging — this branch is reached both when _abQDef.multi
+        // is true AND when _abQDef itself is falsy, so the stamp must stay guarded on both, never
+        // unconditional and never 'single'.
+        if(_abQDef&&_abQDef.multi)_lastMsg.abKind='multi';
         saveChat();chSync();
       }
     }
@@ -3079,11 +3083,18 @@ function _abHandleAnswer(t){
       // the ack message _abAck just pushed is standing in for the pending question, so tag it
       // the same way _abAsk tags its own questions. Without qrOptions/abQuestion, send()'s and
       // initPageAll()'s pending check sees no live question on the last message and discards
-      // _abState as stale the next time the user answers.
+      // _abState as stale the next time the user answers. abKind='multi' too, same as
+      // _abToggleFeature's retagging — otherwise a reload/restore right after a reask on a
+      // multi-select step falls through to flRenderQuickReply instead of _abRenderFeatureBar,
+      // losing the Done button and picked-option highlighting even though _abState.answers
+      // still has the correct picks. Only stamped when the current question actually is multi —
+      // never 'single', since initPageAll's restore condition excludes abKind==='single' messages.
       var _lastMsg=chatHistory.length?chatHistory[chatHistory.length-1]:null;
       if(_lastMsg&&_lastMsg.role==='assistant'){
         _lastMsg.qrOptions=(opts||[]).slice();
         _lastMsg.abQuestion=true;
+        var _reaskQDef=_abState.questions[_abState.step];
+        if(_reaskQDef&&_reaskQDef.multi)_lastMsg.abKind='multi';
         saveChat();chSync();
       }
     }
