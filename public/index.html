@@ -1498,7 +1498,17 @@ function chOpen(id){
         // behavior of always recreating a bar, which is safe since it's exactly what they were.
         if(m.role!=='user'&&Array.isArray(m.qrOptions)&&m.qrOptions.length>=2&&m.abKind!=='single'){
           var _abOpenLive=_abState&&_abState.chatId===id&&m.abQuestion===true&&i===chatHistory.length-1;
-          var _abOpenBar=flRenderQuickReply({options:m.qrOptions},cm,_abOpenLive?'live':'replay');
+          var _abOpenBar;
+          if(m.abKind==='multi'&&_abOpenLive){
+            // Live multi-select redraw: _abState.questions[_abState.step] is only guaranteed to
+            // match THIS message when it's the current pending one (i.e. _abOpenLive) — a replay
+            // (historical, disabled) multi-select bar falls through to flRenderQuickReply below,
+            // unchanged, same as before this fix.
+            _abOpenBar=_abRenderFeatureBar(_abState.questions[_abState.step],'live');
+            cm.appendChild(_abOpenBar);cm.scrollTop=cm.scrollHeight;
+          }else{
+            _abOpenBar=flRenderQuickReply({options:m.qrOptions},cm,_abOpenLive?'live':'replay');
+          }
           if(_abOpenLive){_abLiveBar=_abOpenBar;_abUILock();}
         }
       }catch(e){console.warn('[chat] skipped bad message at index',i,e.message);}
@@ -2855,8 +2865,8 @@ function _abResolveOverrideConfirm(t){
       }
       if(_abKOMulti&&pending.priorQrOptions&&pending.priorQrOptions.length){
         var _koMsgs=document.getElementById('chat-msgs');
-        flRenderQuickReply({options:pending.priorQrOptions},_koMsgs,'live');
-        _koMsgs.scrollTop=_koMsgs.scrollHeight;
+        var _koBar=_abRenderFeatureBar(_abKOQDef,'live');
+        _koMsgs.appendChild(_koBar);_koMsgs.scrollTop=_koMsgs.scrollHeight;
       }
       _abSaveState();
     }
@@ -3070,20 +3080,60 @@ function _abHandleAnswer(t){
   if(_abState.phase==='asking'){
     var qDef=_abState.questions[_abState.step];
     if(qDef.multi){
-      var m=_abMatchOption(t,qDef.options);
       function onMatchMulti(m){
         var bar=document.getElementById('ab-feat-bar');
         var btnEl=bar&&bar.querySelector('.fl-qr-btn[data-opt="'+m+'"]');
         if(btnEl){_abToggleFeature(btnEl);console.log('[_abHandleAnswer] step'+_abState.step+' free-text matched feature: '+m);}
         else console.log('[_abHandleAnswer] step'+_abState.step+' matched feature but its button was not found: '+m);
       }
-      if(m){onMatchMulti(m);return true;} // toggling a feature never advances the step — only Done does
       if(/^(done|finish|ready|mudinjuchu|mudinchu|aayiduchu)$/i.test((t||'').trim())){_abFeatureDone();return true;}
-      console.log('[_abHandleAnswer] step'+_abState.step+' no match for '+JSON.stringify(t));
-      _abTryModelFallback(t,qDef.options,qDef.question,function(matched){
-        if(matched){onMatchMulti(matched);}
-        else{reask(null,qDef.options);} // the feature bar is already on screen and unchanged — nothing to re-render
+      // Split a typed multi-select answer into individually-matchable pieces on commas and "and"
+      // (a comma immediately followed by "and" is consumed as one separator, so an Oxford-comma
+      // list like "A, B, and C" doesn't leave a stray "and C" piece). A plain answer with no
+      // separator degenerates to a single piece.
+      var pieces=t.split(/\s*,\s*(?:and\s+)?|\s+and\s+/i).map(function(p){return p.trim();}).filter(function(p){return p.length>0;});
+      if(!pieces.length){reask(null,qDef.options);return true;}
+      var matchedAny=false;
+      var unmatched=[];
+      // Options already toggled by an earlier piece in THIS send — an option whose own canonical
+      // name contains "and"/"&" (e.g. "Task Add & Delete" typed as "task add and delete") splits
+      // into two pieces that both independently match it; without this guard, the second piece's
+      // match would toggle it straight back off. Only the first piece to match a given option
+      // calls onMatchMulti; a later piece resolving to the same option is skipped, not re-toggled.
+      var matchedOptions=[];
+      pieces.forEach(function(piece){
+        var pm=_abMatchOption(piece,qDef.options);
+        if(pm){
+          matchedAny=true;
+          if(matchedOptions.indexOf(pm)===-1){matchedOptions.push(pm);onMatchMulti(pm);}
+          else console.log('[_abHandleAnswer] step'+_abState.step+' piece '+JSON.stringify(piece)+' matched '+pm+' again this send — skipping duplicate toggle');
+        }
+        else{unmatched.push(piece);}
       });
+      // Fallback lookups run one at a time, not concurrently — _abTryModelFallback's
+      // _lockSend/_unlockSend is a plain boolean (_sendPending), not reference-counted, so two
+      // calls in flight together would have the first to resolve clear the lock while the second
+      // is still pending. Chaining keeps it to the same one-call-at-a-time usage it already has
+      // everywhere else, so _abTryModelFallback itself needs no changes.
+      function processFallback(i){
+        if(i>=unmatched.length){
+          if(!matchedAny)reask(null,qDef.options); // nothing in the whole typed answer matched anything — same as an unmatched single answer today
+          return;
+        }
+        console.log('[_abHandleAnswer] step'+_abState.step+' no local match for piece '+JSON.stringify(unmatched[i]));
+        _abTryModelFallback(unmatched[i],qDef.options,qDef.question,function(matched){
+          if(matched){
+            matchedAny=true;
+            // Same already-matched-this-send guard as the local-match loop above — defensive here,
+            // since a piece routed to fallback already failed to match locally, but the model
+            // fallback and a local match could in principle resolve to the same option.
+            if(matchedOptions.indexOf(matched)===-1){matchedOptions.push(matched);onMatchMulti(matched);}
+            else console.log('[_abHandleAnswer] step'+_abState.step+' fallback match '+matched+' already matched this send — skipping duplicate toggle');
+          }
+          processFallback(i+1);
+        });
+      }
+      processFallback(0);
       return true;
     }else{
       var opts=qDef.options,m=_abMatchOption(t,opts);
@@ -3214,21 +3264,40 @@ function _abRenderPlanCard(){
   msgs.scrollTop=msgs.scrollHeight;
   _abSaveState();
 }
+// Builds just the multi-select option bar — id='ab-feat-bar', buttons wired to
+// onclick="_abToggleFeature(this)", the distinct Done button — shared by the fresh-ask path
+// (_abRenderFeatureSelect) and every redraw/restore site, so a multi-select question never falls
+// back to flRenderQuickReply's plain flQrClick buttons (which is what onMatchMulti's
+// getElementById('ab-feat-bar') lookup silently failed to find before this). No question-bubble
+// render, no chatHistory.push, no _abSaveState — callers own those, same as flRenderQuickReply's
+// own division of labor. Reads already-picked options from _abState.answers[_abState.step]
+// (undefined-safe: unset until the first toggle) so a restored/redrawn live bar shows prior picks
+// highlighted the same way _abToggleFeature itself highlights a fresh toggle. mode mirrors
+// flRenderQuickReply's: 'live' arms the bar via _abArmBar, anything else disables it via
+// _abDisableBar for a resolved/historical redraw.
+function _abRenderFeatureBar(qDef,mode){
+  var picked=(_abState&&Array.isArray(_abState.answers[_abState.step]))?_abState.answers[_abState.step]:[];
+  var bar=document.createElement('div');bar.className='fl-qr-bar';bar.id='ab-feat-bar';
+  bar.innerHTML=qDef.options.map(function(o){
+    var pickedStyle=picked.indexOf(o)!==-1?' style="background:var(--accent);color:#fff"':'';
+    return '<button class="fl-qr-btn" onclick="_abToggleFeature(this)" data-opt="'+esc(o)+'"'+pickedStyle+'>'+esc(o)+'</button>';
+  }).join('')
+    +'<button class="fl-qr-btn" style="background:var(--accent);color:#fff;border-color:var(--accent)" onclick="_abFeatureDone()">Done &rarr;</button>'
+    +'<button class="fl-qr-btn" onclick="flQrClick(this)" data-opt="⬅ Back">⬅ Back</button>'
+    +'<button class="fl-qr-btn" onclick="flQrClick(this)" data-opt="🔄 Start over">🔄 Start over</button>';
+  if(mode==='live')_abArmBar(bar);
+  else _abDisableBar(bar);
+  return bar;
+}
 function _abRenderFeatureSelect(){
   var qDef=_abState.questions[_abState.step];
   var msgs=document.getElementById('chat-msgs');
   var div=document.createElement('div');div.className='msg';
   div.innerHTML='<div class="mav ai">F</div><div><div class="bub">'+esc(qDef.question)+'</div></div>';
   msgs.appendChild(div);
-  var opts=qDef.options;
-  var bar=document.createElement('div');bar.className='fl-qr-bar';bar.id='ab-feat-bar';
-  bar.innerHTML=opts.map(function(o){return '<button class="fl-qr-btn" onclick="_abToggleFeature(this)" data-opt="'+esc(o)+'">'+esc(o)+'</button>';}).join('')
-    +'<button class="fl-qr-btn" style="background:var(--accent);color:#fff;border-color:var(--accent)" onclick="_abFeatureDone()">Done &rarr;</button>'
-    +'<button class="fl-qr-btn" onclick="flQrClick(this)" data-opt="⬅ Back">⬅ Back</button>'
-    +'<button class="fl-qr-btn" onclick="flQrClick(this)" data-opt="🔄 Start over">🔄 Start over</button>';
+  var bar=_abRenderFeatureBar(qDef,'live');
   msgs.appendChild(bar);msgs.scrollTop=msgs.scrollHeight;
-  _abArmBar(bar);
-  chatHistory.push({role:'assistant',content:qDef.question,qrOptions:opts.concat(['⬅ Back','🔄 Start over']),abQuestion:true,abKind:'multi'});
+  chatHistory.push({role:'assistant',content:qDef.question,qrOptions:qDef.options.concat(['⬅ Back','🔄 Start over']),abQuestion:true,abKind:'multi'});
   saveChat();chSync();
   _abSaveState();
 }
@@ -3245,11 +3314,14 @@ function _abToggleFeature(btn){
   // _abAck pushed an untagged assistant line — same pattern reask() uses (index.html:3056-3068):
   // retroactively stamp qrOptions/abQuestion onto it so it stands in for the pending multi-select
   // question, otherwise send()'s staleness tail-scan sees an untagged last message and discards
-  // _abState as stale on the user's next message.
+  // _abState as stale on the user's next message. abKind='multi' too — without it, the restore
+  // paths' m.abKind==='multi' check silently misses every reload that happens after the first
+  // toggle, since abKind otherwise only ever exists on the original question's own entry.
   var _lastMsg=chatHistory.length?chatHistory[chatHistory.length-1]:null;
   if(_lastMsg&&_lastMsg.role==='assistant'){
     _lastMsg.qrOptions=qDef.options.concat(['⬅ Back','🔄 Start over']);
     _lastMsg.abQuestion=true;
+    _lastMsg.abKind='multi';
     saveChat();chSync();
   }
   _abSaveState(); // persists every toggle immediately — previously only "Done" saved, so a reload mid-selection silently lost picks
@@ -5458,7 +5530,16 @@ function initPageAll(){
           // saves fall back to always recreating a bar, which is safe since that's what they were.
           if(m.role!=='user'&&Array.isArray(m.qrOptions)&&m.qrOptions.length>=2&&m.abKind!=='single'){
             var _abRestoreLive=_abState&&_abState.chatId===activeId&&m.abQuestion===true&&i===chatHistory.length-1;
-            _abLastQrBar=flRenderQuickReply({options:m.qrOptions},cm,_abRestoreLive?'live':'replay');
+            if(m.abKind==='multi'&&_abRestoreLive){
+              // Same live-only restriction as chOpen's mirror of this block: _abState.questions[
+              // _abState.step] only matches THIS message when it's the current pending one. A
+              // replay (historical, disabled) multi-select bar falls through to flRenderQuickReply
+              // below, unchanged.
+              _abLastQrBar=_abRenderFeatureBar(_abState.questions[_abState.step],'live');
+              cm.appendChild(_abLastQrBar);cm.scrollTop=cm.scrollHeight;
+            }else{
+              _abLastQrBar=flRenderQuickReply({options:m.qrOptions},cm,_abRestoreLive?'live':'replay');
+            }
           }
         }catch(e){console.warn('[chat] skipped bad message at index',i,e.message);}
       }
