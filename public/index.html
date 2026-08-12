@@ -1470,6 +1470,10 @@ function chOpen(id){
     }catch(e){}
   }
   _abLiveBar=null;
+  // idx -> {bar,container,builtVia:'generic'|'feature'} for every message the loop below renders
+  // a transcript bar for — lets the post-loop repair step below look up and, if needed, replace
+  // whatever bar was actually rendered for the pending question without re-running the loop.
+  var _abOpenBarMap={};
   chatHistory=(Array.isArray(sess.messages)?sess.messages:[]).slice();
   chatFieldMode=sess.fieldMode||null;fieldModeUpdate();
   var cm=document.getElementById('chat-msgs');
@@ -1509,6 +1513,7 @@ function chOpen(id){
           }else{
             _abOpenBar=flRenderQuickReply({options:m.qrOptions},cm,_abOpenLive?'live':'replay');
           }
+          _abOpenBarMap[i]={bar:_abOpenBar,container:cm,builtVia:(m.abKind==='multi'&&_abOpenLive)?'feature':'generic'};
           if(_abOpenLive){_abLiveBar=_abOpenBar;_abUILock();}
         }
       }catch(e){console.warn('[chat] skipped bad message at index',i,e.message);}
@@ -1516,12 +1521,36 @@ function chOpen(id){
     cm.scrollTop=cm.scrollHeight;
     scanChatFiles();
   }
-  if(_abState&&_abState.chatId===id&&!_abLiveBar&&!_abStripPending()){
-    // Alive and genuinely owned by this chat, but nothing above armed a bar for it, and the pinned
-    // strip has nothing pending either — its invariant is broken (no live pending question), the
-    // same failure the IIFE discards in initPageAll. Won't heal on a later visit, so discard for good.
-    console.log('[chOpen] discarding stale _abState — no pending guided-flow question in this chat');
-    _abState=null;_abClearState();
+  if(_abState&&_abState.chatId===id){
+    // Belt-and-braces repair: the loop's own _abOpenLive check requires the tagged question to be
+    // literally the last chatHistory message, which an async reasoned ack (or any future untagged
+    // trailer) can defeat without the question having actually stopped being pending. The bounded
+    // index scan is the same authoritative check _abTailHasPendingTag() already gives send() and
+    // initPageAll — if it finds a pending index the loop didn't render live, repair the bar it DID
+    // render (in place, same DOM position) instead of discarding a genuinely-live state.
+    var _abPendingIdx=_abTailPendingIndex();
+    if(_abPendingIdx===-1){
+      if(!_abStripPending()){
+        // Alive and genuinely owned by this chat, but nothing above armed a bar for it, and the pinned
+        // strip has nothing pending either — its invariant is broken (no live pending question), the
+        // same failure the IIFE discards in initPageAll. Won't heal on a later visit, so discard for good.
+        console.log('[chOpen] discarding stale _abState — no pending guided-flow question in this chat');
+        _abState=null;_abClearState();
+      }
+    }else{
+      var _abPendingEntry=_abOpenBarMap[_abPendingIdx];
+      if(_abPendingEntry){
+        if(chatHistory[_abPendingIdx].abKind==='multi'&&_abPendingEntry.builtVia==='generic'){
+          console.log('[chOpen] repairing mis-rendered multi-select bar — step='+_abState.step);
+          var _abRepairedBar=_abRenderFeatureBar(_abState.questions[_abState.step],'live');
+          _abPendingEntry.bar.replaceWith(_abRepairedBar);
+          _abLiveBar=_abRepairedBar;
+        }else if(!_abLiveBar){
+          _abEnableBar(_abPendingEntry.bar);
+          _abLiveBar=_abPendingEntry.bar;
+        }
+      }
+    }
   }
   if(_abState&&_abState.chatId===id)_abUILock();
   _abRenderPinnedStrip();
@@ -2532,6 +2561,18 @@ function _abTailHasPendingTag(){
     if(m.role==='assistant'&&m.abQuestion===true&&Array.isArray(m.qrOptions)&&m.qrOptions.length>=2)return true;
   }
   return false;
+}
+// Sibling of _abTailHasPendingTag() that returns the pending message's INDEX instead of a
+// boolean, so a restore pass (chOpen/initPageAll) can look up what was actually rendered for it
+// and repair it if needed. Same bounded backward walk; _abTailHasPendingTag() itself is left
+// untouched since send() depends on it.
+function _abTailPendingIndex(){
+  for(var i=chatHistory.length-1;i>=0;i--){
+    var m=chatHistory[i];
+    if(m.role==='user')return -1;
+    if(m.role==='assistant'&&m.abQuestion===true&&Array.isArray(m.qrOptions)&&m.qrOptions.length>=2)return i;
+  }
+  return -1;
 }
 // Redraws the pinned strip from current _abState — called after every _abSaveState/_abClearState,
 // so it never needs its own update site wired in alongside each flow transition. #chat-pills (the
@@ -5527,6 +5568,9 @@ function initPageAll(){
     }
     for(var i=0;i<all.length;i++){if(all[i].id===activeId){sess=all[i];break;}}
     var _abLastQrBar=null;
+    // idx -> {bar,container,builtVia:'generic'|'feature'} — same bookkeeping as chOpen's
+    // _abOpenBarMap, for the post-loop IIFE's repair step below to look up.
+    var _abRestoreBarMap={};
     if(sess&&Array.isArray(sess.messages)&&sess.messages.length>0){
       chatHistory=sess.messages.slice();
       chatFieldMode=sess.fieldMode||null;fieldModeUpdate();
@@ -5562,6 +5606,7 @@ function initPageAll(){
             }else{
               _abLastQrBar=flRenderQuickReply({options:m.qrOptions},cm,_abRestoreLive?'live':'replay');
             }
+            _abRestoreBarMap[i]={bar:_abLastQrBar,container:cm,builtVia:(m.abKind==='multi'&&_abRestoreLive)?'feature':'generic'};
           }
         }catch(e){console.warn('[chat] skipped bad message at index',i,e.message);}
       }
@@ -5571,33 +5616,49 @@ function initPageAll(){
   }
   _abLiveBar=null;
   // Three-way, mirroring chOpen's ownership branches: chatId decides WHOSE flow this is; the
-  // bounded tag scan (only meaningful once chatId already matches, see _abTailHasPendingTag)
-  // decides whether it's still genuinely pending, or a broken invariant. _abPending is read from
-  // chatHistory itself, not from _abLastQrBar, so it stays correct even when the pending question
-  // is single-select and no bar was rendered for it above.
+  // bounded index scan (only meaningful once chatId already matches, see _abTailPendingIndex)
+  // decides whether it's still genuinely pending, or a broken invariant, and which message that
+  // is. _abRestoreBarMap is looked up by that index, not by whatever _abLastQrBar happened to
+  // land on last, so an async reasoned ack (or any future untagged trailer) landing after the
+  // real pending question no longer means arming the wrong — or no — bar.
   (function(){
-    var _abPending=_abTailHasPendingTag();
+    var _abPendingIdx=_abTailPendingIndex();
     if(!_abState)return;
     if(_abState.chatId!==activeId){
       // Belongs to a different chat than the one just restored — park it, the blob must survive.
       console.log('[init] parking _abState — belongs to a different chat than the one restored');
       _abState=null;_abUIUnlock();
-    }else if(!_abPending){
+    }else if(_abPendingIdx===-1){
       // This chat's own flow, but its invariant is broken (no live pending question) — won't
       // heal on a later visit, so discard for good.
       console.log('[init] discarding stale _abState — restored session has no pending guided-flow question');
       _abState=null;_abClearState();
-    }else if(_abLastQrBar){
-      // Survived both checks — its pending question IS the last rendered card.
-      console.log('[init] re-arming the current step\'s bar after reload — step='+_abState.step);
-      _abUILock();
-      _abEnableBar(_abLastQrBar);
-      _abLiveBar=_abLastQrBar;
     }else{
-      // Survived both checks but no bar exists — the pending question is single-select and is
-      // represented by the pinned strip instead. _abRestoreState() already locked the UI when it
-      // first parsed this state, so nothing further is needed here.
-      console.log('[init] pending question is single-select — pinned strip will represent it, step='+_abState.step);
+      var _abRestoreEntry=_abRestoreBarMap[_abPendingIdx];
+      if(_abRestoreEntry){
+        if(chatHistory[_abPendingIdx].abKind==='multi'&&_abRestoreEntry.builtVia==='generic'){
+          // The pending question is multi-select but wasn't literally the last chatHistory
+          // message (e.g. a reasoned ack for the previous answer landed after it), so the loop
+          // rendered it via flRenderQuickReply instead of _abRenderFeatureBar. Replace it in place
+          // — same DOM position — rather than just re-enabling the wrong kind of bar.
+          console.log('[init] repairing mis-rendered multi-select bar after reload — step='+_abState.step);
+          var _abRepairedBar=_abRenderFeatureBar(_abState.questions[_abState.step],'live');
+          _abRestoreEntry.bar.replaceWith(_abRepairedBar);
+          _abUILock();
+          _abLiveBar=_abRepairedBar;
+        }else{
+          // Already the right kind of bar — re-arm exactly as before.
+          console.log('[init] re-arming the current step\'s bar after reload — step='+_abState.step);
+          _abUILock();
+          _abEnableBar(_abRestoreEntry.bar);
+          _abLiveBar=_abRestoreEntry.bar;
+        }
+      }else{
+        // No bar was ever rendered for the pending index — it's single-select, represented by
+        // the pinned strip instead. _abRestoreState() already locked the UI when it first parsed
+        // this state, so nothing further is needed here.
+        console.log('[init] pending question is single-select — pinned strip will represent it, step='+_abState.step);
+      }
     }
   })();
   _abRenderPinnedStrip();
