@@ -1027,7 +1027,7 @@ app.post('/api/chat', requireAuth, async (req, res) => {
     return res.status(429).json({ error: 'Innikku 100 messages limit mudinjuchu — naaliku continue pannunga!' });
   }
 
-  const { prompt, history, enterpriseMode, simpleMode, attachment, fieldMode, fieldPreviewMode, forceTest, evaluateTest, sourceUrl, learnLang, maxTokensOverride, appBuilderBuild, awaitingApproval, appBuilderClientOwns } = req.body;
+  const { prompt, history, enterpriseMode, simpleMode, attachment, fieldMode, fieldPreviewMode, forceTest, evaluateTest, sourceUrl, learnLang, maxTokensOverride, appBuilderBuild, awaitingApproval, appBuilderClientOwns, postBuildFollowup } = req.body;
   if (!attachment && (!prompt || !prompt.trim())) {
     return res.status(400).json({ error: 'Prompt is empty!' });
   }
@@ -1211,6 +1211,15 @@ DOES NOT APPLY TO: bug fixes, small snippets, single functions, adding one featu
   // Force test: output machine-readable [TEST] block only — client renders interactive quiz
   if (forceTest && !evaluateTest && fieldMode && fieldMode.trim()) {
     sysPrompt += '\n\nMANDATORY: Do not teach new content. Output ONLY a [TEST] block with exactly 3 short questions based on what was taught — one recall question, one workplace scenario question, one yes/no question. Use this exact format and nothing else:\n[TEST]\nquestion one | question two | question three\n[/TEST]\nNo text before or after the [TEST] block.';
+  }
+
+  // Post-build follow-up: the client detected this message arrived right after a guided-flow
+  // build completed in this chat, and routed it to ordinary chat instead of restarting the guided
+  // flow. The generated code is already present in `history` above — tell the model to edit it if
+  // this message is an extension/change, or say so and suggest a fresh guided build if it clearly
+  // describes an unrelated new app idea, rather than silently doing either.
+  if (postBuildFollowup) {
+    sysPrompt += '\n\nCONTEXT: The user\'s app was just built in this conversation — the generated code is already in the conversation history above. If this message is asking to modify, extend, or fix that app, edit the existing code directly rather than starting over. If it clearly describes a different, unrelated app idea instead, say so plainly and suggest starting a fresh guided build for it rather than silently building either way.';
   }
 
   // Web search — enrich prompt with live results if needed

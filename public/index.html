@@ -1470,6 +1470,7 @@ function chOpen(id){
     }catch(e){}
   }
   _abLiveBar=null;
+  _abPostBuildChatId=null; // never let a post-build follow-up allowance apply outside the chat it was earned in
   // idx -> {bar,container,builtVia:'generic'|'feature'} for every message the loop below renders
   // a transcript bar for — lets the post-loop repair step below look up and, if needed, replace
   // whatever bar was actually rendered for the pending question without re-running the loop.
@@ -2998,6 +2999,7 @@ function _abGoBack(){
   if(_abState.step<1)return; // no Back from the first question
   _abState.step--;
   _abState.answers[_abState.step]=undefined;
+  _abState.awaitingCustomFeature=false; // don't let a pending "+ Add your own" leak into whatever's typed on the step we just moved back to
   var isTa=_abDetectLang(_abState.intentText||'')!=='english';
   _abAck(isTa?'Seri, adha maathi pick pannalam 🔙':'Sure, let\'s revisit that 🔙');
   var qDef=_abState.questions[_abState.step];
@@ -3006,6 +3008,8 @@ function _abGoBack(){
 function _abStartOverFlow(){
   if(!_abState)return;
   var prevIntent=_abState.intentText;
+  _abPostBuildChatId=null; // user explicitly restarted — any lingering post-build follow-up allowance no longer applies
+  _abState.awaitingCustomFeature=false; // explicit restart — a pending "+ Add your own" on the old flow no longer applies
   _abClearState();
   var isTa=_abDetectLang(prevIntent||'')!=='english';
   _abAck(isTa?'Seri, mudhal irundhu start pannalam! 🔄':'Sure, let\'s start fresh! 🔄');
@@ -3149,6 +3153,31 @@ function _abHandleAnswer(t){
         if(btnEl){_abToggleFeature(btnEl);console.log('[_abHandleAnswer] step'+_abState.step+' free-text matched feature: '+m);}
         else console.log('[_abHandleAnswer] step'+_abState.step+' matched feature but its button was not found: '+m);
       }
+      // "+ Add your own" armed this flag — the very next message is taken verbatim as one custom
+      // feature, unconditionally: no done-check, no _abMatchOption, no model fallback, no comma/
+      // "and" splitting (a phrase like "lead pipeline with deal stages" must stay intact, not be
+      // fragmented as if it were several fixed-chip answers). Consumed into its own field,
+      // _abState.customFeatures[step] — never _abState.answers[step] — and the flag is cleared
+      // immediately so only this one message gets this treatment.
+      if(_abState.awaitingCustomFeature){
+        _abState.awaitingCustomFeature=false;
+        var _abCustomText=(t||'').trim();
+        if(_abCustomText){
+          if(!Array.isArray(_abState.customFeatures))_abState.customFeatures=[];
+          if(!Array.isArray(_abState.customFeatures[_abState.step]))_abState.customFeatures[_abState.step]=[];
+          _abState.customFeatures[_abState.step].push(_abCustomText);
+          _abAck('Added: '+_abCustomText);
+          var _lastMsgCustom=chatHistory.length?chatHistory[chatHistory.length-1]:null;
+          if(_lastMsgCustom&&_lastMsgCustom.role==='assistant'){
+            _lastMsgCustom.qrOptions=qDef.options.concat(['⬅ Back','🔄 Start over']);
+            _lastMsgCustom.abQuestion=true;
+            _lastMsgCustom.abKind='multi';
+            saveChat();chSync();
+          }
+          _abSaveState();
+        }
+        return true;
+      }
       if(/^(done|finish|ready|mudinjuchu|mudinchu|aayiduchu)$/i.test((t||'').trim())){_abFeatureDone();return true;}
       // Split a typed multi-select answer into individually-matchable pieces on commas and "and"
       // (a comma immediately followed by "and" is consumed as one separator, so an Oxford-comma
@@ -3264,6 +3293,16 @@ function _abHandleAnswer(t){
 // to skip its stale-check and guided-flow detection for this one call, since the build prompt
 // itself would otherwise look like a fresh, specific build request and restart the flow.
 var _abBuildInFlight=false;
+// Chat id a build JUST completed in, or null. Set once, at the exact point a successful build
+// clears _abState; read by every send() in that same chat afterward — a message that would
+// otherwise look like a fresh build request routes to ordinary chat instead of restarting the
+// guided flow, since _abState being null there is what let a follow-up like "add a login screen"
+// silently discard the app that was just built. Persistent, not one-shot: stays set across as
+// many consecutive follow-ups as the user sends, so it never re-triggers this same bug on the
+// second or third one. Cleared only on chOpen (never applies outside the chat it was earned in)
+// and at the two points the user explicitly starts a fresh guided flow themselves (Start over,
+// the "Guide me step-by-step" CTA) — never as a side effect of send()'s gate matching it.
+var _abPostBuildChatId=null;
 function _abTriggerBuild(){
   _abState.phase='building';
   // Real generated questions always carry buildHints from the server (piece 4). Absent means
@@ -3284,10 +3323,18 @@ function _abTriggerBuild(){
   var qa=[];
   for(var _abQI=0;_abQI<s.questions.length;_abQI++){
     var _abAns=s.answers[_abQI];
-    var _abAnsLabel=Array.isArray(_abAns)?(_abAns.length?_abAns.join(', '):'none'):(_abAns||'none');
+    // Custom features (typed via "+ Add your own", stored separately in s.customFeatures — never
+    // merged into s.answers anywhere else) are combined into the same label here, and only here,
+    // so the model sees one natural feature list without needing to know the two were ever
+    // tracked apart. Degrades to the original scalar/array-or-'none' logic exactly when there are
+    // no custom entries for this step (the common case, and every single-select question).
+    var _abCustom=(s.customFeatures&&Array.isArray(s.customFeatures[_abQI]))?s.customFeatures[_abQI]:[];
+    var _abAnsArr=Array.isArray(_abAns)?_abAns.slice():(_abAns?[_abAns]:[]);
+    var _abCombined=_abAnsArr.concat(_abCustom);
+    var _abAnsLabel=_abCombined.length?_abCombined.join(', '):'none';
     qa.push('Q: '+s.questions[_abQI].question+'\nA: '+_abAnsLabel);
   }
-  var prompt='Build a complete app.\nApp idea: '+(s.intentText||'')+'\n'+qa.join('\n')+'\nIMPORTANT: Fully implement a working, visible UI section for EVERY feature or requirement mentioned above (not just login). Each must have its own functional section inside the main app with real controls and basic working JavaScript logic. Do not stop after the login screen. Do not leave anything as an empty placeholder or a comment.\n'+styleGuide+'\n';
+  var prompt='Build a complete app.\nApp idea: '+(s.intentText||'')+'\n'+qa.join('\n')+'\nIMPORTANT: Fully implement a working, visible UI section for EVERY feature or requirement mentioned above. Each must have its own functional section inside the main app with real controls and basic working JavaScript logic. Do not leave anything as an empty placeholder or a comment. Do not add features, screens, or flows that were not requested above — this includes login, signup, or authentication: only include them if explicitly listed as an answer above.\n'+styleGuide+'\n';
   if(s.buildHints.techStack==='React'){
     prompt+='Generate a SINGLE HTML file that uses React via CDN script tags so it runs directly in an iframe preview with no build step. Use exactly these script tags: <script src="https://unpkg.com/react@18.3.1/umd/react.production.min.js"><\/script> <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js"><\/script> <script src="https://unpkg.com/@babel/standalone@7.29.7/babel.min.js"><\/script> for React, ReactDOM, and in-browser JSX. JSX rules (hard requirements, the code will fail to parse otherwise): comments inside JSX must use {/* ... */}, never <!-- -->. Use className, not class. Use htmlFor, not for. No import or require statements anywhere — everything comes from the CDN globals React, ReactDOM. The script tag containing JSX MUST be <script type="text/babel"> — plain <script> with no type will make the browser parse JSX as JavaScript and crash on the first tag. The body MUST contain <div id="root"></div> before the script tags. Use ReactDOM.createRoot(document.getElementById(\'root\')).render(...), not the legacy ReactDOM.render. Tailwind\'s @apply does not work in a plain <style> tag with the CDN build — use utility classes directly, or <style type="text/tailwindcss"> if @apply is needed. Every component that is defined must actually be rendered. Tailwind must be loaded with <script src="https://cdn.tailwindcss.com/3.4.17"><\/script> — never a <link> tag; the Tailwind CDN ships JavaScript, not a stylesheet, so a <link rel="stylesheet"> pointing at it will never apply any styling. Return the full file in one ```html code block.';
   }else{
@@ -3311,7 +3358,13 @@ function _abRenderPlanCard(){
   var lines=[];
   for(var _abI=0;_abI<s.questions.length;_abI++){
     var _abA=s.answers[_abI];
-    var _abAnsLabel=Array.isArray(_abA)?(_abA.length?_abA.join(', '):'(none)'):(_abA||'(none)');
+    // Same merge _abTriggerBuild's qa.push block already does when building the actual prompt —
+    // keeps this plan-recap consistent with what the build will actually include, so a custom
+    // feature typed via "+ Add your own" doesn't look silently dropped in the preview.
+    var _abCustomI=(s.customFeatures&&Array.isArray(s.customFeatures[_abI]))?s.customFeatures[_abI]:[];
+    var _abAArr=Array.isArray(_abA)?_abA.slice():(_abA?[_abA]:[]);
+    var _abCombinedI=_abAArr.concat(_abCustomI);
+    var _abAnsLabel=_abCombinedI.length?_abCombinedI.join(', '):'(none)';
     var _abQLabel=s.questions[_abI].label||s.questions[_abI].question;
     lines.push(_abQLabel+': '+_abAnsLabel);
   }
@@ -3345,6 +3398,7 @@ function _abRenderFeatureBar(qDef,mode){
     var pickedStyle=picked.indexOf(o)!==-1?' style="background:var(--accent);color:#fff"':'';
     return '<button class="fl-qr-btn" onclick="_abToggleFeature(this)" data-opt="'+esc(o)+'"'+pickedStyle+'>'+esc(o)+'</button>';
   }).join('')
+    +'<button class="fl-qr-btn" onclick="_abRequestCustomFeature()">+ Add your own</button>'
     +'<button class="fl-qr-btn" style="background:var(--accent);color:#fff;border-color:var(--accent)" onclick="_abFeatureDone()">Done &rarr;</button>'
     +'<button class="fl-qr-btn" onclick="flQrClick(this)" data-opt="⬅ Back">⬅ Back</button>'
     +'<button class="fl-qr-btn" onclick="flQrClick(this)" data-opt="🔄 Start over">🔄 Start over</button>';
@@ -3388,6 +3442,29 @@ function _abToggleFeature(btn){
     saveChat();chSync();
   }
   _abSaveState(); // persists every toggle immediately — previously only "Done" saved, so a reload mid-selection silently lost picks
+}
+// "+ Add your own" — does not touch _abState.answers at all, only arms a one-shot flag that
+// _abHandleAnswer's qDef.multi branch checks first, ahead of the done-regex and the fixed-chip
+// matcher chain, so the user's very next message is taken verbatim as a custom feature instead
+// of being run through _abMatchOption/the model fallback (both closed-set classifiers that could
+// only ever resolve back to one of the 8 fixed chips, never accept novel text).
+function _abRequestCustomFeature(){
+  if(!_abState||_abState.phase!=='asking')return;
+  var qDef=_abState.questions[_abState.step];
+  if(!qDef||!qDef.multi)return;
+  _abState.awaitingCustomFeature=true;
+  _abAck(_abFlowIsTa()?'Seri, unga feature-a type pannunga 👇':'Sure, type your feature below 👇');
+  // Same retagging _abToggleFeature does — the ack line just pushed is standing in for the
+  // pending multi-select question, so it needs the same tags or send()'s staleness scan and the
+  // restore paths lose track of this as a still-pending multi-select question.
+  var _lastMsgCF=chatHistory.length?chatHistory[chatHistory.length-1]:null;
+  if(_lastMsgCF&&_lastMsgCF.role==='assistant'){
+    _lastMsgCF.qrOptions=qDef.options.concat(['⬅ Back','🔄 Start over']);
+    _lastMsgCF.abQuestion=true;
+    _lastMsgCF.abKind='multi';
+    saveChat();chSync();
+  }
+  _abSaveState();
 }
 function _abFeatureDone(){
   if(!_abState||_abState.phase!=='asking')return;
@@ -3511,6 +3588,7 @@ function flQrClick(btn){
     u.innerHTML=renderUserBub({content:opt});
     msgs.appendChild(u);msgs.scrollTop=msgs.scrollHeight;
     chatHistory.push({role:'user',content:opt});saveChat();chSync();
+    _abPostBuildChatId=null; // user explicitly chose a fresh guided flow — any lingering post-build follow-up allowance no longer applies
     _abBeginGeneratedFlow((lastUserMsg&&lastUserMsg.content)||'');
     return;
   }
@@ -3892,7 +3970,15 @@ function send(){
     // state silently; a bare step-answer with no independent build request still routes to
     // _abHandleAnswer as before.
     var _abNi=_abIsSpecificBuildRequest(t),_abFa=!_abNi&&_abState&&_abState.phase!=='building';
-    if(_abFa||_abNi){
+    // A build just completed in THIS chat and _abState is null (per the check above) — a
+    // build-shaped follow-up here almost always means "change what was just built", not a brand
+    // new app idea, and the model already has the generated code in history for free.
+    // Persistent, not one-shot: stays set across as many consecutive follow-ups as the user sends
+    // — it's only cleared when the user explicitly starts a fresh guided flow themselves (Start
+    // over, or the "Guide me step-by-step" CTA), not as a side effect of matching here.
+    // _abIsSpecificBuildRequest itself is untouched — only the routing here changes.
+    var _abPostBuildSkip=_abNi&&!_abState&&_abPostBuildChatId===chCurId();
+    if((_abFa||_abNi)&&!_abPostBuildSkip){
       var _abM=document.getElementById('chat-msgs'),_abU=document.createElement('div');
       _abU.className='msg u';_abU.innerHTML=renderUserBub({content:t});
       _abM.appendChild(_abU);inp.value='';rsz(inp);_abM.scrollTop=_abM.scrollHeight;
@@ -3936,6 +4022,7 @@ function send(){
   chatHistory.push(msgObj);
   saveChat();chSync();
   var fetchBody=_buildChatFetchBody({prompt:apiPrompt||'',history:histForApi,enterpriseMode:enterpriseMode,simpleMode:isSimple()});
+  if(_abPostBuildSkip)fetchBody.postBuildFollowup=true;
   if(_appBuildAwaitingApproval){fetchBody.awaitingApproval=true;_appBuildAwaitingApproval=false;}
   if(chatFieldMode){fetchBody.fieldMode=chatFieldMode;fetchBody.learnLang=_learnLang;}
   if(_pendingSourceUrl){fetchBody.sourceUrl=_pendingSourceUrl;_pendingSourceUrl=null;}
@@ -4023,7 +4110,7 @@ function send(){
         // _abContinueBuild takes over the send lock from here — do NOT unlock below in this case.
         _abWillContinue=!!(fetchBody.appBuilderBuild&&_abFenceOpenUnclosed(_reply));
         if(_abWillContinue)_abContinueBuild(msgs,ai,1);
-        if(_abState&&_abState.phase==='building'){_abState=null;_abClearState();}
+        if(_abState&&_abState.phase==='building'){_abPostBuildChatId=origChatId;_abState=null;_abClearState();}
       }else{
         chSaveToOrigin(origChatId,{role:'assistant',content:_reply});
       }
