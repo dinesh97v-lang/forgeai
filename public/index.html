@@ -2494,6 +2494,20 @@ var _abDefaultQuestions=[
   {question:'Which features do you need? Pick one or more, then tap Done.',label:'Features',options:['User Login','Data Storage','Search','Notifications','Payment','Maps','Charts','Chat'],multi:true},
   {question:'What design style do you prefer?',label:_AB_LABEL_DESIGN_STYLE,options:['Minimal','Colorful','Professional'],multi:false}
 ];
+// Thanglish counterpart, used only on the guaranteed-fallback path (_abBeginGeneratedFlow) when
+// the server-detected lang is 'tamil'/'thanglish', so a Thanglish opening message doesn't get a
+// Thanglish intro line followed by plain-English fallback questions. Same question count, order,
+// and labels as _abDefaultQuestions on purpose — _abDeriveFallbackBuildHints matches
+// _AB_LABEL_TECH_STACK/_AB_LABEL_DESIGN_STYLE by label and 'React'/'Minimal'/'Colorful'/
+// 'Professional' by exact option string, so the Tech Stack and Design Style options stay
+// untranslated here too (translating them would silently break build-hint derivation without
+// touching that function, which is out of scope for this fix).
+var _abDefaultQuestionsThanglish=[
+  {question:'Unga app enga run aaganum?',label:'Platform',options:['Phone la mattum','Desktop la mattum','Rendume'],multi:false},
+  {question:'Enna tech stack venum?',label:_AB_LABEL_TECH_STACK,options:['Simple HTML/CSS/JS','React'],multi:false},
+  {question:'Enna features venum? Onnu illa athukku mela pick pannunga, appuram Done click pannunga.',label:'Features',options:['User Login','Data Storage','Search','Notifications','Payment','Maps','Charts','Chat'],multi:true},
+  {question:'Enna design style venum?',label:_AB_LABEL_DESIGN_STYLE,options:['Minimal','Colorful','Professional'],multi:false}
+];
 // Derives build-relevant hints from the fallback array's own answers, by label (not position),
 // since a generated question set's order can never be assumed. Only ever used when buildHints
 // wasn't provided (i.e. we're on the fallback array) — real generated questions always carry
@@ -2785,7 +2799,16 @@ function _abBeginGeneratedFlow(intentText){
       // this is the last resort after the server-side call has already failed, not a place to
       // depend on another model call. Runs once, right before the fallback question set asks its
       // first question, so the user gets SOME acknowledgment instead of a bare card.
-      var _fallbackIntro='Semma idea! Konjam questions kekkaren, apram unga app-a build panna start pannalam. 🚀';
+      // Only the true-failure 503 body carries `lang` (server.js's outer catch) — a network
+      // failure or the client's own 35s timeout leaves d null, with no server-detected lang
+      // available at all, so those fall back to English exactly like an unrecognized lang would.
+      var _abFbThanglish=!!(d&&(d.lang==='tamil'||d.lang==='thanglish'));
+      var _fallbackIntro=_abFbThanglish?'Semma idea! Konjam questions kekkaren, apram unga app-a build panna start pannalam. 🚀':'Nice idea! Let\'s go through a few quick questions, then we\'ll build your app. 🚀';
+      if(_abFbThanglish){
+        console.log('[_abBeginGeneratedFlow] true-failure path — lang='+d.lang+', using Thanglish fallback questions');
+        _abState.questions=_abDefaultQuestionsThanglish.slice();
+        _abState.answers=[];
+      }
       var _fbDiv=document.createElement('div');_fbDiv.className='msg';
       _fbDiv.innerHTML='<div class="mav ai">F</div><div><div class="bub">'+esc(_fallbackIntro)+'</div></div>';
       msgs.appendChild(_fbDiv);msgs.scrollTop=msgs.scrollHeight;

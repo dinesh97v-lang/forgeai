@@ -1687,7 +1687,7 @@ app.post('/api/app-build-intro', requireAuth, async (req, res) => {
     res.json({ intro, questions, buildHints, model: servedModel, lang });
   } catch (err) {
     console.error(`[app-build-intro] failed after retry (last attempt duration=${Date.now() - attemptStart}ms):`, err.message);
-    res.status(503).json({ error: 'intro unavailable' });
+    res.status(503).json({ error: 'intro unavailable', lang });
   }
 });
 
