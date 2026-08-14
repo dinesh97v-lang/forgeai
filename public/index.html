@@ -3044,6 +3044,41 @@ function _abTryModelFallback(text,options,question,cb){
     })
     .catch(function(){finish(null);});
 }
+// Pre-filter for _abIsSpecificBuildRequest's word-list miss, on an OPENING message only (no
+// active _abState — send()'s gate never reaches this for a mid-flow message, that's
+// _abClassifyMidFlowAside's job above). A typo ("buld") or a Thanglish phrasing outside the
+// fixed verb list ("pani kudu", "coding pananum eppadi panalam") never reaches the word-list's
+// own >=2-meaningful-word count, since the trigger-verb regex gates entry before that count ever
+// runs — so today it silently falls through to ordinary chat instead of ever offering the guided
+// flow, an inconsistent experience for what's functionally the same request. Reuses
+// /api/ab-match-option exactly as _abClassifyMidFlowAside does — just a different two-option pair
+// and question — so no new server endpoint. Same shape otherwise: blocked via _lockSend, capped
+// by a 6s AbortController timeout. Deliberately conservative in the OPPOSITE direction from the
+// other classifiers here: a false positive (wrongly launching the guided flow on an ordinary
+// message) is worse than a false negative on an opening message, so only an exact, confident
+// "build request" match triggers it — NONE, a timeout, or a network failure all fall through to
+// ordinary chat exactly as today, never a guess toward launching the flow.
+function _abClassifyOpeningBuildRequest(text,cb){
+  var _t0=performance.now();
+  _lockSend();
+  var _abOpenAbort=new AbortController();
+  var _abOpenTimer=setTimeout(function(){_abOpenAbort.abort();},6000);
+  function finish(result){
+    clearTimeout(_abOpenTimer);
+    _unlockSend();
+    console.log('[abOpenerClassify] text='+JSON.stringify(text)+' result='+JSON.stringify(result)+' elapsedMs='+Math.round(performance.now()-_t0));
+    cb(result);
+  }
+  var question='The user typed this as their opening message in a chat with an AI app-building assistant. Casual phrasing, typos, and Thanglish (Tamil+English mixed) wording are normal here and are NOT evidence against build intent — for example, "expense tracker venum", "ecommerce site pani kudu", and "buld a chat app" (typo for "build") are all build requests despite informal grammar or spelling mistakes. Is this message a request to build/create/develop a specific app or tool, or is it an ordinary message unrelated to building anything (a greeting, a question, small talk, or an unrelated topic)?';
+  var options=['build request','ordinary message'];
+  fetch('/api/ab-match-option',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:text,options:options,question:question}),signal:_abOpenAbort.signal})
+    .then(function(r){return r.json();})
+    .then(function(d){
+      var m=(d&&typeof d.match==='string')?d.match:null;
+      finish(m==='build request'?'build':(m==='ordinary message'?'ordinary':null));
+    })
+    .catch(function(){finish(null);});
+}
 // Fire-and-forget reasoned response for a single-select answer — deliberately does NOT
 // call _lockSend/_unlockSend (unlike _abTryModelFallback above): the next question has
 // already rendered by the time this is kicked off, and locking here would make
@@ -3293,6 +3328,12 @@ function _abHandleAnswer(t){
 // to skip its stale-check and guided-flow detection for this one call, since the build prompt
 // itself would otherwise look like a fresh, specific build request and restart the flow.
 var _abBuildInFlight=false;
+// One-shot: set right before send() re-invokes itself after _abClassifyOpeningBuildRequest comes
+// back non-confident, so that retry falls straight through to ordinary chat instead of asking the
+// classifier about the exact same miss again. Read-and-cleared at the very top of send(), same
+// spot _abBuildInFlight's own early-exit checks live, so it can never leak into an unrelated,
+// later message.
+var _abOpenerBypass=false;
 // Chat id a build JUST completed in, or null. Set once, at the exact point a successful build
 // clears _abState; read by every send() in that same chat afterward — a message that would
 // otherwise look like a fresh build request routes to ordinary chat instead of restarting the
@@ -3928,6 +3969,7 @@ function send(){
   if(_sendPending){_abBuildInFlight=false;return;}
   var inp=document.getElementById('chat-in');
   var t=inp.value.trim();if(!t&&!attachData){_abBuildInFlight=false;return;}
+  var _abSkipOpenerClassify=_abOpenerBypass;_abOpenerBypass=false;
   console.log('[ab-diag] appBuilder='+FEATURES.appBuilder+' simple='+isSimple()+' _abState='+JSON.stringify(_abState)+' detectIntent='+_abDetectIntent(t)+' specificBuildRequest='+_abIsSpecificBuildRequest(t));
   if(FEATURES.appBuilder&&!isSimple()&&!_abBuildInFlight){
     // Belt-and-braces: if _abState is active but the tagged pending question isn't still the
@@ -3985,6 +4027,27 @@ function send(){
       chatHistory.push({role:'user',content:t});saveChat();chSync();
       if(_abNi){ if(_abState){ if(_abState.step>=1){_abBeginOverrideConfirm(t);}else{_abResetWithNotice(t);} }else{_abStartWithIntro(t);} }
       else{_abHandleAnswer(t);}
+      return;
+    }
+    // The word list missed (_abNi false) on an OPENING message (_abState still null after the
+    // stale-discard check above) — before silently falling through to ordinary chat, ask the
+    // model whether this is genuinely a build request the fixed word list just didn't recognize
+    // (a typo, or a Thanglish phrasing outside build|create|make|...). _abSkipOpenerClassify is
+    // true on the retry this fires below, so a non-confident result doesn't loop back into asking
+    // about the same miss again.
+    if(!_abNi&&!_abState&&!_abSkipOpenerClassify){
+      _abClassifyOpeningBuildRequest(t,function(_abOpenResult){
+        if(_abOpenResult==='build'){
+          var _abM2=document.getElementById('chat-msgs'),_abU2=document.createElement('div');
+          _abU2.className='msg u';_abU2.innerHTML=renderUserBub({content:t});
+          _abM2.appendChild(_abU2);inp.value='';rsz(inp);_abM2.scrollTop=_abM2.scrollHeight;
+          chatHistory.push({role:'user',content:t});saveChat();chSync();
+          _abStartWithIntro(t);
+        }else{
+          _abOpenerBypass=true;
+          send();
+        }
+      });
       return;
     }
   }
