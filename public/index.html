@@ -2777,6 +2777,20 @@ function _abBeginGeneratedFlow(intentText){
       _abState.answers=[];
       if(d.buildHints)_abState.buildHints=d.buildHints;
     }
+    if(!_cleanIntro){
+      // Guaranteed fallback for the true failure path — both server attempts exhausted (503 or
+      // network failure) or the 35s ceiling won the race, so no real intro ever arrived. Same
+      // !_cleanIntro condition the "skip intro bubble entirely" comment above already uses, so
+      // this can never fire alongside a real intro. Static and non-model-generated on purpose —
+      // this is the last resort after the server-side call has already failed, not a place to
+      // depend on another model call. Runs once, right before the fallback question set asks its
+      // first question, so the user gets SOME acknowledgment instead of a bare card.
+      var _fallbackIntro='Semma idea! Konjam questions kekkaren, apram unga app-a build panna start pannalam. 🚀';
+      var _fbDiv=document.createElement('div');_fbDiv.className='msg';
+      _fbDiv.innerHTML='<div class="mav ai">F</div><div><div class="bub">'+esc(_fallbackIntro)+'</div></div>';
+      msgs.appendChild(_fbDiv);msgs.scrollTop=msgs.scrollHeight;
+      chatHistory.push({role:'assistant',content:_fallbackIntro});saveChat();chSync();
+    }
     proceedToCard();
   });
 }
