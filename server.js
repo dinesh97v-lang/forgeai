@@ -68,9 +68,9 @@ const TAVILY_KEY = process.env.TAVILY_API_KEY;
 
 // ── Model IDs & daily quota reference ────────────────────────────────
 const MODELS = {
-  GROQ_8B:    'llama-3.1-8b-instant',                   // 14,400 req/day · 6K TPM
-  GROQ_70B:   'llama-3.3-70b-versatile',                 // 1,000 req/day · 12K TPM
-  GROQ_SCOUT: 'meta-llama/llama-4-scout-17b-16e-instruct', // 1,000 req/day · 30K TPM — large-input fallback
+  GROQ_8B:    'openai/gpt-oss-20b',                   // 14,400 req/day · 6K TPM
+  GROQ_70B:   'openai/gpt-oss-120b',                 // 1,000 req/day · 12K TPM
+  GROQ_SCOUT: 'openai/gpt-oss-safeguard-20b', // 1,000 req/day · 30K TPM — large-input fallback
   GEM_LITE:   'gemini-flash-lite-latest',                // alias -> 2.0-flash-lite — Tamil simple
   GEM_FLASH:  'gemini-flash-latest',                     // alias -> 2.0-flash     — Tamil complex
 };
@@ -1341,6 +1341,15 @@ DOES NOT APPLY TO: bug fixes, small snippets, single functions, adding one featu
   // Source card: page content is large — use 70b for better synthesis
   if (sourcePageFetched) {
     primaryModel = (lang === 'tamil' || lang === 'thanglish') ? MODELS.GEM_FLASH : MODELS.GROQ_70B;
+  }
+  // Oversized request — every Groq model on this account shares a flat 8,000 TPM ceiling
+  // (confirmed via live testing: GROQ_8B/GROQ_70B/GROQ_SCOUT all 413 past it), so no Groq
+  // model choice can help here. 7800 leaves a small margin under that ceiling. Checked last
+  // so it overrides any earlier override above, since none of those help either once the
+  // request is this large.
+  if (estimatedTokens > 7800 && !primaryModel.startsWith('gemini')) {
+    console.log(`[router] estimatedTokens=${estimatedTokens} exceeds Groq account TPM ceiling — routing to Gemini Flash instead of ${primaryModel}`);
+    primaryModel = MODELS.GEM_FLASH;
   }
 
   console.log(`Lang: ${lang} | Intent: ${intent} | Tokens~${estimatedTokens} | Primary: ${primaryModel} | Search: ${searched}`);
