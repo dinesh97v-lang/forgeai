@@ -1705,6 +1705,154 @@ app.post('/api/app-build-intro', requireAuth, async (req, res) => {
   }
 });
 
+// ============================================
+// APP BUILDER — extract a full plan (questions+answers+buildHints) directly from an opening
+// build request already classified "detailed" by the client (_abClassifyDetailedEnough). Purely
+// additive: /api/app-build-intro above is completely untouched and still handles every request
+// that isn't classified "detailed" — this is a new, separate endpoint, not an extension of it.
+// ============================================
+const AB_EXTRACT_PLAN_PROMPT = `You are a startup mentor reading a highly detailed app-build request from a non-coder who already specified most of the important decisions themselves (tech stack, key features, data model, etc.). Extract a plan-summary from what they already said — do NOT ask them anything new, and do NOT invent any detail they did not mention.
+
+Return ONLY a single JSON object, nothing else — no markdown code fences, no prose before or after it — in exactly this shape:
+{
+  "questions": [
+    {"question":"<short internal label, not shown as a question to the user>","label":"<2-3 word noun phrase, in English>","options":["<value already stated>"],"multi":false},
+    ... 2 to 6 of these total, one per major decision already specified (e.g. Tech Stack, Features, Platform, Data Model) ...
+  ],
+  "answers": [
+    "<the value(s) already stated for this entry, in the SAME language/style the user wrote in>",
+    ... same length and order as questions, one per entry — a plain string, or for a "multi" entry, an array of strings ...
+  ],
+  "buildHints": {"techStack":"React or Plain HTML/CSS/JS","styleGuide":"Minimal or Colorful or Professional"}
+}
+
+QUESTIONS/ANSWERS rules: each "label" is a short English noun phrase for a plan-summary card (e.g. "Tech Stack", "Features", "Data Model"). Each "answers" entry reflects ONLY what the user already explicitly said. Set "multi":true and use an array for the matching "answers" entry only when the user listed multiple discrete items for that one category (e.g. several named features); otherwise "multi":false and a single string. Include a "Features" entry whenever the user named specific features. Do not include an entry for anything the user did not actually specify.
+
+BUILDHINTS rules: your own inference, independent of the questions/answers above. "techStack" must be EXACTLY "React" or EXACTLY "Plain HTML/CSS/JS" — nothing else. "styleGuide" must be EXACTLY "Minimal", "Colorful", or "Professional" — nothing else. Both are always in English regardless of the user's language.
+
+Output ONLY the JSON object, starting directly with "{" — no labels, no restating or verifying these instructions in any form.
+
+Example (input: "Build a React todo app with user login, a task list with due dates, and a clean minimal design"):
+{"questions":[{"question":"Tech stack","label":"Tech Stack","options":["React"],"multi":false},{"question":"Features","label":"Features","options":["User Login","Task list with due dates"],"multi":true},{"question":"Design style","label":"Design Style","options":["Minimal"],"multi":false}],"answers":["React",["User Login","Task list with due dates"],"Minimal"],"buildHints":{"techStack":"React","styleGuide":"Minimal"}}`;
+
+// All-or-nothing, mirroring _abValidateQuestions above: any entry failing invalidates the whole
+// array so the client falls back to the normal guided flow rather than rendering a broken plan
+// card. Cross-checked against the already-validated questions array (multi entry <-> array
+// answer, single entry <-> string answer) rather than validated in isolation.
+function _abValidateAnswers(answers, questions) {
+  if (!Array.isArray(answers) || answers.length !== questions.length) return null;
+  const cleaned = [];
+  for (let i = 0; i < answers.length; i++) {
+    const a = answers[i];
+    if (questions[i].multi) {
+      if (!Array.isArray(a) || a.length === 0 || !a.every(v => typeof v === 'string' && v.trim())) return null;
+      cleaned.push(a.map(v => v.trim()));
+    } else {
+      if (typeof a !== 'string' || !a.trim()) return null;
+      cleaned.push(a.trim());
+    }
+  }
+  return cleaned;
+}
+
+// Validators specific to /api/ab-extract-plan's own prompt contract — a 2-6 entry range
+// (matching AB_EXTRACT_PLAN_PROMPT's stated range above, not app-build-intro's 3-5) and options
+// arrays allowed down to a single item (an already-known value being reported back, not a menu
+// of choices to offer). _abValidateQuestions/_abValidateAnswers above are untouched and still
+// serve /api/app-build-intro exactly as before — these are separate functions, not a shared path.
+function _abValidateExtractPlanQuestions(questions) {
+  if (!Array.isArray(questions) || questions.length < 2 || questions.length > 6) {
+    console.error(`[ab-extract-plan-validate] questions array invalid — isArray=${Array.isArray(questions)} length=${Array.isArray(questions) ? questions.length : 'n/a'} (expected 2-6)`);
+    return null;
+  }
+  const cleaned = [];
+  for (let i = 0; i < questions.length; i++) {
+    const q = questions[i];
+    if (!q || typeof q.question !== 'string' || !q.question.trim()) {
+      console.error(`[ab-extract-plan-validate] entry ${i}: missing/invalid "question" — ${JSON.stringify(q)}`);
+      return null;
+    }
+    if (typeof q.label !== 'string' || !q.label.trim()) {
+      console.error(`[ab-extract-plan-validate] entry ${i}: missing/invalid "label" — ${JSON.stringify(q)}`);
+      return null;
+    }
+    if (!Array.isArray(q.options) || q.options.length < 1 || q.options.length > 10) {
+      console.error(`[ab-extract-plan-validate] entry ${i}: field "options" length=${Array.isArray(q.options) ? q.options.length : 'n/a'} out of allowed range 1-10 — ${JSON.stringify(q.options)}`);
+      return null;
+    }
+    if (!q.options.every(o => typeof o === 'string' && o.trim())) {
+      console.error(`[ab-extract-plan-validate] entry ${i}: "options" contains a non-string/empty value — ${JSON.stringify(q.options)}`);
+      return null;
+    }
+    if (typeof q.multi !== 'boolean') {
+      console.error(`[ab-extract-plan-validate] entry ${i}: "multi" not a boolean — ${JSON.stringify(q.multi)}`);
+      return null;
+    }
+    cleaned.push({ question: q.question.trim(), label: q.label.trim(), options: q.options.map(o => o.trim()), multi: q.multi });
+  }
+  return cleaned;
+}
+
+// Mirrors _abValidateAnswers's logic exactly (same length rule, same per-index multi:true/false
+// shape rule) under the new name, so it's paired with _abValidateExtractPlanQuestions above
+// instead of the shared app-build-intro validator.
+function _abValidateExtractPlanAnswers(answers, questions) {
+  if (!Array.isArray(answers) || answers.length !== questions.length) {
+    console.error(`[ab-extract-plan-validate] answers array invalid — isArray=${Array.isArray(answers)} length=${Array.isArray(answers) ? answers.length : 'n/a'} (expected ${questions.length})`);
+    return null;
+  }
+  const cleaned = [];
+  for (let i = 0; i < answers.length; i++) {
+    const a = answers[i];
+    if (questions[i].multi) {
+      if (!Array.isArray(a) || a.length === 0 || !a.every(v => typeof v === 'string' && v.trim())) {
+        console.error(`[ab-extract-plan-validate] answers[${i}]: expected non-empty string array (multi entry "${questions[i].label}") — ${JSON.stringify(a)}`);
+        return null;
+      }
+      cleaned.push(a.map(v => v.trim()));
+    } else {
+      if (typeof a !== 'string' || !a.trim()) {
+        console.error(`[ab-extract-plan-validate] answers[${i}]: expected non-empty string (entry "${questions[i].label}") — ${JSON.stringify(a)}`);
+        return null;
+      }
+      cleaned.push(a.trim());
+    }
+  }
+  return cleaned;
+}
+
+app.post('/api/ab-extract-plan', requireAuth, async (req, res) => {
+  if (rlCheck(req.session.userId, req.session.userPlan)) {
+    return res.status(429).json({ error: 'rate limited' });
+  }
+  const { ideaText } = req.body;
+  if (!ideaText || !ideaText.trim()) return res.status(400).json({ error: 'ideaText required' });
+
+  const lang = detectLanguage(ideaText);
+  const model = (lang === 'tamil' || lang === 'thanglish') ? MODELS.GEM_FLASH : MODELS.GROQ_70B;
+  const callWith = (m) => m === MODELS.GEM_FLASH
+    ? callGeminiModel(m, ideaText, AB_EXTRACT_PLAN_PROMPT, [], 2000, 15000, true)
+    : callGroqModel(m, ideaText, AB_EXTRACT_PLAN_PROMPT, [], 2000, 15000, true);
+
+  try {
+    const reply = await callWith(model);
+    const parsed = _abExtractJson(reply.text);
+    const questions = parsed ? _abValidateExtractPlanQuestions(parsed.questions) : null;
+    const answers = questions ? _abValidateExtractPlanAnswers(parsed.answers, questions) : null;
+    if (!questions || !answers) {
+      const rawTrimmed = reply.text.trim();
+      console.error(`[ab-extract-plan] validation failed — model=${model} parsedOk=${!!parsed} rawLen=${rawTrimmed.length} rawSnippet=${JSON.stringify(rawTrimmed.slice(0, 300))}`);
+      return res.status(503).json({ error: 'plan unavailable' });
+    }
+    const buildHints = _abCoerceBuildHints(parsed.buildHints);
+    console.log(`[ab-extract-plan] success — model=${model} questions=${questions.length} buildHints=${JSON.stringify(buildHints)}`);
+    res.json({ questions, answers, buildHints });
+  } catch (err) {
+    console.error('[ab-extract-plan] failed:', err.message);
+    res.status(503).json({ error: 'plan unavailable' });
+  }
+});
+
 
 // ============================================
 // SEARCH ENDPOINT — Tavily + AI synthesis
@@ -1889,7 +2037,13 @@ async function abMatchOption(text, options, question) {
         { role: 'system', content: sysMsg },
         { role: 'user', content: userMsg }
       ],
-      max_tokens: 30,
+      // GROQ_8B (openai/gpt-oss-20b) is a reasoning-capable model — confirmed live that its
+      // hidden reasoning tokens can consume 400+ tokens before it emits any visible answer on
+      // a complex classification input, well past the old 30-token budget calibrated for the
+      // previous non-reasoning Llama model. 800 is the smallest budget directly tested that let
+      // a real complex case finish naturally (finish_reason=stop) with room to spare; simpler
+      // calls just finish sooner and cost less, since this is a ceiling, not a fixed cost.
+      max_tokens: 800,
       temperature: 0
     },
     { headers: { Authorization: `Bearer ${GROQ_KEY}` }, timeout: 8000 }
