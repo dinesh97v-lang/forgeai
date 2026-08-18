@@ -732,7 +732,7 @@ async function callWithFallback(primaryModel, prompt, sysPrompt, history, lang =
     const others = groqChain.filter(m => m !== primaryModel);
     const has8B = others.includes(MODELS.GROQ_8B);
     const othersNo8B = others.filter(m => m !== MODELS.GROQ_8B);
-    chain = [primaryModel, ...(GEMINI_KEY ? [MODELS.GEM_FLASH] : []), ...othersNo8B, ...(has8B ? [MODELS.GROQ_8B] : [])];
+    chain = [primaryModel, ...(GEMINI_KEY ? [MODELS.GEM_FLASH] : []), ...othersNo8B, ...(has8B ? [MODELS.GROQ_8B] : []), ...(GEMINI_KEY ? [MODELS.GEM_LITE] : [])];
   } else {
     // Primary first, then remaining models in priority order.
     const others = groqChain.filter(m => m !== primaryModel);
@@ -765,11 +765,16 @@ async function callWithFallback(primaryModel, prompt, sysPrompt, history, lang =
         : fitHistory(history, sysPrompt, prompt, MODEL_INPUT_LIMITS[model] ?? 4000);
 
       // App-build requests: 8B's default 2000-token budget is too tight to generate a full
-      // multi-feature app — raise it to 4000, but only if input+4000 still fits 8B's ~6000 TPM safely.
+      // multi-feature app — scale it against the account's confirmed flat 8,000 TPM ceiling
+      // (the real limit every model on this account shares, not the old 6000 estimate this
+      // was previously calibrated against) so a LARGER input still gets real output headroom
+      // instead of silently falling back to the tiny 2000 baseline right when more room is
+      // needed most. Capped at 6000 for a sane per-call ceiling; floored at the original 2000.
       if (appBuilderBuild === true && model === MODELS.GROQ_8B) {
         const _estInputTok = Math.ceil(((sysPrompt || '').length + (prompt || '').length + safeHistory.reduce((s, m) => s + (m.content || '').length, 0)) / 4);
-        const _appBuild8BBudget = 4000;
-        if (_estInputTok + _appBuild8BBudget <= 6000) {
+        const _accountTpmCeiling = 8000;
+        const _appBuild8BBudget = Math.max(2000, Math.min(6000, _accountTpmCeiling - _estInputTok - 500));
+        if (_appBuild8BBudget >= 1000) {
           effectiveMaxTokens = maxTokensOverride != null ? Math.min(maxTokensOverride, _appBuild8BBudget) : _appBuild8BBudget;
         }
       }
