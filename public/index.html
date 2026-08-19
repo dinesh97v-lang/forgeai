@@ -1721,6 +1721,62 @@ function _abContinueBuild(msgs,aiDiv,attempt){
       }
       var verdict=_abContinuationVerdict(cont);
       var newCode=(info.code+'\n'+verdict.code).trim();
+      // Tag-mismatch guard: the truncated chunk and its continuation can stitch into text that's
+      // individually plausible on both sides of the seam but structurally broken AT the seam — e.g.
+      // a closing </section> with no matching open tag anywhere in the joined code, because the
+      // continuation resumed at the wrong point. Babel throws a SyntaxError on this, surfaced to the
+      // user as a generic "Script error." with no useful detail. Deliberately narrow: a small
+      // whitelist of common block tags, and only an explicit mismatch fires (a closing tag whose name
+      // doesn't match the stack top, or an empty stack) — a tag still open at the end is NOT flagged,
+      // that's a much noisier signal prone to false positives on legitimately nested layouts.
+      var _abBlockTags=['section','div','main','header','footer','nav','ul','ol','table','thead','tbody','form'];
+      var _abTagRe=new RegExp('<(\\/?)('+_abBlockTags.join('|')+')\\b[^>]*?(\\/)?>','gi');
+      var _abTagStack=[],_abTagMismatch=null,_abTagM;
+      while((_abTagM=_abTagRe.exec(newCode))!==null){
+        var _abIsClose=!!_abTagM[1],_abTagName=_abTagM[2].toLowerCase(),_abSelfClose=!!_abTagM[3];
+        if(_abSelfClose)continue;
+        if(_abIsClose){
+          if(_abTagStack.length===0||_abTagStack[_abTagStack.length-1]!==_abTagName){
+            _abTagMismatch='found </'+_abTagName+'> with no matching open tag';
+            break;
+          }
+          _abTagStack.pop();
+        }else{
+          _abTagStack.push(_abTagName);
+        }
+      }
+      if(_abTagMismatch){
+        console.log('[_abContinueBuild] tag-mismatch: '+_abTagMismatch);
+        _abContinueBuild(msgs,aiDiv,attempt+1);
+        return;
+      }
+      // JS-expression-mismatch guard: a different stitching-corruption class from the tag-mismatch
+      // guard above — the overlap-strip can consume real content along with genuine duplicate text,
+      // leaving a JSX attribute expression opener (={) immediately followed by unrelated code that
+      // starts with a bare closing delimiter — e.g. "onChange={" immediately followed by
+      // "e.target.value)}", where "e => setSearch(" was lost at the stitch seam. Deliberately narrow:
+      // only checks the very first non-whitespace character in a short window right after each ={,
+      // not a general paren/brace balance scan across the file — a real expression's first
+      // meaningful character is never a bare closing delimiter, so this has very low false-positive
+      // surface without needing to understand strings/regex/JSX text content at all.
+      var _abExprRe=/=\{\s*/g;
+      var _abExprM,_abExprMismatch=null;
+      while((_abExprM=_abExprRe.exec(newCode))!==null){
+        var _abExprStart=_abExprM.index+_abExprM[0].length;
+        var _abExprWindow=newCode.slice(_abExprStart,_abExprStart+100);
+        var _abFirstCharM=/\S/.exec(_abExprWindow);
+        if(!_abFirstCharM)continue;
+        var _abFirstChar=_abFirstCharM[0];
+        if(_abFirstChar===')'||_abFirstChar==='}'){
+          _abExprMismatch='found bare closing delimiter "'+_abFirstChar+'" immediately after ={';
+          break;
+        }
+      }
+      if(_abExprMismatch){
+        console.log('[_abContinueBuild] js-expression-mismatch: '+_abExprMismatch);
+        _abContinueBuild(msgs,aiDiv,attempt+1);
+        return;
+      }
       var done=verdict.done&&_abLooksComplete(newCode);
       if(verdict.done&&!done)console.log('[_abContinueBuild] fence closed but content failed the completeness sanity check — treating as still cut off');
       var newContent=info.before+'```'+info.lang+'\n'+newCode+(done?'\n```':'');
