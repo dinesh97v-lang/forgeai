@@ -3845,6 +3845,13 @@ function _abRenderPlanCard(){
 // flRenderQuickReply's: 'live' arms the bar via _abArmBar, anything else disables it via
 // _abDisableBar for a resolved/historical redraw.
 function _abRenderFeatureBar(qDef,mode){
+  // Every call creates a fresh bar with this same hardcoded id — strip it from whatever
+  // previously held it first, so getElementById('ab-feat-bar') (onMatchMulti, _abFeatureDone)
+  // always resolves to the CURRENT live bar, not a stale one left over from an earlier
+  // multi-select question in the same session. Purely an id change, not a removal — the old
+  // bar's own disabled/historical styling and visual position in the transcript are untouched.
+  var _abStaleFeatBar=document.getElementById('ab-feat-bar');
+  if(_abStaleFeatBar)_abStaleFeatBar.removeAttribute('id');
   var picked=(_abState&&Array.isArray(_abState.answers[_abState.step]))?_abState.answers[_abState.step]:[];
   var bar=document.createElement('div');bar.className='fl-qr-bar';bar.id='ab-feat-bar';
   bar.innerHTML=qDef.options.map(function(o){
