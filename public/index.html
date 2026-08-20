@@ -1211,7 +1211,8 @@ function enterMode(mode){
         // never runs there either (same gate) — leaving _abUILock()'s ab-flow-active class stuck
         // on indefinitely. Clear the flow state the same way chOpen()/chNewChat() do on any other
         // context switch, but leave chatHistory/the active chat alone.
-        _abState=null;_abClearState();_abLiveBar=null;
+        var _abEmChatId=_abState&&_abState.chatId;
+        _abState=null;_abClearState(_abEmChatId);_abLiveBar=null;
       }
     },400);
   },200);
@@ -1310,7 +1311,8 @@ function saveChat(){chatHistory=chatHistory.slice(-50);localStorage.setItem('for
 function saveTamilChat(){tamilHistory=tamilHistory.slice(-50);localStorage.setItem(_thKey(),JSON.stringify(tamilHistory));}
 function clearChat(){
   chatHistory=[];localStorage.removeItem('forgeai_chat_history');
-  _abState=null;_abClearState();_abLiveBar=null;
+  var _abCcChatId=_abState&&_abState.chatId;
+  _abState=null;_abClearState(_abCcChatId);_abLiveBar=null;
   var cid=chCurId();
   if(cid){var a=chAll();for(var i=0;i<a.length;i++){if(a[i].id===cid){a[i].messages=[];a[i].title='New Chat';break;}}chStore(a);chDraw();}
   document.getElementById('chat-msgs').innerHTML=welcomeHTML();
@@ -1441,7 +1443,8 @@ function chNewChat(){
   chatHistory=[];localStorage.removeItem('forgeai_chat_history');
   localStorage.removeItem(_acKey());
   chatFieldMode=null;fieldModeUpdate();
-  _abState=null;_abClearState();_abLiveBar=null;
+  var _abNcChatId=_abState&&_abState.chatId;
+  _abState=null;_abClearState(_abNcChatId);_abLiveBar=null;
   document.getElementById('chat-msgs').innerHTML=welcomeHTML();
   chDraw();
   var ni=document.querySelector((isSimple()?'#simple-nav':'#pro-nav')+' .ni');if(ni)go('chat',ni);
@@ -1462,7 +1465,7 @@ function chOpen(id){
   }else{
     // nothing live in memory — pick up a parked flow if it belongs to the chat we're opening
     try{
-      var _abParked=localStorage.getItem('forgeai_ab_state');
+      var _abParked=localStorage.getItem(_abStateKey(id));
       if(_abParked){
         var _abParkedObj=JSON.parse(_abParked);
         if(_abParkedObj&&_abParkedObj.chatId===id){_abState=_abParkedObj;}
@@ -1536,7 +1539,7 @@ function chOpen(id){
         // strip has nothing pending either — its invariant is broken (no live pending question), the
         // same failure the IIFE discards in initPageAll. Won't heal on a later visit, so discard for good.
         console.log('[chOpen] discarding stale _abState — no pending guided-flow question in this chat');
-        _abState=null;_abClearState();
+        _abState=null;_abClearState(id);
       }
     }else{
       var _abPendingEntry=_abOpenBarMap[_abPendingIdx];
@@ -1565,7 +1568,7 @@ function chRemove(id){
   if(chCurId()===id){
     localStorage.removeItem(_acKey());chatHistory=[];localStorage.removeItem('forgeai_chat_history');
     if(all.length){chOpen(all[0].id);}
-    else{_abState=null;_abClearState();_abLiveBar=null;document.getElementById('chat-msgs').innerHTML=welcomeHTML();chDraw();}
+    else{var _abCrChatId=_abState&&_abState.chatId;_abState=null;_abClearState(_abCrChatId);_abLiveBar=null;document.getElementById('chat-msgs').innerHTML=welcomeHTML();chDraw();}
   }else{chDraw();}
 }
 function isSimple(){return document.getElementById('simple-btn').classList.contains('active')}
@@ -2583,15 +2586,34 @@ function _abDeriveFallbackBuildHints(s){
 }
 function _abUILock(){document.body.classList.add('ab-flow-active');}
 function _abUIUnlock(){document.body.classList.remove('ab-flow-active');}
-function _abSaveState(){console.log('[abstate-diag] _abSaveState',JSON.stringify(_abState));_abUILock();try{localStorage.setItem('forgeai_ab_state',JSON.stringify(_abState));}catch(e){console.log('[abstate-diag] _abSaveState FAILED',e&&e.name,e&&e.message);}_abRenderPinnedStrip();}
-function _abClearState(){console.trace('[abstate-diag] _abClearState called');_abUIUnlock();try{localStorage.removeItem('forgeai_ab_state');}catch(e){}_abRenderPinnedStrip();}
+// Namespaces the persisted guided-flow blob per chat — one flat 'forgeai_ab_state' key used to be
+// shared by the whole app, so two different chats each parking an active flow would have the
+// second chat's leaving-save silently overwrite the first's under that same key. Every
+// read/write/remove site now goes through this same key shape so two chats' parked flows can
+// coexist without colliding.
+function _abStateKey(chatId){return 'forgeai_ab_state_'+chatId;}
+function _abSaveState(){console.log('[abstate-diag] _abSaveState',JSON.stringify(_abState));_abUILock();try{localStorage.setItem(_abStateKey(_abState.chatId),JSON.stringify(_abState));}catch(e){console.log('[abstate-diag] _abSaveState FAILED',e&&e.name,e&&e.message);}_abRenderPinnedStrip();}
+// chatId param covers callers that already nulled _abState before calling this (the common
+// "_abState=null;_abClearState();" pattern) — those pass the chatId they captured beforehand.
+// Callers where _abState is still intact (e.g. _abStartOverFlow, _abTriggerBuild's own
+// clear-at-build-start) can omit it and let it fall back to _abState.chatId.
+function _abClearState(chatId){
+  console.trace('[abstate-diag] _abClearState called');
+  _abUIUnlock();
+  var cid=chatId||(_abState&&_abState.chatId);
+  if(cid){try{localStorage.removeItem(_abStateKey(cid));}catch(e){}}
+  _abRenderPinnedStrip();
+}
+// Called from onAuthSuccess(), after currentUser is set — not here at top-level script execution,
+// since chCurId()->_acKey() depends on currentUser, which is still null this early (auth is an
+// async /api/auth/me round-trip). Calling it before currentUser is set would always resolve the
+// wrong (empty-suffixed) key and silently find nothing, regardless of what's actually persisted.
 function _abRestoreState(){
   try{
-    var raw=localStorage.getItem('forgeai_ab_state');
+    var raw=localStorage.getItem(_abStateKey(chCurId()));
     if(raw){var parsed=JSON.parse(raw);if(parsed&&typeof parsed.step==='number'&&parsed.phase&&parsed.phase!=='building'){_abState=parsed;_abUILock();}}
   }catch(e){console.warn('[_abRestoreState] failed:',e.message);}
 }
-_abRestoreState();
 // Only ONE guided-flow quick-reply/toggle bar should ever be live at a time. Every earlier bar
 // (platform/stack/features/design/plan) must be disabled the moment the flow moves past it —
 // otherwise a stale click on an old card silently feeds the wrong step (index.html audit #4/#5).
@@ -3384,6 +3406,28 @@ function _abHandleAnswer(t){
           if(_abState!==_abAckSession)return;
           if(_abState.answers[_abAckStep]!==_abAckAnswer)return;
           _abRenderReasonedAck(_abAckQuestion,ackText);
+          // The ack lands asynchronously, after the next question/plan-card (pushed synchronously
+          // above, already correctly tagged) — so it ends up as the new LAST chatHistory message,
+          // untagged. _abTailHasPendingTag()/_abTailPendingIndex()'s bounded scan already tolerates
+          // an untagged trailer like this, but a few other consumers key off the tagged question
+          // being LITERALLY last (chOpen/initPageAll's own live-render loop, not their post-loop
+          // repair pass), and would miss it. Same retag-in-place pattern _abToggleFeature/reask()/
+          // the off-topic-reply call sites already use elsewhere — find the real pending question
+          // via the same tolerant scan (works whether it's a single-select question, a multi-select
+          // question, or the plan/confirm card) and copy its tags onto the ack, rather than pushing
+          // a second, duplicate copy of that same question (the exact anti-pattern already avoided
+          // elsewhere in this flow).
+          var _abAckPendingIdx=_abTailPendingIndex();
+          if(_abAckPendingIdx!==-1){
+            var _abAckSrc=chatHistory[_abAckPendingIdx];
+            var _abAckLast=chatHistory.length?chatHistory[chatHistory.length-1]:null;
+            if(_abAckLast&&_abAckLast!==_abAckSrc&&_abAckLast.role==='assistant'){
+              _abAckLast.qrOptions=(_abAckSrc.qrOptions||[]).slice();
+              _abAckLast.abQuestion=true;
+              if(_abAckSrc.abKind)_abAckLast.abKind=_abAckSrc.abKind;
+              saveChat();chSync();
+            }
+          }
         });
       }
       if(m){onMatchSingle(m);return true;}
@@ -3484,7 +3528,7 @@ function _abTriggerBuild(){
     _abBuildInFlight=false;
     // send() threw before ever reaching the fetch call (so neither its .then nor .catch will
     // ever run to clear the building phase) — clear it here so this exact build attempt can't strand it.
-    if(_abState&&_abState.phase==='building'){_abState=null;_abClearState();}
+    if(_abState&&_abState.phase==='building'){var _abTbChatId=_abState.chatId;_abState=null;_abClearState(_abTbChatId);}
     throw e;
   }
 }
@@ -4074,7 +4118,8 @@ function send(){
     var _abPending=_abTailHasPendingTag();
     if(_abState&&(!_abPending||_abState.chatId!==chCurId())){
       console.log('[send] discarding stale _abState — no pending guided-flow question in this chat');
-      _abState=null;_abClearState();_abLiveBar=null;
+      var _abSdChatId=_abState.chatId;
+      _abState=null;_abClearState(_abSdChatId);_abLiveBar=null;
     }
     // A pending mid-flow override confirmation takes priority over everything else below — this
     // reply answers "start fresh or keep going", not the guided-flow's own current step, so it
@@ -4267,7 +4312,7 @@ function send(){
         // _abContinueBuild takes over the send lock from here — do NOT unlock below in this case.
         _abWillContinue=!!(fetchBody.appBuilderBuild&&_abFenceOpenUnclosed(_reply));
         if(_abWillContinue)_abContinueBuild(msgs,ai,1);
-        if(_abState&&_abState.phase==='building'){_abPostBuildChatId=origChatId;_abState=null;_abClearState();}
+        if(_abState&&_abState.phase==='building'){var _abBsChatId=_abState.chatId;_abPostBuildChatId=origChatId;_abState=null;_abClearState(_abBsChatId);}
       }else{
         chSaveToOrigin(origChatId,{role:'assistant',content:_reply});
       }
@@ -4282,7 +4327,7 @@ function send(){
         ai.innerHTML='<div class="mav ai">F</div><div><div class="bub" style="color:var(--danger)">Connection error — is the server running?</div>'+aiActBar()+'</div>';
         msgs.appendChild(ai);msgs.scrollTop=msgs.scrollHeight;
       }
-      if(_abState&&_abState.phase==='building'){_abState=null;_abClearState();}
+      if(_abState&&_abState.phase==='building'){var _abBcChatId=_abState.chatId;_abState=null;_abClearState(_abBcChatId);}
       _unlockSend();
     });
 }
@@ -5763,6 +5808,13 @@ function onAuthSuccess(user){
   }
   var _wel=document.getElementById('welcome');
   _wel.style.opacity='';_wel.style.transition='';_wel.style.display='flex';
+  // Moved here from top-level script execution — chCurId()->_acKey() needs currentUser (just set
+  // above) to resolve the right per-user key, and needs the un-namespaced-chat migration right
+  // above this to have already run too, so a first-login user's active-chat pointer is available
+  // under the namespaced key by the time this looks it up. Must still run before initPageAll(),
+  // so _abState is populated before its render loop and the unconditional _abRenderPinnedStrip()
+  // call inside it.
+  _abRestoreState();
   initPageAll();
 }
 // 401 session-expiry interceptor
@@ -5876,7 +5928,7 @@ function initPageAll(){
       // This chat's own flow, but its invariant is broken (no live pending question) — won't
       // heal on a later visit, so discard for good.
       console.log('[init] discarding stale _abState — restored session has no pending guided-flow question');
-      _abState=null;_abClearState();
+      _abState=null;_abClearState(activeId);
     }else{
       var _abRestoreEntry=_abRestoreBarMap[_abPendingIdx];
       if(_abRestoreEntry){
