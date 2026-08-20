@@ -1838,8 +1838,18 @@ function saveEdit(btn){
   if(!newText)return;
   var msgs=document.getElementById('chat-msgs');
   var msgDiv=bub.closest('.msg');
-  var msgIdx=Array.from(msgs.children).indexOf(msgDiv);
-  while(msgs.children.length>msgIdx){msgs.removeChild(msgs.children[msgIdx]);}
+  // #chat-msgs also holds UI-only siblings never pushed into chatHistory — quick-reply/feature
+  // bars (.fl-qr-bar, present on every multi-select question and every plan-confirmation card),
+  // the "Check & Download ZIP" button after any fenced code reply (.cc-wrap, present on every
+  // app-builder build's own response), and Learn-mode's doubt-chips/quiz-card/preview-card. None
+  // of those carry the .msg class. domIdx (raw position) is still right for truncating the DOM —
+  // it should remove msgDiv and everything visually after it, untracked siblings included. But
+  // histIdx must count only .msg children, or it drifts by however many untracked siblings sit
+  // before msgDiv — which happens on essentially every app-builder build. Both must be computed
+  // here, before the DOM removal below, since indexOf(msgDiv) needs msgDiv still present.
+  var domIdx=Array.from(msgs.children).indexOf(msgDiv);
+  var msgIdx=Array.from(msgs.children).filter(function(c){return c.classList.contains('msg');}).indexOf(msgDiv);
+  while(msgs.children.length>domIdx){msgs.removeChild(msgs.children[domIdx]);}
   var hasWelcome=!!document.getElementById('welcome-bub');
   var histIdx=msgIdx-(hasWelcome?1:0);
   chatHistory=chatHistory.slice(0,histIdx);
@@ -1859,13 +1869,17 @@ function saveEdit(btn){
 function regenMsg(btn){
   var msgDiv=btn.closest('.msg');
   var msgs=document.getElementById('chat-msgs');
-  var msgIdx=Array.from(msgs.children).indexOf(msgDiv);
+  // See saveEdit()'s comment above for why domIdx (raw DOM position, for removal) and msgIdx
+  // (.msg-only position, for chatHistory) must be two different numbers — same #chat-msgs
+  // UI-only siblings (.fl-qr-bar/.cc-wrap/Learn-mode cards) apply here too.
+  var domIdx=Array.from(msgs.children).indexOf(msgDiv);
+  var msgIdx=Array.from(msgs.children).filter(function(c){return c.classList.contains('msg');}).indexOf(msgDiv);
   var hasWelcome=!!document.getElementById('welcome-bub');
   var histIdx=msgIdx-(hasWelcome?1:0);
   if(histIdx<1)return;
   var userText=chatHistory[histIdx-1]&&chatHistory[histIdx-1].content;
   if(!userText)return;
-  while(msgs.children.length>msgIdx){msgs.removeChild(msgs.children[msgIdx]);}
+  while(msgs.children.length>domIdx){msgs.removeChild(msgs.children[domIdx]);}
   var histForApi=chatHistory.slice(0,histIdx-1).slice(-10);
   chatHistory=chatHistory.slice(0,histIdx);
   saveChat();
@@ -1925,7 +1939,11 @@ function resendMsg(btn){
   var ta=bub.querySelector('textarea');
   var text=ta?ta.value.trim():(bub.innerText||bub.textContent).trim();
   if(!text)return;
-  var msgIdx=Array.from(msgs.children).indexOf(msgDiv);
+  // See saveEdit()'s comment above for why domIdx (raw DOM position, for removal) and msgIdx
+  // (.msg-only position, for chatHistory) must be two different numbers — same #chat-msgs
+  // UI-only siblings (.fl-qr-bar/.cc-wrap/Learn-mode cards) apply here too.
+  var domIdx=Array.from(msgs.children).indexOf(msgDiv);
+  var msgIdx=Array.from(msgs.children).filter(function(c){return c.classList.contains('msg');}).indexOf(msgDiv);
   var hasWelcome=!!document.getElementById('welcome-bub');
   var histIdx=msgIdx-(hasWelcome?1:0);
   var origMsg=chatHistory[histIdx];
@@ -1945,7 +1963,7 @@ function resendMsg(btn){
     chatHistory.push({role:'assistant',content:notice});saveChat();chSync();
     return;
   }
-  while(msgs.children.length>msgIdx){msgs.removeChild(msgs.children[msgIdx]);}
+  while(msgs.children.length>domIdx){msgs.removeChild(msgs.children[domIdx]);}
   chatHistory=chatHistory.slice(0,histIdx);
   saveChat();
   // App Builder build-trigger message: replay the stored full prompt, not the short displayed label —
