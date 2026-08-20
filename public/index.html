@@ -3766,13 +3766,20 @@ function flParseQuickReply(text){
     .replace(/<<END_Q[A-Z_]*>>/gi,'<<END_QUICK_REPLY>>')
     .replace(/\[\/QUICK_REPLY\]\s*<<END_QUICK_REPLY>>/gi,'<<END_QUICK_REPLY>>')
     .replace(/\[\/QUICK_REPLY\]/gi,'<<END_QUICK_REPLY>>');
-  var m=normalized.match(/<<QUICK_REPLY>>([\s\S]*?)<<END_QUICK_REPLY>>/i);
+  // Opening-marker tolerance: models occasionally garble the opening tag with a stray-character
+  // stutter right before it (e.g. <<QUQUICK_REPLY>> — echoing part of the English "Quick Reply"
+  // header phrasing the prompt writes just before the marker itself). <{1,2} tolerates a missing
+  // angle bracket too; [A-Z]{0,8} tolerates a handful of extra uppercase characters ahead of the
+  // real marker text. Still requires the literal QUICK_REPLY>> suffix exactly, so this can't
+  // false-positive on unrelated text — that substring doesn't occur by accident. Closing-tag
+  // garbling already has its own separate tolerance via the <<END_Q[A-Z_]*>> normalization above.
+  var m=normalized.match(/<{1,2}[A-Z]{0,8}QUICK_REPLY>>([\s\S]*?)<<END_QUICK_REPLY>>/i);
   if(!m){
     // Fallback: <<QUICK_REPLY>> present but close tag missing — recover or strip
-    var openIdx=normalized.search(/<<QUICK_REPLY>>/i);
+    var openIdx=normalized.search(/<{1,2}[A-Z]{0,8}QUICK_REPLY>>/i);
     if(openIdx===-1)return{clean:text||'',qr:null};
     var clean=normalized.slice(0,openIdx).trim();
-    var tail=normalized.slice(openIdx).replace(/^<<QUICK_REPLY>>\s*/i,'');
+    var tail=normalized.slice(openIdx).replace(/^<{1,2}[A-Z]{0,8}QUICK_REPLY>>\s*/i,'');
     // Strip HTML entities (e.g. &#x20;) models sometimes append after JSON
     tail=tail.replace(/&[a-z0-9#]+;/gi,' ').trim();
     // Try pipe-separated on first non-empty line
@@ -3796,7 +3803,7 @@ function flParseQuickReply(text){
     console.warn('[quick_reply] stripped unparseable unclosed marker');
     return{clean:clean,qr:null};
   }
-  var clean=normalized.replace(/\s*<<QUICK_REPLY>>[\s\S]*?<<END_QUICK_REPLY>>/i,'').trim();
+  var clean=normalized.replace(/\s*<{1,2}[A-Z]{0,8}QUICK_REPLY>>[\s\S]*?<<END_QUICK_REPLY>>/i,'').trim();
   var raw=m[1].trim();
   // Primary: pipe-separated format — opt1|opt2|opt3
   var opts=raw.split('|').map(function(o){return o.trim();}).filter(function(o){return o.length>0&&o.length<80;});
