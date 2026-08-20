@@ -2684,7 +2684,14 @@ function _abRenderPinnedStrip(){
   var opts=qDef.options.slice();
   if(_abState.step>0)opts.push('⬅ Back');
   opts.push('🔄 Start over');
-  strip.innerHTML=opts.map(function(o){return '<button class="fl-qr-btn" onclick="_abPinStripClick(this)" data-opt="'+esc(o)+'">'+esc(o)+'</button>';}).join('');
+  // "Technical" questions (tech stack/framework/design-style, matched by label) keep chips as
+  // the prominent element, same as before. Everything else is "open" — a free-typed answer is
+  // the natural response, so a hint takes the primary slot and the same chips shrink into
+  // secondary suggestions below it. Purely visual: click behavior/data-opt wiring is untouched,
+  // so every chip is still fully clickable either way. Defaults to "open" when uncertain.
+  var isTechnical=/tech|stack|framework|style|design/i.test(qDef.label||'');
+  var chipsHTML=opts.map(function(o){return '<button class="fl-qr-btn" onclick="_abPinStripClick(this)" data-opt="'+esc(o)+'"'+(isTechnical?'':' style="font-size:10px;padding:3px 9px;min-height:30px;opacity:.7"')+'>'+esc(o)+'</button>';}).join('');
+  strip.innerHTML=isTechnical?chipsHTML:('<div style="width:100%;font-size:13px;color:var(--text2);margin-bottom:2px">✏️ Type your own answer below, or pick a suggestion:</div>'+chipsHTML);
   strip.style.display='flex';
   if(pillsEl)pillsEl.style.display='none';
 }
