@@ -2897,6 +2897,44 @@ function _abBeginGeneratedFlow(intentText){
 }
 // Fresh, specific build request: one-time warm conversational intro before the first card.
 function _abStartWithIntro(t){_abBeginGeneratedFlow(t);}
+// Completeness-detection skip path (new): for an opening build request already classified
+// "detailed" by _abClassifyDetailedEnough, extracts a full plan (questions+answers+buildHints)
+// directly from the message via /api/ab-extract-plan, then renders the SAME plan-confirmation
+// card _abRenderPlanCard() already produces at the end of the normal question-by-question flow —
+// no intermediate clarifying questions. Mirrors _abBeginGeneratedFlow's own session-guard/typing-
+// indicator/timeout-race shape so a stale/superseded call can never render on top of something
+// newer. Always falls through to _abStartWithIntro(t) — the EXACT existing guided flow, untouched
+// — on any invalid/failed/timed-out response, same "always falls through" guarantee
+// _abBeginGeneratedFlow itself gives for its own fetch.
+function _abStartWithDetailedPlan(text){
+  var _abSession=_abState=_abNewState({step:0,phase:'asking',questions:[],answers:[],intentText:text});
+  _abUILock();
+  var msgs=document.getElementById('chat-msgs');
+  var typ=document.createElement('div');typ.id='ab-plan-typ';typ.className='msg';
+  typ.innerHTML='<div class="mav ai">F</div><div class="bub"><div class="typing"><div class="dot"></div><div class="dot"></div><div class="dot"></div></div></div>';
+  msgs.appendChild(typ);msgs.scrollTop=msgs.scrollHeight;
+  var fetchP=fetch('/api/ab-extract-plan',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ideaText:text})}).then(function(r){return r.json();}).catch(function(){return null;});
+  var timeoutP=new Promise(function(resolve){setTimeout(function(){resolve(null);},20000);});
+  Promise.race([fetchP,timeoutP]).then(function(d){
+    var ty=document.getElementById('ab-plan-typ');if(ty)ty.remove();
+    if(_abState!==_abSession){console.log('[_abStartWithDetailedPlan] stale session — discarding extracted plan');return;}
+    var questionsOk=!!(d&&Array.isArray(d.questions)&&d.questions.length);
+    var answersOk=!!(questionsOk&&Array.isArray(d.answers)&&d.answers.length===d.questions.length);
+    if(!questionsOk||!answersOk){
+      console.log('[_abStartWithDetailedPlan] extraction unavailable/invalid — falling back to normal guided flow');
+      _abState=null;
+      _abStartWithIntro(text);
+      return;
+    }
+    console.log('[_abStartWithDetailedPlan] adopting extracted plan — '+d.questions.length+' entries, buildHints='+JSON.stringify(d.buildHints));
+    _abState.questions=d.questions;
+    _abState.answers=d.answers;
+    _abState.step=d.questions.length;
+    if(d.buildHints)_abState.buildHints=d.buildHints;
+    _abState.phase='confirm';
+    _abRenderPlanCard();
+  });
+}
 function _abPick(arr){return arr[Math.floor(Math.random()*arr.length)];}
 // Client-side mirror of server.js's detectLanguage() — same logic, so guided-flow acknowledgments
 // match the language the user is actually writing in, with zero API calls.
@@ -3193,6 +3231,45 @@ function _abClassifyOpeningBuildRequest(text,cb){
       finish(m==='build request'?'build':(m==='ordinary message'?'ordinary':null));
     })
     .catch(function(){finish(null);});
+}
+// Pre-filter in front of _abStartWithIntro on a genuinely fresh opening build request (no active
+// _abState yet, already confirmed a build request) — same reuse of /api/ab-match-option as
+// _abClassifyOpeningBuildRequest just above, a different question: not "is this a build request"
+// but "did they already give enough detail (tech stack, key features, data model, etc.) to skip
+// the clarifying questions entirely." Default (null/timeout/failure/no confident match) always
+// means "needs clarification" — an uncertain verdict must never skip real information-gathering,
+// only a confident "detailed" match does.
+function _abClassifyDetailedEnough(text,cb){
+  var _t0=performance.now();
+  _lockSend();
+  var _abDetAbort=new AbortController();
+  var _abDetTimer=setTimeout(function(){_abDetAbort.abort();},6000);
+  function finish(result){
+    clearTimeout(_abDetTimer);
+    _unlockSend();
+    console.log('[abDetailedClassify] text='+JSON.stringify(text)+' result='+JSON.stringify(result)+' elapsedMs='+Math.round(performance.now()-_t0));
+    cb(result);
+  }
+  var question='The user typed this as their opening message in a chat with an AI app-building assistant, asking to build a specific app. Casual phrasing, typos, and Thanglish (Tamil+English mixed) wording are normal here and are not evidence of anything either way. Does this message ALREADY specify enough concrete detail on its own (such as a tech stack/framework, specific named features, a data model, or other concrete build decisions) that an experienced developer could start building without asking any clarifying questions first? Or is it a general app idea that still needs clarifying questions (platform, features, style, etc.) before it can be planned?';
+  var options=['detailed enough to skip questions','needs clarifying questions'];
+  fetch('/api/ab-match-option',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:text,options:options,question:question}),signal:_abDetAbort.signal})
+    .then(function(r){return r.json();})
+    .then(function(d){
+      var m=(d&&typeof d.match==='string')?d.match:null;
+      finish(m==='detailed enough to skip questions'?'detailed':(m==='needs clarifying questions'?'needs':null));
+    })
+    .catch(function(){finish(null);});
+}
+// Routes a genuinely fresh opening build request through the completeness check above before
+// falling into the normal guided flow. 'detailed' takes the new skip-straight-to-plan path;
+// everything else (including null/timeout/uncertain) falls through to _abStartWithIntro(t) —
+// the EXACT same call, in the EXACT same way, every opening build request used before this
+// feature existed.
+function _abStartWithIntroOrPlan(t){
+  _abClassifyDetailedEnough(t,function(_abDetResult){
+    if(_abDetResult==='detailed'){_abStartWithDetailedPlan(t);}
+    else{_abStartWithIntro(t);}
+  });
 }
 // Fire-and-forget reasoned response for a single-select answer — deliberately does NOT
 // call _lockSend/_unlockSend (unlike _abTryModelFallback above): the next question has
@@ -4164,7 +4241,7 @@ function send(){
       _abU.className='msg u';_abU.innerHTML=renderUserBub({content:t});
       _abM.appendChild(_abU);inp.value='';rsz(inp);_abM.scrollTop=_abM.scrollHeight;
       chatHistory.push({role:'user',content:t});saveChat();chSync();
-      if(_abNi){ if(_abState){ if(_abState.step>=1){_abBeginOverrideConfirm(t);}else{_abResetWithNotice(t);} }else{_abStartWithIntro(t);} }
+      if(_abNi){ if(_abState){ if(_abState.step>=1){_abBeginOverrideConfirm(t);}else{_abResetWithNotice(t);} }else{_abStartWithIntroOrPlan(t);} }
       else{_abHandleAnswer(t);}
       return;
     }
@@ -4181,7 +4258,7 @@ function send(){
           _abU2.className='msg u';_abU2.innerHTML=renderUserBub({content:t});
           _abM2.appendChild(_abU2);inp.value='';rsz(inp);_abM2.scrollTop=_abM2.scrollHeight;
           chatHistory.push({role:'user',content:t});saveChat();chSync();
-          _abStartWithIntro(t);
+          _abStartWithIntroOrPlan(t);
         }else{
           _abOpenerBypass=true;
           send();
