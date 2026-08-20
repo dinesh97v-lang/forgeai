@@ -1953,6 +1953,7 @@ function resendMsg(btn){
   if(origMsg&&origMsg.isBuilderBuild&&origMsg.fullPrompt){
     _abState=_abNewState({phase:'building',intentText:(origMsg.content||'').replace(/^🚀 Build: /,'')});
     document.getElementById('chat-in').value=origMsg.fullPrompt;
+    _abBuildInFlight=true;
     send();
     return;
   }
