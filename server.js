@@ -2115,6 +2115,50 @@ app.post('/api/ab-reasoned-ack', requireAuth, async (req, res) => {
   }
 });
 
+// ============================================
+// APP BUILDER — conversational reply to an off-topic aside during a guided-flow step
+// Fires only after both the client's local matcher and its model-fallback tier have already
+// given up on every piece of what the user typed — this never resolves to one of the step's
+// options, it's what replaces the canned "Sorry, puriyala" dead-end with an actual reply to
+// whatever they said, before the still-pending question is re-shown. Same GROQ_70B pin and
+// quota-guard shape as AB_REASONED_ACK above, for the same reason: fires at most a handful of
+// times per flow, but must never contend with essential features for the shared GROQ_70B cap.
+// ============================================
+const AB_OFFTOPIC_REPLY_PROMPT = `You are a helpful product mentor guiding a non-technical founder through building an app. They are in the middle of a guided app-planning flow and were asked a specific question, but what they just typed is not an answer to it — it's an aside, a question, or an unrelated remark. Write a short, warm, natural reply (1-2 sentences) that responds to what they actually said. Do not pretend it was an answer to the pending question. Do not repeat the pending question back verbatim — it will be shown again separately right after your reply. Reply in the SAME language/style as their message (Tamil script in, Tamil script out; Thanglish in, Thanglish out; English in, English out — never switch or mix). Output ONLY the reply text, nothing else, no labels.`;
+
+const AB_OFFTOPIC_REPLY_QUOTA_THRESHOLD = 0.2;
+
+app.post('/api/ab-offtopic-reply', requireAuth, async (req, res) => {
+  const { text, question, priorQA } = req.body;
+  if (typeof text !== 'string' || !text.trim() || typeof question !== 'string' || !question.trim()) {
+    return res.status(400).json({ error: 'text and question are required' });
+  }
+  const q = quotaState[MODELS.GROQ_70B];
+  if (q.limit !== Infinity && q.remaining < q.limit * AB_OFFTOPIC_REPLY_QUOTA_THRESHOLD) {
+    console.log(`[ab-offtopic-reply] skipped — quota guard, remaining=${q.remaining}/${q.limit}`);
+    return res.json({ reply: null, skipped: true });
+  }
+  let priorText = '';
+  if (Array.isArray(priorQA) && priorQA.length) {
+    priorText = 'Earlier in this conversation:\n' + priorQA.map(qa => `Q: ${qa.question}\nA: ${qa.answer}`).join('\n') + '\n\n';
+  }
+  const userMsg = priorText + `Pending question: ${question}\nUser's message (not an answer to it): ${text}`;
+  try {
+    const resp = await axios.post(
+      'https://api.groq.com/openai/v1/chat/completions',
+      { model: MODELS.GROQ_70B, messages: [{ role: 'system', content: AB_OFFTOPIC_REPLY_PROMPT }, { role: 'user', content: userMsg }], max_tokens: 300, temperature: 0.7 },
+      { headers: { Authorization: `Bearer ${GROQ_KEY}` }, timeout: 4500 }
+    );
+    try { updateGroqQuota(MODELS.GROQ_70B, resp.headers); } catch (e) { console.warn('[quota-track]', e.message); }
+    const reply = (resp.data?.choices?.[0]?.message?.content || '').trim();
+    console.log(`[ab-offtopic-reply] success — model=${MODELS.GROQ_70B} outputLength=${reply.length}`);
+    res.json({ reply: reply || null });
+  } catch (err) {
+    console.error('[ab-offtopic-reply]', err.message);
+    res.status(500).json({ reply: null });
+  }
+});
+
 app.post('/api/code-fix', requireAuth, async (req, res) => {
   const { files, issues } = req.body;
   if (!Array.isArray(files) || files.length === 0) {

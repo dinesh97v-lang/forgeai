@@ -3223,6 +3223,45 @@ function _abTryModelFallback(text,options,question,cb){
     })
     .catch(function(){finish(null);});
 }
+// Pre-filter in front of _abBeginOverrideConfirm, for the one case _abIsSpecificBuildRequest's
+// word-count heuristic is known to false-positive on: an ordinary aside ("enaku oru coffee
+// venum") that happens to clear its >=2-meaningful-word threshold mid-flow. Reuses
+// /api/ab-match-option's existing classify-against-a-fixed-option-set infrastructure (same as
+// _abTryModelFallback above) rather than adding a new endpoint — just a different two-option
+// question. Same shape as _abTryModelFallback: blocked via _lockSend, capped by a 6s
+// AbortController timeout, and NEVER a silent guess in either direction — cb('aside') only on an
+// exact, confident "ordinary aside" match; cb('new') on an exact "new app idea" match; cb(null)
+// on NONE, a timeout, or a network failure, all of which the caller treats as "unsure" and falls
+// through to today's _abBeginOverrideConfirm(t) unchanged.
+function _abClassifyMidFlowAside(text,cb){
+  var _t0=performance.now();
+  _lockSend();
+  var _abAsideAbort=new AbortController();
+  var _abAsideTimer=setTimeout(function(){_abAsideAbort.abort();},6000);
+  function finish(result){
+    clearTimeout(_abAsideTimer);
+    _unlockSend();
+    console.log('[abAsideClassify] input='+JSON.stringify(text)+' result='+JSON.stringify(result)+' elapsedMs='+Math.round(performance.now()-_t0));
+    cb(result);
+  }
+  var s=_abState;
+  var parts=[];
+  for(var _abI=0;_abI<s.step;_abI++){
+    var _abA=s.answers[_abI];
+    if(Array.isArray(_abA)){if(_abA.length)parts.push(_abA.join(', '));}
+    else if(_abA)parts.push(_abA);
+  }
+  var soFar=parts.length?parts.join(', '):'nothing yet';
+  var question='The user is in the middle of building an app ("'+(s.intentText||'')+'"; answers so far: '+soFar+'). Is this new message a brand-new, unrelated app idea for a DIFFERENT app, or just an ordinary aside/comment/reply during the conversation?';
+  var options=['new app idea','ordinary aside'];
+  fetch('/api/ab-match-option',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:text,options:options,question:question}),signal:_abAsideAbort.signal})
+    .then(function(r){return r.json();})
+    .then(function(d){
+      var m=(d&&typeof d.match==='string')?d.match:null;
+      finish(m==='ordinary aside'?'aside':(m==='new app idea'?'new':null));
+    })
+    .catch(function(){finish(null);});
+}
 // Pre-filter for _abIsSpecificBuildRequest's word-list miss, on an OPENING message only (no
 // active _abState — send()'s gate never reaches this for a mid-flow message, that's
 // _abClassifyMidFlowAside's job above). A typo ("buld") or a Thanglish phrasing outside the
@@ -3297,6 +3336,38 @@ function _abStartWithIntroOrPlan(t){
     else{_abStartWithIntro(t);}
   });
 }
+// Pre-filter in front of onMatchSingle's verbatim-accept fallback (single-select, both matcher
+// tiers already missed) — same problem class as _abClassifyMidFlowAside above, different question:
+// not "is this a new app idea" but "is this typed text even attempting to answer the CURRENT
+// question," so a genuine off-topic aside ("enaku oru coffee venum" on a Design Style question)
+// doesn't get silently stored as the answer and steer the eventual build prompt. Reuses
+// /api/ab-match-option exactly as _abClassifyMidFlowAside does — just a different two-option pair
+// and context — so no new server endpoint. Same shape otherwise: blocked via _lockSend, capped by
+// a 6s AbortController timeout, and NEVER a silent guess — cb('relevant') only on an exact,
+// confident "relevant answer" match; cb('aside') only on an exact "unrelated aside" match; cb(null)
+// on NONE, a timeout, or a network failure, all of which the caller treats as "unsure" and accepts
+// the text verbatim exactly as before — uncertainty must never block a real answer.
+function _abClassifyRelevantAnswer(text,question,cb){
+  var _t0=performance.now();
+  _lockSend();
+  var _abRelAbort=new AbortController();
+  var _abRelTimer=setTimeout(function(){_abRelAbort.abort();},6000);
+  function finish(result){
+    clearTimeout(_abRelTimer);
+    _unlockSend();
+    console.log('[abRelevanceClassify] text='+JSON.stringify(text)+' question='+JSON.stringify(question)+' result='+JSON.stringify(result)+' elapsedMs='+Math.round(performance.now()-_t0));
+    cb(result);
+  }
+  var classifyQuestion='The user was asked: "'+question+'" during an app-building conversation, as a multiple-choice question. They typed a free-text reply that did not match any of the listed options. Is their reply actually attempting to answer that question in their own words, or is it an unrelated aside/comment that has nothing to do with the question?';
+  var options=['relevant answer','unrelated aside'];
+  fetch('/api/ab-match-option',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:text,options:options,question:classifyQuestion}),signal:_abRelAbort.signal})
+    .then(function(r){return r.json();})
+    .then(function(d){
+      var m=(d&&typeof d.match==='string')?d.match:null;
+      finish(m==='relevant answer'?'relevant':(m==='unrelated aside'?'aside':null));
+    })
+    .catch(function(){finish(null);});
+}
 // Fire-and-forget reasoned response for a single-select answer — deliberately does NOT
 // call _lockSend/_unlockSend (unlike _abTryModelFallback above): the next question has
 // already rendered by the time this is kicked off, and locking here would make
@@ -3333,6 +3404,39 @@ function _abRenderReasonedAck(questionText,ackText){
   div.innerHTML='<div class="mav ai">F</div><div><div class="bub">'+qHtml+esc(_clean)+'</div></div>';
   msgs.appendChild(div);msgs.scrollTop=msgs.scrollHeight;
   chatHistory.push({role:'assistant',content:_clean,tieback:questionText});saveChat();chSync();
+}
+// Model-generated conversational reply to an aside/question typed mid-flow, once both
+// _abMatchOption and _abTryModelFallback have already given up on it — this is what replaces
+// reask()'s canned "Sorry, puriyala" dead-end with an actual reply to whatever the user said,
+// instead of ignoring it. Same shape as _abTryModelFallback: blocked via _lockSend, capped by a
+// 6s AbortController timeout, and never a silent guess — cb(null) on no reply, a timeout, or a
+// network failure, all of which the caller falls back to today's reask() for. Builds its own
+// priorQA from _abState (same shape onMatchSingle builds for _abGenerateReasonedAck) so callers
+// only need to pass the text and the pending question.
+function _abGenerateOffTopicReply(text,question,cb){
+  var _t0=performance.now();
+  _lockSend();
+  var _abOffTopicAbort=new AbortController();
+  var _abOffTopicTimer=setTimeout(function(){_abOffTopicAbort.abort();},6000);
+  function finish(result){
+    clearTimeout(_abOffTopicTimer);
+    _unlockSend();
+    console.log('[abOffTopicReply] text='+JSON.stringify(text)+' question='+JSON.stringify(question)+' result='+JSON.stringify(result)+' elapsedMs='+Math.round(performance.now()-_t0));
+    cb(result);
+  }
+  var _abPriorQA=[];
+  for(var _abPQI=0;_abPQI<_abState.step;_abPQI++){
+    var _abPQA=_abState.answers[_abPQI];
+    if(_abPQA===undefined)continue;
+    _abPriorQA.push({question:_abState.questions[_abPQI].question,answer:Array.isArray(_abPQA)?_abPQA.join(', '):_abPQA});
+  }
+  fetch('/api/ab-offtopic-reply',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:text,question:question,priorQA:_abPriorQA}),signal:_abOffTopicAbort.signal})
+    .then(function(r){return r.json();})
+    .then(function(d){
+      var reply=(d&&typeof d.reply==='string'&&d.reply.trim())?d.reply.trim():null;
+      finish(reply);
+    })
+    .catch(function(){finish(null);});
 }
 function _abHandleAnswer(t){
   if(!_abState)return false;
@@ -3462,7 +3566,24 @@ function _abHandleAnswer(t){
       // everywhere else, so _abTryModelFallback itself needs no changes.
       function processFallback(i){
         if(i>=unmatched.length){
-          if(!matchedAny)reask(null,qDef.options); // nothing in the whole typed answer matched anything — same as an unmatched single answer today
+          if(!matchedAny){
+            // Nothing in the whole typed answer matched anything — try a conversational reply
+            // before falling back to reask()'s canned dead-end text.
+            _abGenerateOffTopicReply(t,qDef.question,function(replyText){
+              if(replyText){
+                _abRenderReasonedAck(qDef.question,replyText);
+                var _abOtLast=chatHistory.length?chatHistory[chatHistory.length-1]:null;
+                if(_abOtLast&&_abOtLast.role==='assistant'){
+                  _abOtLast.qrOptions=qDef.options.slice();
+                  _abOtLast.abQuestion=true;
+                  _abOtLast.abKind='multi';
+                  saveChat();chSync();
+                }
+              }else{
+                reask(null,qDef.options);
+              }
+            });
+          }
           return;
         }
         console.log('[_abHandleAnswer] step'+_abState.step+' no local match for piece '+JSON.stringify(unmatched[i]));
@@ -3538,13 +3659,41 @@ function _abHandleAnswer(t){
       _abTryModelFallback(t,opts,qDef.question,function(matched){
         if(matched){onMatchSingle(matched);}
         else if(_tt){
-          // Neither tier matched anything in options — for single-select only, accept the
-          // typed text as the answer verbatim rather than reasking. Last resort, not first:
-          // a typed answer that clearly meant one of the options already canonicalised to it
-          // above. options.indexOf(answers[step])===-1 is how a reader can tell this was free
-          // text later, with no shape change and nothing to keep in sync.
-          console.log('[_abHandleAnswer] step'+_abState.step+' accepting free-text answer: '+JSON.stringify(_tt));
-          onMatchSingle(_tt);
+          // Neither tier matched anything in options — before accepting the typed text verbatim
+          // as a free-text answer (last resort, not first — see below), check whether it's even
+          // attempting to answer this question. A confident "unrelated aside" routes through the
+          // same off-topic-reply handling the multi-select/confirm dead-ends already use, instead
+          // of silently storing something like "enaku oru coffee venum" as the answer; any
+          // failure/timeout/low-confidence result still falls through to accepting the text
+          // verbatim exactly as before — uncertainty never blocks a real answer.
+          _abClassifyRelevantAnswer(_tt,qDef.question,function(relResult){
+            if(relResult==='aside'){
+              _abGenerateOffTopicReply(_tt,qDef.question,function(replyText){
+                if(replyText){
+                  _abRenderReasonedAck(qDef.question,replyText);
+                  var _abOtLast3=chatHistory.length?chatHistory[chatHistory.length-1]:null;
+                  if(_abOtLast3&&_abOtLast3.role==='assistant'){
+                    var _abOtOpts=opts.slice();
+                    if(_abState.step>0)_abOtOpts.push('⬅ Back');
+                    _abOtOpts.push('🔄 Start over');
+                    _abOtLast3.qrOptions=_abOtOpts;
+                    _abOtLast3.abQuestion=true;
+                    _abOtLast3.abKind='single';
+                    saveChat();chSync();
+                  }
+                }else{
+                  reask(function(){_abAsk(qDef.question,opts);});
+                }
+              });
+            }else{
+              // relResult is 'relevant', or null (classifier unsure/timed out/failed) — a typed
+              // answer that clearly meant one of the options already canonicalised to it above.
+              // options.indexOf(answers[step])===-1 is how a reader can tell this was free text
+              // later, with no shape change and nothing to keep in sync.
+              console.log('[_abHandleAnswer] step'+_abState.step+' accepting free-text answer: '+JSON.stringify(_tt));
+              onMatchSingle(_tt);
+            }
+          });
         }
         else{reask(function(){_abAsk(qDef.question,opts);});}
       });
@@ -3558,7 +3707,23 @@ function _abHandleAnswer(t){
     console.log('[_abHandleAnswer] confirm no match for '+JSON.stringify(t));
     _abTryModelFallback(t,opts,'Ready to build?',function(matched){
       if(matched){onMatchConfirm(matched);}
-      else{reask(null,opts);} // the plan card is already on screen and unchanged — nothing to re-render
+      else{
+        // Try a conversational reply before falling back to reask()'s canned dead-end text —
+        // the plan card is already on screen and unchanged either way, nothing to re-render there.
+        _abGenerateOffTopicReply(t,'Ready to build?',function(replyText){
+          if(replyText){
+            _abRenderReasonedAck('Ready to build?',replyText);
+            var _abOtLast2=chatHistory.length?chatHistory[chatHistory.length-1]:null;
+            if(_abOtLast2&&_abOtLast2.role==='assistant'){
+              _abOtLast2.qrOptions=opts.slice();
+              _abOtLast2.abQuestion=true;
+              saveChat();chSync();
+            }
+          }else{
+            reask(null,opts);
+          }
+        });
+      }
     });
     return true;
   }
@@ -4280,7 +4445,25 @@ function send(){
       _abU.className='msg u';_abU.innerHTML=renderUserBub({content:t});
       _abM.appendChild(_abU);inp.value='';rsz(inp);_abM.scrollTop=_abM.scrollHeight;
       chatHistory.push({role:'user',content:t});saveChat();chSync();
-      if(_abNi){ if(_abState){ if(_abState.step>=1){_abBeginOverrideConfirm(t);}else{_abResetWithNotice(t);} }else{_abStartWithIntroOrPlan(t);} }
+      // step===0 alone doesn't mean "nothing to lose" — a multi-select question sitting at step 0
+      // can already have chips toggled into _abState.answers[0] (an array, same shape
+      // _abToggleFeature/_abFeatureDone use) without Done having been pressed yet, since toggling
+      // never advances step. Auto-resetting through _abResetWithNotice in that case would silently
+      // discard those picks with no confirm — exactly what _abBeginOverrideConfirm exists to
+      // prevent for step>=1. Treat step 0 with in-progress picks the same as step>=1.
+      var _abStep0InProgress=_abState&&_abState.step<1&&Array.isArray(_abState.answers[_abState.step])&&_abState.answers[_abState.step].length>0;
+      // _abStep0InProgress alone still misses the far more common step-0 case: a plain SINGLE-
+      // select question already asked and pending (nothing to toggle at all). If a real guided-
+      // flow question was the tail of this chat, there IS something to lose even at step 0, and
+      // an aside here should go through the classifier too, not silently reset via
+      // _abResetWithNotice. Reuses _abPending (computed above, BEFORE this message was pushed to
+      // chatHistory a few lines up) rather than calling _abTailHasPendingTag() fresh here — this
+      // message's own role:'user' entry is now the tail, so a fresh call would always see itself
+      // and return false, silently defeating this check every time. Only a genuinely fresh state
+      // with no question shown yet (still waiting on the intro fetch — _abPending false) still
+      // falls through to the silent reset below.
+      var _abStep0QuestionPending=_abState&&_abState.step<1&&_abPending;
+      if(_abNi){ if(_abState){ if(_abState.step>=1||_abStep0InProgress||_abStep0QuestionPending){_abClassifyMidFlowAside(t,function(_abAsideResult){if(_abAsideResult==='aside'){_abHandleAnswer(t);}else{_abBeginOverrideConfirm(t);}});}else{_abResetWithNotice(t);} }else{_abStartWithIntroOrPlan(t);} }
       else{_abHandleAnswer(t);}
       return;
     }
