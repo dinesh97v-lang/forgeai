@@ -3585,27 +3585,43 @@ function _abHandleAnswer(t){
       function processFallback(i){
         if(i>=unmatched.length){
           if(!matchedAny){
-            // nullStreak now counts every unresolved turn on this step, not just canned-reask
-            // misses — increment (and possibly preempt with the escape offer) BEFORE attempting a
-            // conversational reply, so a friendly reply that keeps succeeding can't indefinitely
-            // postpone the escape hatch. If the escape offer fires here, stop — it and the
-            // off-topic-reply must never both try to render on the same turn.
-            if(_abTrackStuckStep())return;
-            // Nothing in the whole typed answer matched anything — try a conversational reply
-            // before falling back to reask()'s canned dead-end text.
-            _abGenerateOffTopicReply(t,qDef.question,function(replyText){
-              if(replyText){
-                _abRenderReasonedAck(qDef.question,replyText);
-                var _abOtLast=chatHistory.length?chatHistory[chatHistory.length-1]:null;
-                if(_abOtLast&&_abOtLast.role==='assistant'){
-                  _abOtLast.qrOptions=qDef.options.slice();
-                  _abOtLast.abQuestion=true;
-                  _abOtLast.abKind='multi';
-                  saveChat();chSync();
+            // Last resort before treating this as a genuinely unresolved turn: the fast regex
+            // above (English + a couple of Latin-script Thanglish spellings) can't catch "done"
+            // phrased in a different script — e.g. Tamil முடிந்துச்சு. Reuses the exact same
+            // _abTryModelFallback tier steps 1/2/4/5 already have, just with a single pseudo-
+            // option ['Done'] instead of qDef.options. Reached only after every piece has
+            // already failed BOTH local and model-fallback matching against the real feature
+            // options above (processFallback's own comment explains why these calls must never
+            // run concurrently), so a genuine feature pick always wins first and this can never
+            // pre-empt it. Deliberately NOT qDef.question here — /api/ab-match-option's prompt
+            // frames the option as "the answer to THAT question", and "Done" isn't a valid
+            // answer to "which features do you need" (confirmed live: the classifier correctly
+            // returned NONE for that mismatched framing) — it needs its own question asking
+            // about readiness, not about which feature was picked.
+            _abTryModelFallback(t,['Done'],'Is the user saying they are finished picking features and ready to continue?',function(doneMatch){
+              if(doneMatch==='Done'){_abFeatureDone();return;}
+              // nullStreak now counts every unresolved turn on this step, not just canned-reask
+              // misses — increment (and possibly preempt with the escape offer) BEFORE attempting a
+              // conversational reply, so a friendly reply that keeps succeeding can't indefinitely
+              // postpone the escape hatch. If the escape offer fires here, stop — it and the
+              // off-topic-reply must never both try to render on the same turn.
+              if(_abTrackStuckStep())return;
+              // Nothing in the whole typed answer matched anything — try a conversational reply
+              // before falling back to reask()'s canned dead-end text.
+              _abGenerateOffTopicReply(t,qDef.question,function(replyText){
+                if(replyText){
+                  _abRenderReasonedAck(qDef.question,replyText);
+                  var _abOtLast=chatHistory.length?chatHistory[chatHistory.length-1]:null;
+                  if(_abOtLast&&_abOtLast.role==='assistant'){
+                    _abOtLast.qrOptions=qDef.options.slice();
+                    _abOtLast.abQuestion=true;
+                    _abOtLast.abKind='multi';
+                    saveChat();chSync();
+                  }
+                }else{
+                  _abReaskCanned(null,qDef.options);
                 }
-              }else{
-                _abReaskCanned(null,qDef.options);
-              }
+              });
             });
           }
           return;
