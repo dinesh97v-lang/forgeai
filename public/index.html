@@ -3443,9 +3443,17 @@ function _abHandleAnswer(t){
   var _tt=(t||'').trim();
   if(/^(?:🔄\s*)?start\s*over$|^restart$/i.test(_tt)){_abStartOverFlow();return true;}
   if(_abState.step>0&&/^(?:⬅\s*)?back$|^go\s*back$/i.test(_tt)){_abGoBack();return true;}
-  function reask(renderFn,opts){
+  // Increments nullStreak (consecutive-unresolved-turn tracking for the CURRENT step) and, once
+  // it reaches the escape threshold, renders the two-way escape offer and returns true — the
+  // caller MUST stop immediately in that case, never also rendering an off-topic-reply or its own
+  // canned dead-end text on the same turn. Returns false when the caller should proceed with its
+  // own turn-specific handling. Counts every unresolved turn on this step, not just canned-reask
+  // misses — a successful off-topic-reply still leaves the user without a matchable answer to the
+  // actual question, so it counts too; only a genuine match/advance leaves nullStreak alone (it
+  // naturally goes stale once _abState.step moves on — see the check below).
+  function _abTrackStuckStep(){
     // Consecutive no-match tracking for the CURRENT step only. A real match advances _abState.step,
-    // so the next reask (for a different step) sees nullStreak.step differ from _abState.step and
+    // so the next check (for a different step) sees nullStreak.step differ from _abState.step and
     // resets to 1 on its own — no explicit reset is needed at any match site.
     if(_abState.nullStreak&&_abState.nullStreak.step===_abState.step){
       _abState.nullStreak.count++;
@@ -3475,8 +3483,15 @@ function _abHandleAnswer(t){
       chatHistory.push({role:'assistant',content:escMsg,qrOptions:escLabels,abQuestion:true,abKind:'escape'});
       saveChat();chSync();
       _abSaveState();
-      return;
+      return true;
     }
+    return false;
+  }
+  // The non-escape half of what reask() used to do in one step — renders the canned "didn't catch
+  // that" dead-end and retags the pending message. Does NOT touch nullStreak; the off-topic-reply
+  // dead-ends call this directly (having already gone through _abTrackStuckStep() before even
+  // attempting a reply) so the turn isn't counted twice.
+  function _abReaskCanned(renderFn,opts){
     var isTa=_abDetectLang(_abState.intentText||'')!=='english';
     _abAck(isTa?'Sorry, puriyala 🙏 Kelvi options-la irundhu ondru pick pannunga:':'Sorry, didn\'t quite catch that 🙏 Please pick one of the options below:');
     if(renderFn){renderFn();}
@@ -3500,6 +3515,10 @@ function _abHandleAnswer(t){
         saveChat();chSync();
       }
     }
+  }
+  function reask(renderFn,opts){
+    if(_abTrackStuckStep())return;
+    _abReaskCanned(renderFn,opts);
   }
   if(_abState.phase==='asking'){
     var qDef=_abState.questions[_abState.step];
@@ -3567,6 +3586,12 @@ function _abHandleAnswer(t){
       function processFallback(i){
         if(i>=unmatched.length){
           if(!matchedAny){
+            // nullStreak now counts every unresolved turn on this step, not just canned-reask
+            // misses — increment (and possibly preempt with the escape offer) BEFORE attempting a
+            // conversational reply, so a friendly reply that keeps succeeding can't indefinitely
+            // postpone the escape hatch. If the escape offer fires here, stop — it and the
+            // off-topic-reply must never both try to render on the same turn.
+            if(_abTrackStuckStep())return;
             // Nothing in the whole typed answer matched anything — try a conversational reply
             // before falling back to reask()'s canned dead-end text.
             _abGenerateOffTopicReply(t,qDef.question,function(replyText){
@@ -3580,7 +3605,7 @@ function _abHandleAnswer(t){
                   saveChat();chSync();
                 }
               }else{
-                reask(null,qDef.options);
+                _abReaskCanned(null,qDef.options);
               }
             });
           }
@@ -3668,6 +3693,12 @@ function _abHandleAnswer(t){
           // verbatim exactly as before — uncertainty never blocks a real answer.
           _abClassifyRelevantAnswer(_tt,qDef.question,function(relResult){
             if(relResult==='aside'){
+              // nullStreak now counts every unresolved turn on this step, not just canned-reask
+              // misses — increment (and possibly preempt with the escape offer) BEFORE attempting
+              // a conversational reply, so a friendly reply that keeps succeeding can't
+              // indefinitely postpone the escape hatch. If the escape offer fires here, stop — it
+              // and the off-topic-reply must never both try to render on the same turn.
+              if(_abTrackStuckStep())return;
               _abGenerateOffTopicReply(_tt,qDef.question,function(replyText){
                 if(replyText){
                   _abRenderReasonedAck(qDef.question,replyText);
@@ -3682,7 +3713,7 @@ function _abHandleAnswer(t){
                     saveChat();chSync();
                   }
                 }else{
-                  reask(function(){_abAsk(qDef.question,opts);});
+                  _abReaskCanned(function(){_abAsk(qDef.question,opts);});
                 }
               });
             }else{
@@ -3708,6 +3739,12 @@ function _abHandleAnswer(t){
     _abTryModelFallback(t,opts,'Ready to build?',function(matched){
       if(matched){onMatchConfirm(matched);}
       else{
+        // nullStreak now counts every unresolved turn on this step, not just canned-reask misses
+        // — increment (and possibly preempt with the escape offer) BEFORE attempting a
+        // conversational reply, so a friendly reply that keeps succeeding can't indefinitely
+        // postpone the escape hatch. If the escape offer fires here, stop — it and the
+        // off-topic-reply must never both try to render on the same turn.
+        if(_abTrackStuckStep())return;
         // Try a conversational reply before falling back to reask()'s canned dead-end text —
         // the plan card is already on screen and unchanged either way, nothing to re-render there.
         _abGenerateOffTopicReply(t,'Ready to build?',function(replyText){
@@ -3720,7 +3757,7 @@ function _abHandleAnswer(t){
               saveChat();chSync();
             }
           }else{
-            reask(null,opts);
+            _abReaskCanned(null,opts);
           }
         });
       }
