@@ -3852,9 +3852,21 @@ function _abTriggerBuild(){
   try{ send(); }
   catch(e){
     _abBuildInFlight=false;
-    // send() threw before ever reaching the fetch call (so neither its .then nor .catch will
-    // ever run to clear the building phase) — clear it here so this exact build attempt can't strand it.
-    if(_abState&&_abState.phase==='building'){var _abTbChatId=_abState.chatId;_abState=null;_abClearState(_abTbChatId);}
+    // send() threw before ever reaching the fetch call (so neither its .then nor .catch will ever
+    // run to clear the building phase) — recover it here so this exact build attempt can't strand
+    // it, same recovery send()'s own catch uses: push a persistent failure notice, revert phase to
+    // 'confirm', and push a fresh live plan card via _abRenderPlanCard() instead of nulling
+    // outright (see send()'s catch for the full rationale). No chCurId()===origChatId gate needed
+    // here — unlike send()'s catch, this fires synchronously in the same call stack that just
+    // started the build, with no async gap for the user to have switched chats in between. Wording
+    // says "please try again" rather than "connection error" — this is a synchronous exception in
+    // send()'s own code, not necessarily a network failure.
+    if(_abState&&_abState.phase==='building'){
+      chatHistory.push({role:'assistant',content:'⚠️ Build failed — please try again.'});
+      saveChat();chSync();
+      _abState.phase='confirm';
+      _abRenderPlanCard();
+    }
     throw e;
   }
 }
@@ -4684,8 +4696,29 @@ function send(){
         var ai=document.createElement('div');ai.className='msg';
         ai.innerHTML='<div class="mav ai">F</div><div><div class="bub" style="color:var(--danger)">Connection error — is the server running?</div>'+aiActBar()+'</div>';
         msgs.appendChild(ai);msgs.scrollTop=msgs.scrollHeight;
+        // Persist the failure so it survives a refresh (previously DOM-only, so a reload left no
+        // trace the build ever failed), and recover the guided flow to a genuinely resumable
+        // confirm state instead of nulling it outright. Nulling here meant the plan card's own
+        // "Build it 🚀" button rendered permanently disabled on the next load — even though
+        // _abState was gone, the OLD plan card was no longer the last tagged message either (the
+        // click + "Building..." spinner sit after it), so initPageAll()'s restore loop had no way
+        // to resurrect it even if _abState had survived. Pushing a FRESH plan card (via the same
+        // _abRenderPlanCard() the confirm step already uses) sidesteps both problems at once — the
+        // old plan card/click/spinner messages above are left untouched as the historical record
+        // of the failed attempt.
+        if(_abState&&_abState.phase==='building'){
+          chatHistory.push({role:'assistant',content:'⚠️ Build failed — connection error. Tap "Build it 🚀" below to try again.'});
+          saveChat();chSync();
+          _abState.phase='confirm';
+          _abRenderPlanCard();
+        }
+      }else if(_abState&&_abState.phase==='building'){
+        // User switched to a different chat while this build was failing in the background —
+        // recovering cross-chat is out of scope here (would need writing directly to the
+        // ORIGINAL chat's persisted storage without touching the current chat's live
+        // chatHistory/DOM) — same fallback as before this fix.
+        var _abBcChatId=_abState.chatId;_abState=null;_abClearState(_abBcChatId);
       }
-      if(_abState&&_abState.phase==='building'){var _abBcChatId=_abState.chatId;_abState=null;_abClearState(_abBcChatId);}
       _unlockSend();
     });
 }
