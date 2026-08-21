@@ -3162,14 +3162,24 @@ function _abResolveEscape(t){
     }
     return;
   }
-  // Neither matched — keep the escape offer alive rather than silently doing nothing, same
-  // re-tag-in-place technique reask() uses for its own no-match case. pendingEscape stays set.
-  var _lastMsg2=chatHistory.length?chatHistory[chatHistory.length-1]:null;
-  if(_lastMsg2&&_lastMsg2.role==='assistant'){
-    _lastMsg2.qrOptions=opts.slice();
-    _lastMsg2.abQuestion=true;
-    saveChat();chSync();
-  }
+  // Neither matched — keep the escape offer alive. The retag-in-place technique reask() uses
+  // for its own no-match case doesn't work here: by this point send() has already pushed the
+  // user's stray reply as chatHistory's last entry (role==='user'), so retagging "the last
+  // message" silently did nothing — and _abTailHasPendingTag()'s backward scan then stops at
+  // that user message on the very next turn, discarding _abState as stale before ever reaching
+  // pendingEscape. Render a fresh instance of the same two-option bar instead — same technique
+  // _abTrackStuckStep() uses to create the escape offer the first time — so a genuine assistant
+  // message with the live tag ends up last again. pendingEscape/nullStreak stay untouched.
+  var isTaEsc2=_abDetectLang(_abState.intentText||'')!=='english';
+  var reEscMsg=isTaEsc2?'Rendu options-la irundhu ondru pick pannunga 🙏':'Please pick one of the two options below 🙏';
+  var reEscMsgs=document.getElementById('chat-msgs');
+  var reEscDiv=document.createElement('div');reEscDiv.className='msg';
+  reEscDiv.innerHTML='<div class="mav ai">F</div><div><div class="bub">'+esc(reEscMsg)+'</div></div>';
+  reEscMsgs.appendChild(reEscDiv);
+  flRenderQuickReply({options:opts},reEscMsgs,'live');
+  reEscMsgs.scrollTop=reEscMsgs.scrollHeight;
+  chatHistory.push({role:'assistant',content:reEscMsg,qrOptions:opts.slice(),abQuestion:true,abKind:'escape'});
+  saveChat();chSync();
 }
 // Question N is reached by answering question N-1 — going Back means returning to N-1 and
 // clearing exactly the answer that led here, so it can be picked again.
