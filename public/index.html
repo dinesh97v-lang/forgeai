@@ -1165,6 +1165,9 @@ body.ab-flow-active .mac[onclick^="regenMsg"]{display:none!important}
   <span data-lang="english">or type your own answer ✍️</span>
 </div>
 
+<script src="/lib/ab-match-option.js"></script>
+<script src="/lib/ab-null-streak.js"></script>
+<script src="/lib/ab-continue-build-guards.js"></script>
 <script>
 const FEATURES={
   deploy:false,
@@ -1724,79 +1727,33 @@ function _abContinueBuild(msgs,aiDiv,attempt){
       }
       var verdict=_abContinuationVerdict(cont);
       var newCode=(info.code+'\n'+verdict.code).trim();
-      // Tag-mismatch guard: the truncated chunk and its continuation can stitch into text that's
-      // individually plausible on both sides of the seam but structurally broken AT the seam — e.g.
-      // a closing </section> with no matching open tag anywhere in the joined code, because the
-      // continuation resumed at the wrong point. Babel throws a SyntaxError on this, surfaced to the
-      // user as a generic "Script error." with no useful detail. Deliberately narrow: a small
-      // whitelist of common block tags, and only an explicit mismatch fires (a closing tag whose name
-      // doesn't match the stack top, or an empty stack) — a tag still open at the end is NOT flagged,
-      // that's a much noisier signal prone to false positives on legitimately nested layouts.
-      var _abBlockTags=['section','div','main','header','footer','nav','ul','ol','table','thead','tbody','form'];
-      var _abTagRe=new RegExp('<(\\/?)('+_abBlockTags.join('|')+')\\b[^>]*?(\\/)?>','gi');
-      var _abTagStack=[],_abTagMismatch=null,_abTagM;
-      while((_abTagM=_abTagRe.exec(newCode))!==null){
-        var _abIsClose=!!_abTagM[1],_abTagName=_abTagM[2].toLowerCase(),_abSelfClose=!!_abTagM[3];
-        if(_abSelfClose)continue;
-        if(_abIsClose){
-          if(_abTagStack.length===0||_abTagStack[_abTagStack.length-1]!==_abTagName){
-            _abTagMismatch='found </'+_abTagName+'> with no matching open tag';
-            break;
-          }
-          _abTagStack.pop();
-        }else{
-          _abTagStack.push(_abTagName);
-        }
-      }
+      // Tag-mismatch guard: catches a closing tag with no matching open tag anywhere in the
+      // joined code (continuation resumed at the wrong point) — Babel throws a SyntaxError on
+      // this otherwise, surfaced to the user as a generic "Script error." with no useful detail.
+      // Detection logic + full rationale: public/lib/ab-continue-build-guards.js (unit-tested in
+      // test/pure-logic.test.js). Only the retry side effect stays here.
+      var _abTagMismatch=_abDetectTagMismatch(newCode,_AB_BLOCK_TAGS);
       if(_abTagMismatch){
         console.log('[_abContinueBuild] tag-mismatch: '+_abTagMismatch);
         _abContinueBuild(msgs,aiDiv,attempt+1);
         return;
       }
-      // Split-opening-tag guard: a third stitching-corruption variant — an OPENING tag itself lands
-      // across the truncation boundary (e.g. a lone "<" or a partial tag name at the very end of the
-      // truncated chunk, with the rest of the name resuming in the continuation). The tag-mismatch
-      // guard above can't see this: its regex requires the tag name to appear intact right after "<",
-      // so a split tag is simply invisible to that scan rather than flagged. Reconstructs what the
-      // split-off tag name would read as by joining any partial name left dangling at the end of
-      // info.code with the start of verdict.code, then checks it against the same block-tag whitelist
-      // above. Deliberately narrow, same philosophy as both guards above: a bare "<" alone is never
-      // flagged on its own (it's also the less-than operator — flagging every dangling "<" would
-      // false-positive on ordinary comparisons like "x < 10"), only a reconstruction that matches a
-      // known tag name triggers. Scoped to a split tag NAME only, not a split landing inside
-      // attributes — that's a much looser pattern to detect without a high false-positive cost.
-      var _abDangleM=/<\/?([a-zA-Z]{0,10})$/.exec(info.code.slice(-20));
-      if(_abDangleM){
-        var _abReconstructed=_abDangleM[1]+verdict.code.slice(0,20);
-        var _abTagStartRe=new RegExp('^('+_abBlockTags.join('|')+')\\b','i');
-        if(_abTagStartRe.test(_abReconstructed)){
-          console.log('[_abContinueBuild] split-opening-tag: reconstructed "'+_abReconstructed.slice(0,20)+'" at the stitch seam');
-          _abContinueBuild(msgs,aiDiv,attempt+1);
-          return;
-        }
+      // Split-opening-tag guard: catches an OPENING tag's NAME landing across the truncation
+      // boundary itself (e.g. a lone "<" at the very end of the truncated chunk, with the rest of
+      // the name resuming in the continuation) — invisible to the tag-mismatch guard above, which
+      // requires the tag name to appear intact right after "<". Detection logic + full rationale:
+      // public/lib/ab-continue-build-guards.js (unit-tested in test/pure-logic.test.js).
+      var _abSplitTag=_abDetectSplitOpeningTag(info.code,verdict.code,_AB_BLOCK_TAGS);
+      if(_abSplitTag){
+        console.log('[_abContinueBuild] split-opening-tag: reconstructed "'+_abSplitTag+'" at the stitch seam');
+        _abContinueBuild(msgs,aiDiv,attempt+1);
+        return;
       }
-      // JS-expression-mismatch guard: a different stitching-corruption class from the tag-mismatch
-      // guard above — the overlap-strip can consume real content along with genuine duplicate text,
-      // leaving a JSX attribute expression opener (={) immediately followed by unrelated code that
-      // starts with a bare closing delimiter — e.g. "onChange={" immediately followed by
-      // "e.target.value)}", where "e => setSearch(" was lost at the stitch seam. Deliberately narrow:
-      // only checks the very first non-whitespace character in a short window right after each ={,
-      // not a general paren/brace balance scan across the file — a real expression's first
-      // meaningful character is never a bare closing delimiter, so this has very low false-positive
-      // surface without needing to understand strings/regex/JSX text content at all.
-      var _abExprRe=/=\{\s*/g;
-      var _abExprM,_abExprMismatch=null;
-      while((_abExprM=_abExprRe.exec(newCode))!==null){
-        var _abExprStart=_abExprM.index+_abExprM[0].length;
-        var _abExprWindow=newCode.slice(_abExprStart,_abExprStart+100);
-        var _abFirstCharM=/\S/.exec(_abExprWindow);
-        if(!_abFirstCharM)continue;
-        var _abFirstChar=_abFirstCharM[0];
-        if(_abFirstChar===')'||_abFirstChar==='}'){
-          _abExprMismatch='found bare closing delimiter "'+_abFirstChar+'" immediately after ={';
-          break;
-        }
-      }
+      // JS-expression-mismatch guard: catches the overlap-strip consuming real content along with
+      // genuine duplicate text, leaving a JSX attribute expression opener (={) immediately
+      // followed by a bare closing delimiter. Detection logic + full rationale:
+      // public/lib/ab-continue-build-guards.js (unit-tested in test/pure-logic.test.js).
+      var _abExprMismatch=_abDetectExprMismatch(newCode);
       if(_abExprMismatch){
         console.log('[_abContinueBuild] js-expression-mismatch: '+_abExprMismatch);
         _abContinueBuild(msgs,aiDiv,attempt+1);
@@ -2747,32 +2704,8 @@ function _abPinStripClick(btn){
 // for the current step. Exact/case-insensitive match wins; otherwise a loose word-level match
 // against each option's significant words (emoji stripped) catches things like "react venum" ->
 // "React". Returns the canonical option string, or null if nothing reasonably matches.
-function _abMatchOption(t,options){
-  var norm=(t||'').toLowerCase().trim();
-  if(!norm)return null;
-  var stripEmoji=function(s){return s.replace(/[\u{1F300}-\u{1FAFF}☀-➿]/gu,'').trim().toLowerCase();};
-  for(var i=0;i<options.length;i++){if(options[i].toLowerCase()===norm)return options[i];}
-  var normNoEmoji=stripEmoji(norm);
-  for(var i=0;i<options.length;i++){if(stripEmoji(options[i])===normNoEmoji)return options[i];}
-  // Word-level matching: an option's own word must equal, or be contained with >=50%
-  // coverage in, some individual WORD of the typed input — not just appear anywhere as a raw
-  // substring of the whole input string. \p{M} is required in the split below: Tamil vowel
-  // signs and virama are Unicode category Mn/Mc, not \p{L}, so without \p{M} they'd be treated
-  // as word separators and shatter Tamil words into meaningless fragments.
-  var inputWords=normNoEmoji.split(/[^\p{L}\p{N}\p{M}]+/u).filter(Boolean);
-  for(var i=0;i<options.length;i++){
-    var words=stripEmoji(options[i]).split(/[\s\/]+/).filter(function(w){return w.length>2;});
-    for(var j=0;j<words.length;j++){
-      if(words[j].length/normNoEmoji.length>=0.25){
-        for(var k=0;k<inputWords.length;k++){
-          var w=inputWords[k];
-          if(w===words[j]||(w.indexOf(words[j])!==-1&&words[j].length/w.length>=0.5)){return options[i];}
-        }
-      }
-    }
-  }
-  return null;
-}
+// Defined in /lib/ab-match-option.js (loaded above) — pure logic, unit-tested in
+// test/pure-logic.test.js — not inline here so it can run outside a browser.
 // Detects the model answering its own self-check checklist instead of writing the reply — e.g.
 // a bare language-name line ("Tanglish."), or numbered lines ending in a Yes/No confirmation
 // ("5. No code/buttons/tech specs? Yes."), or an "Under N words?" style line. Requires more than
@@ -3484,15 +3417,13 @@ function _abHandleAnswer(t){
   // actual question, so it counts too; only a genuine match/advance leaves nullStreak alone (it
   // naturally goes stale once _abState.step moves on — see the check below).
   function _abTrackStuckStep(){
-    // Consecutive no-match tracking for the CURRENT step only. A real match advances _abState.step,
-    // so the next check (for a different step) sees nullStreak.step differ from _abState.step and
-    // resets to 1 on its own — no explicit reset is needed at any match site.
-    if(_abState.nullStreak&&_abState.nullStreak.step===_abState.step){
-      _abState.nullStreak.count++;
-    }else{
-      _abState.nullStreak={step:_abState.step,count:1};
-    }
-    if(_abState.nullStreak.count>=2){
+    // Consecutive-unresolved-turn counting logic (pure): public/lib/ab-null-streak.js, unit-tested
+    // in test/pure-logic.test.js. A real match advances _abState.step, so the next check (for a
+    // different step) sees nullStreak.step differ from _abState.step and resets to 1 on its own —
+    // no explicit reset is needed at any match site.
+    var _abNS=_abComputeNullStreak(_abState.nullStreak,_abState.step);
+    _abState.nullStreak=_abNS.nullStreak;
+    if(_abNS.escalate){
       // Two misses in a row on the same step — offer an escape instead of reasking a third time.
       // Same pattern as _abBeginOverrideConfirm: capture the still-pending question/options (the
       // message just before the user's latest unrecognized reply, which send() already pushed)
