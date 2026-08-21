@@ -5440,6 +5440,14 @@ function ccGetFiles(){
   // Detect filename from first-line comment: // server.js  # config.py  -- schema.sql
   var _fnRe=/^(?:\/\/|#(?!!)|--|\/\*)\s*([\w.\-/]+\.[\w]+)/;
   var blocks=[],snipN=0;
+  // Indices (into blocks[]) of every fallback-named html/htm block — no filename-comment hint,
+  // not a Dockerfile, just "snippet-N.html". Only the LAST one (across the whole chat scan) gets
+  // renamed to index.html below, once the scan is done — the conventional entry-point name a ZIP
+  // download wants for App Builder's generated app. Earlier ones are left as snippet-N.html: if
+  // this renamed every fallback html block, two genuinely separate standalone HTML snippets from
+  // different messages would collide on the same filename and the existing de-dup step (below)
+  // would silently drop all but one of them from the ZIP.
+  var htmlFallbackIdx=[];
   var re=/```([^\n`]*)\n?([\s\S]*?)```/g,m;
   var _tailRe=/```([^\n`]*)\n?([\s\S]*)$/;
   for(var i=0;i<chatHistory.length;i++){
@@ -5460,6 +5468,7 @@ function ccGetFiles(){
       var firstLine=(raw.split('\n')[0]||'').trim();
       var fnHint=_fnRe.exec(firstLine);
       var filename;
+      var _isHtmlFallback=false;
       if(fnHint){
         filename=fnHint[1];
       }else if(tag==='dockerfile'||tag==='docker'){
@@ -5468,8 +5477,10 @@ function ccGetFiles(){
         snipN++;
         var ext=_ext[tag];
         filename='snippet-'+snipN+(ext?'.'+ext:tag?'.'+tag:'');
+        if(tag==='html'||tag==='htm')_isHtmlFallback=true;
       }
       blocks.push({filename:filename,content:raw,skipped:_skipReason||undefined});
+      if(_isHtmlFallback)htmlFallbackIdx.push(blocks.length-1);
     }
     // Unterminated trailing fence — the response was cut off (output-token limit on a large
     // generation) before the closing ``` was ever written, so the complete-pair regex above
@@ -5485,6 +5496,7 @@ function ccGetFiles(){
         var firstLine=(raw.split('\n')[0]||'').trim();
         var fnHint=_fnRe.exec(firstLine);
         var filename;
+        var _isHtmlFallback=false;
         if(fnHint){
           filename=fnHint[1];
         }else if(tag==='dockerfile'||tag==='docker'){
@@ -5493,11 +5505,19 @@ function ccGetFiles(){
           snipN++;
           var ext=_ext[tag];
           filename='snippet-'+snipN+(ext?'.'+ext:tag?'.'+tag:'');
+          if(tag==='html'||tag==='htm')_isHtmlFallback=true;
         }
         blocks.push({filename:filename,content:raw,skipped:_skipReason||undefined});
+        if(_isHtmlFallback)htmlFallbackIdx.push(blocks.length-1);
       }
     }
   }
+  // The LAST fallback-named html/htm block (if any) is renamed to index.html — the conventional
+  // entry-point name for a standalone app. Done here, before the de-dup step below, so if it now
+  // collides with some OTHER block explicitly hinted as index.html, the existing "keep the last
+  // occurrence" de-dup logic resolves it the same way it already resolves every other filename
+  // collision — no special-casing needed.
+  if(htmlFallbackIdx.length)blocks[htmlFallbackIdx[htmlFallbackIdx.length-1]].filename='index.html';
   // Deduplicate by filename: if the same filename appears multiple times, keep the last (most recent version)
   var lastIdx={};
   for(var j=0;j<blocks.length;j++)lastIdx[blocks[j].filename]=j;
