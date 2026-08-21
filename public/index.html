@@ -2037,8 +2037,18 @@ function pvDetectLang(rawLang, code){
   else if(/^html?$/.test(l)||/\.html?$/.test(l)) key='html';
   // CSS
   else if(/^css$/.test(l)||/\.css$/.test(l)) key='css';
-  // Web JS / JSX / TS / TSX (non-RN)
-  else if(/^(javascript|js|jsx|typescript|ts|tsx)$/.test(l)||/\.[jt]sx?$/.test(l)) key='js';
+  // Web JS / JSX / TS / TSX (non-RN) — but not if it's actually Node.js-only code (require(...),
+  // module.exports, process.env/argv/exit, app.listen(...)): there's no Node runtime in the
+  // sandboxed preview iframe, so offering a Preview button on it would just throw "require is
+  // not defined" the moment it's clicked. Deliberately narrow, same low-false-positive
+  // philosophy as _abContinueBuild's own require( check elsewhere in this file — a real browser
+  // script essentially never uses these, so leaving it unclassified (key stays '') here is safe;
+  // it also keeps it out of pvFiles.js entirely, so it can't poison a real app's combined preview
+  // if this block is accompanied by genuine browser HTML elsewhere in the same message.
+  else if(/^(javascript|js|jsx|typescript|ts|tsx)$/.test(l)||/\.[jt]sx?$/.test(l)){
+    var looksNodeOnly=/\brequire\s*\(\s*['"]/i.test(code)||/\bmodule\.exports\b/.test(code)||/\bprocess\.(env|argv|exit)\b/.test(code)||/\bapp\.listen\s*\(/.test(code);
+    if(!looksNodeOnly)key='js';
+  }
   // Structural HTML fallback (handles escaped &lt; and raw <)
   else if(/(?:&lt;|<)\s*!doctype\b/i.test(code)||/(?:&lt;|<)\s*(?:html|head|body)\b/i.test(code)) key='html';
   console.log('[pvDetect] label="'+rawLang+'" → "'+key+'" ('+code.length+'ch)');
