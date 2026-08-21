@@ -1586,13 +1586,19 @@ function formatMarkdown(text){
     .replace(/>/g,'&gt;');
   // 2. Code blocks: ```lang\ncode``` — replace with dark box + copy button
   var blocks=[];
+  // Tracks which pvStore keys this SINGLE render pass has already written, so a second
+  // HTML-shaped block later in the SAME message (e.g. a short example mentioned after the real
+  // app) can't silently overwrite it — see pvStore()'s own comment for the full rule. Declared
+  // fresh on every formatMarkdown() call, never carried across messages/renders — a smaller-but-
+  // complete regenerated app in a NEW message must still replace the old one normally.
+  var _pvPassKeys={};
   s=s.replace(/```([^\n`]*)\n?([\s\S]*?)```/g,function(m,lang,code){
     var id='cb'+Math.random().toString(36).slice(2,10);
     var label=lang?'<div style="font-size:10px;color:#888;padding:6px 12px 2px;font-family:monospace">'+lang+'</div>':'';
     // Detect previewable file type — delegates to shared pvDetectLang()
     var fileKey=pvDetectLang(lang,code);
     if(fileKey==='rn'){pvStoreRn(lang,code.trim());}
-    else if(fileKey){pvStore(fileKey,code.trim());}
+    else if(fileKey){pvStore(fileKey,code.trim(),_pvPassKeys);}
     var pvBtn=fileKey?'<button onclick="pvOpen(\''+id+'\',\''+fileKey+'\')" style="position:absolute;top:6px;right:60px;font-size:10px;padding:2px 8px;border-radius:4px;border:1px solid #6366f1;background:rgba(99,102,241,.15);color:#a5b4fc;cursor:pointer;font-family:inherit">▶ Preview</button>':'';
     var html='<div style="background:#1e1e1e;border-radius:8px;margin:8px 0;overflow:hidden;position:relative">'
       +label
@@ -1612,7 +1618,7 @@ function formatMarkdown(text){
     var label=lang?'<div style="font-size:10px;color:#888;padding:6px 12px 2px;font-family:monospace">'+lang+'</div>':'';
     var fileKey=pvDetectLang(lang,code);
     if(fileKey==='rn'){pvStoreRn(lang,code.trim());}
-    else if(fileKey){pvStore(fileKey,code.trim());}
+    else if(fileKey){pvStore(fileKey,code.trim(),_pvPassKeys);}
     var pvBtn=fileKey?'<button onclick="pvOpen(\''+id+'\',\''+fileKey+'\')" style="position:absolute;top:6px;right:60px;font-size:10px;padding:2px 8px;border-radius:4px;border:1px solid #6366f1;background:rgba(99,102,241,.15);color:#a5b4fc;cursor:pointer;font-family:inherit">▶ Preview</button>':'';
     var html='<div style="background:#1e1e1e;border-radius:8px;margin:8px 0;overflow:hidden;position:relative">'
       +label
@@ -1985,9 +1991,24 @@ var _pvErrLog=[];
 // identifier) since that's an invalid nesting context for those structural elements.
 // Order is the exact reverse of the encode order (& first, < second, > third when encoding)
 // so a literal "&lt;" in the source can't be double-decoded into "<".
-function pvStore(key,escapedCode){
+// Same floor _abLooksComplete() uses for "too small to be a genuine complete app."
+var _PV_MIN_PLAUSIBLE_LEN=200;
+// passKeys (optional) is the calling formatMarkdown() pass's own tracking object — see its
+// declaration there. Within one message's render pass, the FIRST block for a given key wins: a
+// stray trailing snippet (e.g. "and here's a small example") must not silently replace the real
+// app just because it renders later in the SAME message. Exception: if the block already
+// claimed this key in THIS pass is implausibly tiny and the new block is larger, the new one
+// wins instead — handles a short preamble/example appearing BEFORE the real app. Never compares
+// across separate messages/renders (passKeys is a fresh object every formatMarkdown() call) — a
+// smaller-but-complete regenerated app in a later message still replaces the old one normally.
+function pvStore(key,escapedCode,passKeys){
   var s=(escapedCode||'').replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&amp;/g,'&');
+  if(passKeys&&passKeys[key]){
+    var heldLen=pvFiles[key]?pvFiles[key].length:0;
+    if(heldLen>=_PV_MIN_PLAUSIBLE_LEN||s.length<=heldLen)return;
+  }
   pvFiles[key]=s;
+  if(passKeys)passKeys[key]=true;
 }
 function pvRnName(rawLang){
   var l=(rawLang||'').trim();
