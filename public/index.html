@@ -1193,6 +1193,10 @@ var badges={chat:'Private',search:'No tracking',deploy:'3 apps',test:'Live check
 
 function enterMode(mode){
   var ws=document.getElementById('welcome');
+  // Remembered so a returning user with a restored session (onAuthSuccess()) can skip straight
+  // back into the mode they were actually last using, instead of always defaulting to one or
+  // showing the picker again just to find out.
+  try{localStorage.setItem(_lastModeKey(),mode);}catch(e){}
   document.getElementById('wc-'+mode).style.borderColor='var(--accent)';
   setTimeout(function(){
     ws.style.opacity='0';
@@ -1303,6 +1307,7 @@ var currentUser=null;
 function _chKey(){return 'forgeai_chats'+(currentUser?'_'+currentUser.id:'');}
 function _acKey(){return 'forgeai_active_chat'+(currentUser?'_'+currentUser.id:'');}
 function _thKey(){return 'forgeai_tamil_history'+(currentUser?'_'+currentUser.id:'');}
+function _lastModeKey(){return 'forgeai_last_mode'+(currentUser?'_'+currentUser.id:'');}
 function userInitials(){return currentUser?currentUser.name.trim().split(/\s+/).slice(0,2).map(function(w){return w[0];}).join('').toUpperCase().slice(0,2):'?';}
 var chatHistory=[];
 var tamilHistory=[];
@@ -6143,8 +6148,6 @@ function onAuthSuccess(user){
     if(oldC&&!localStorage.getItem(_chKey())){localStorage.setItem(_chKey(),oldC);if(oldA&&!localStorage.getItem(_acKey()))localStorage.setItem(_acKey(),oldA);}
     localStorage.setItem(migKey,'1');
   }
-  var _wel=document.getElementById('welcome');
-  _wel.style.opacity='';_wel.style.transition='';_wel.style.display='flex';
   // Moved here from top-level script execution — chCurId()->_acKey() needs currentUser (just set
   // above) to resolve the right per-user key, and needs the un-namespaced-chat migration right
   // above this to have already run too, so a first-login user's active-chat pointer is available
@@ -6153,6 +6156,25 @@ function onAuthSuccess(user){
   // call inside it.
   _abRestoreState();
   initPageAll();
+  // Both restores above are fully synchronous (plain localStorage reads, no network calls), so
+  // chatHistory/_abState are already in their final state here — a returning user with a real
+  // restored session shouldn't have to click through the mode picker to see it. _abState is
+  // Pro-mode-only by construction (send()'s own gate is !isSimple(), same invariant enterMode()
+  // relies on above), so a restored guided flow reliably means Pro even without a persisted last
+  // mode; an ordinary restored chat needs the persisted mode from enterMode() to know which
+  // chrome to show, since chat sessions themselves carry no mode tag. If a returning user has
+  // chat history but no persisted mode yet (pre-existing chats from before this fix shipped),
+  // there's nothing to safely infer from, so the picker still shows — same as a fresh user.
+  var hasRestoredSession=chatHistory.length>0||!!_abState;
+  var restoreMode=_abState?'pro':localStorage.getItem(_lastModeKey());
+  if(hasRestoredSession&&restoreMode){
+    document.getElementById('welcome').style.display='none';
+    document.getElementById('app').classList.add('show');
+    switchMode(restoreMode);
+    return;
+  }
+  var _wel=document.getElementById('welcome');
+  _wel.style.opacity='';_wel.style.transition='';_wel.style.display='flex';
 }
 // 401 session-expiry interceptor
 (function(){
