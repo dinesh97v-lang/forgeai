@@ -1753,6 +1753,28 @@ function _abContinueBuild(msgs,aiDiv,attempt){
         _abContinueBuild(msgs,aiDiv,attempt+1);
         return;
       }
+      // Split-opening-tag guard: a third stitching-corruption variant — an OPENING tag itself lands
+      // across the truncation boundary (e.g. a lone "<" or a partial tag name at the very end of the
+      // truncated chunk, with the rest of the name resuming in the continuation). The tag-mismatch
+      // guard above can't see this: its regex requires the tag name to appear intact right after "<",
+      // so a split tag is simply invisible to that scan rather than flagged. Reconstructs what the
+      // split-off tag name would read as by joining any partial name left dangling at the end of
+      // info.code with the start of verdict.code, then checks it against the same block-tag whitelist
+      // above. Deliberately narrow, same philosophy as both guards above: a bare "<" alone is never
+      // flagged on its own (it's also the less-than operator — flagging every dangling "<" would
+      // false-positive on ordinary comparisons like "x < 10"), only a reconstruction that matches a
+      // known tag name triggers. Scoped to a split tag NAME only, not a split landing inside
+      // attributes — that's a much looser pattern to detect without a high false-positive cost.
+      var _abDangleM=/<\/?([a-zA-Z]{0,10})$/.exec(info.code.slice(-20));
+      if(_abDangleM){
+        var _abReconstructed=_abDangleM[1]+verdict.code.slice(0,20);
+        var _abTagStartRe=new RegExp('^('+_abBlockTags.join('|')+')\\b','i');
+        if(_abTagStartRe.test(_abReconstructed)){
+          console.log('[_abContinueBuild] split-opening-tag: reconstructed "'+_abReconstructed.slice(0,20)+'" at the stitch seam');
+          _abContinueBuild(msgs,aiDiv,attempt+1);
+          return;
+        }
+      }
       // JS-expression-mismatch guard: a different stitching-corruption class from the tag-mismatch
       // guard above — the overlap-strip can consume real content along with genuine duplicate text,
       // leaving a JSX attribute expression opener (={) immediately followed by unrelated code that
