@@ -490,6 +490,7 @@ body.ab-flow-active .mac[onclick^="regenMsg"]{display:none!important}
 .auth-btn:hover:not(:disabled){background:var(--accent2)}
 .auth-btn:disabled{opacity:.6;cursor:not-allowed}
 </style>
+<script src="/vendor/diff.min.js" defer></script>
 </head>
 <body>
 <div class="notif" id="notif"></div>
@@ -5582,6 +5583,89 @@ function ccGetFiles(){
   for(var j=0;j<blocks.length;j++)lastIdx[blocks[j].filename]=j;
   return blocks.filter(function(_,idx){return Object.values(lastIdx).indexOf(idx)!==-1;});
 }
+// Line-level diff (git-diff style) between a fix's before/after file content, via the vendored
+// jsdiff (Diff.diffLines — LCS-based, correct on insertions/deletions/reorderings, not a hand-
+// rolled algorithm). Long unchanged runs are capped to `context` lines on each side of a change
+// and collapsed in between, so a small real fix doesn't drown in hundreds of unchanged lines from
+// a full-file regeneration.
+function _ccDiffLines(oldStr,newStr,context){
+  context=context||3;
+  // Normalize to exactly one trailing newline — without this, jsdiff tokenizes a final line with
+  // no trailing \n as a distinct token from the same text WITH one, so an unrelated change deeper
+  // in the file can make the untouched last line show up as a spurious removed+added pair.
+  oldStr=(oldStr||'').replace(/\n?$/,'\n');
+  newStr=(newStr||'').replace(/\n?$/,'\n');
+  var parts=(typeof Diff!=='undefined')?Diff.diffLines(oldStr,newStr):[{value:newStr}];
+  var lines=[];
+  parts.forEach(function(part){
+    var type=part.added?'added':part.removed?'removed':'unchanged';
+    var raw=part.value.split('\n');
+    if(raw.length&&raw[raw.length-1]==='')raw.pop(); // diffLines' value ends with \n — drop the trailing empty split
+    raw.forEach(function(text){lines.push({type:type,text:text});});
+  });
+  var out=[],i=0;
+  while(i<lines.length){
+    if(lines[i].type!=='unchanged'){out.push(lines[i]);i++;continue;}
+    var runStart=i;
+    while(i<lines.length&&lines[i].type==='unchanged')i++;
+    var runEnd=i; // exclusive
+    var runLen=runEnd-runStart;
+    var headKeep=(runStart===0)?0:context;       // no preceding change -> no head context needed
+    var tailKeep=(runEnd===lines.length)?0:context; // no following change -> no tail context needed
+    if(runLen<=headKeep+tailKeep){
+      for(var j=runStart;j<runEnd;j++)out.push(lines[j]);
+    }else{
+      for(var j=runStart;j<runStart+headKeep;j++)out.push(lines[j]);
+      out.push({type:'collapsed',count:runLen-headKeep-tailKeep});
+      for(var j=runEnd-tailKeep;j<runEnd;j++)out.push(lines[j]);
+    }
+  }
+  return out;
+}
+function _ccRenderDiffRows(diffLines){
+  return diffLines.map(function(l){
+    if(l.type==='collapsed'){
+      return '<div style="padding:3px 8px;color:var(--text3);font-size:10px;text-align:center;background:var(--bg2)">&#8942; '+l.count+' unchanged line'+(l.count!==1?'s':'')+' &#8942;</div>';
+    }
+    var bg=l.type==='added'?'var(--sbg)':l.type==='removed'?'var(--dbg)':'transparent';
+    var color=l.type==='added'?'var(--success)':l.type==='removed'?'var(--danger)':'var(--text)';
+    var prefix=l.type==='added'?'+ ':l.type==='removed'?'- ':'&nbsp;&nbsp;';
+    return '<div style="background:'+bg+';color:'+color+';padding:0 8px;white-space:pre-wrap;word-break:break-word">'+prefix+esc(l.text)+'</div>';
+  }).join('');
+}
+// Diffs every file present in fixedFiles against its pre-fix counterpart (matched by filename —
+// ccRunFix() sends the same file set it read, so names line up 1:1). Files with no actual change
+// are skipped entirely rather than showing an empty/no-op diff section.
+function _ccBuildDiffHtml(origFiles,fixedFiles){
+  var origMap={};(origFiles||[]).forEach(function(f){origMap[f.filename]=f.content||'';});
+  var sections=(fixedFiles||[]).map(function(f){
+    var before=origMap[f.filename]||'';
+    var after=f.content||'';
+    if(before===after)return '';
+    var header='<div style="padding:4px 8px;background:var(--bg2);font-weight:700;color:var(--text2);border-bottom:1px solid var(--border);font-size:11px">'+esc(f.filename)+'</div>';
+    return header+_ccRenderDiffRows(_ccDiffLines(before,after,3));
+  }).filter(Boolean).join('');
+  return sections||'<div style="padding:8px;color:var(--text2)">No visible changes.</div>';
+}
+// Collapsed-by-default "View changes" toggle, inserted into the .cc-card next to the Download
+// button whenever a fix has actually been applied (st.fixedFiles present) — computed once, eagerly,
+// since both before/after file contents already live in _ccStore[ccId] with no extra network call.
+function _ccDiffToggleHtml(ccId){
+  var st=_ccStore[ccId]||{};
+  if(!st.fixedFiles||!st.fixedFiles.length)return '';
+  var diffId=ccId+'-diff';
+  var diffHtml=_ccBuildDiffHtml(st.files,st.fixedFiles);
+  return '<div onclick="_ccToggleDiff(\''+diffId+'\')" style="cursor:pointer;font-size:11px;color:var(--text2);margin:6px 0;user-select:none">'
+    +'<span id="'+diffId+'-arrow">&#9662;</span> View changes</div>'
+    +'<div id="'+diffId+'" style="display:none;border:1px solid var(--border);border-radius:var(--r);overflow:hidden;margin-bottom:8px;font-family:monospace;font-size:10.5px;max-height:300px;overflow-y:auto">'+diffHtml+'</div>';
+}
+function _ccToggleDiff(diffId){
+  var el=document.getElementById(diffId);if(!el)return;
+  var arrow=document.getElementById(diffId+'-arrow');
+  var isOpen=el.style.display!=='none';
+  el.style.display=isOpen?'none':'block';
+  if(arrow)arrow.innerHTML=isOpen?'&#9662;':'&#9652;';
+}
 function ccRunCheck(ccId){
   var wrap=document.getElementById(ccId);if(!wrap)return;
   var allFiles=ccGetFiles();
@@ -5606,12 +5690,13 @@ function ccShowResult(ccId,result,isRecheck){
   if(result.issues)st.lastIssues=result.issues;
   if(result.status==='pass'){
     wrap.innerHTML='<div class="cc-card"><div style="color:var(--success);font-weight:700;margin-bottom:6px">'+(isRecheck?'Issues fixed and verified ✓':'All checks passed ✓')+'</div>'
+      +(isRecheck?_ccDiffToggleHtml(ccId):'')
       +'<button class="cc-btn prim" onclick="ccDownload(\''+ccId+'\')">Download ZIP</button></div>';
   }else{
     var issueHtml=(result.issues||[]).map(function(i){return '<div class="cc-issue">• '+esc(i)+'</div>';}).join('');
     var note=isRecheck?'<div style="color:var(--text2);font-size:11px;margin-bottom:4px">Some issues remain after auto-fix.</div>':'';
     var fixBtn=!isRecheck?'<button class="cc-btn prim" onclick="ccRunFix(\''+ccId+'\')">Auto-Fix Issues</button>':'';
-    wrap.innerHTML='<div class="cc-card">'+note+issueHtml+'<div>'+fixBtn
+    wrap.innerHTML='<div class="cc-card">'+note+issueHtml+(isRecheck?_ccDiffToggleHtml(ccId):'')+'<div>'+fixBtn
       +'<button class="cc-btn sec" onclick="ccDownload(\''+ccId+'\')">'+(isRecheck?'Download ZIP':'Download Anyway')+'</button></div></div>';
   }
   if((st.skippedCount||0)>0){
@@ -5641,11 +5726,13 @@ function ccRunFix(ccId){
       _ccStore[ccId].fixedFiles=d.files;
       if(d.recheck&&d.recheck.status==='check-failed'){
         wrap.innerHTML='<div class="cc-card"><div style="color:var(--text2);margin-bottom:6px">Fix applied — verification unavailable (model busy). Download to review.</div>'
+          +_ccDiffToggleHtml(ccId)
           +'<button class="cc-btn prim" onclick="ccDownload(\''+ccId+'\')">Download ZIP</button></div>';
         return;
       }
       if(d.recheck&&d.recheck.status==='check-skipped'){
         wrap.innerHTML='<div class="cc-card"><div style="color:var(--text2);margin-bottom:6px">Fix applied — couldn\'t auto-verify right now, download to review.</div>'
+          +_ccDiffToggleHtml(ccId)
           +'<button class="cc-btn prim" onclick="ccDownload(\''+ccId+'\')">Download ZIP</button></div>';
         return;
       }
