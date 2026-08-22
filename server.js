@@ -1923,16 +1923,10 @@ app.post('/api/search', requireAuth, async (req, res) => {
 
     try {
       if (lang === 'tamil' && GEMINI_KEY) {
-        const gemRes = await axios.post(
-          `https://generativelanguage.googleapis.com/v1beta/models/${MODELS.GEM_FLASH}:generateContent?key=${GEMINI_KEY}`,
-          {
-            system_instruction: { parts: [{ text: synthSys }] },
-            contents: [{ role: 'user', parts: [{ text: synthPrompt }] }],
-            generationConfig: { maxOutputTokens: 400 }
-          },
-          { timeout: 15000 }
-        );
-        aiAnswer = gemRes.data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+        // Routed through callGeminiModel() (not a direct axios call) so this path is tracked by
+        // trackGeminiUsage() like every other Gemini consumer — a raw axios call here was
+        // invisible to the app's own daily-usage counter, undercounting real quota consumption.
+        aiAnswer = await callGeminiModel(MODELS.GEM_FLASH, synthPrompt, synthSys, [], 400, 15000);
       } else if (GROQ_KEY) {
         const groqRes = await axios.post(
           'https://api.groq.com/openai/v1/chat/completions',
