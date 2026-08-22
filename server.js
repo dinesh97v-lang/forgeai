@@ -120,6 +120,13 @@ function trackGeminiUsage(model) {
   if (c.date !== today) { c.count = 0; c.date = today; } // reset on new day
   c.count++;
   c.updatedAt = Date.now();
+  // Exact-equality (not >=) so this fires once, at the moment of crossing, not on every
+  // subsequent call for the rest of the day — same reasoning as updateGroqQuota()'s own
+  // <5%-remaining warning above, just Gemini's own daily-counter equivalent.
+  const lim = GEMINI_DAILY_LIMITS[model];
+  if (lim && c.count === Math.ceil(lim * 0.8)) {
+    console.warn(`[gemini-quota] ⚠️ ${model} at 80% of daily limit (${c.count}/${lim})`);
+  }
 }
 
 // Rough token estimate: 1 token ≈ 4 chars
