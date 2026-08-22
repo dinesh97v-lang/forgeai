@@ -2050,7 +2050,7 @@ async function abMatchOption(text, options, question) {
   );
   const raw = (resp.data?.choices?.[0]?.message?.content || '').trim();
   const match = options.find(o => o === raw);
-  return match || null;
+  return { match: match || null, raw };
 }
 
 app.post('/api/ab-match-option', requireAuth, async (req, res) => {
@@ -2059,7 +2059,8 @@ app.post('/api/ab-match-option', requireAuth, async (req, res) => {
     return res.status(400).json({ error: 'text and options are required' });
   }
   try {
-    const match = await abMatchOption(text, options, question);
+    const { match, raw } = await abMatchOption(text, options, question);
+    console.log('[ab-match-option] raw=', raw, 'match=', match);
     res.json({ match });
   } catch (err) {
     console.error('[ab-match-option]', err.message);
