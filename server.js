@@ -620,7 +620,7 @@ async function callGeminiModel(model, prompt, sysPrompt, history = [], maxTokens
   }));
   contents.push({ role: 'user', parts: [{ text: prompt }] });
 
-  const response = await axios.post(
+  const doRequest = () => axios.post(
     `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_KEY}`,
     {
       system_instruction: { parts: [{ text: sysPrompt }] },
@@ -629,6 +629,25 @@ async function callGeminiModel(model, prompt, sysPrompt, history = [], maxTokens
     },
     { timeout: timeoutMs }
   );
+
+  // Transient/overloaded errors (Google-side capacity, not this account's quota) get one quick
+  // retry before giving up on this model — same classification + 1500ms backoff already
+  // hand-rolled in callGeminiWithImage's own caller, lifted here so every other caller (11 of
+  // the 12 call sites that route through this function) gets the same resilience for free,
+  // instead of it existing in exactly one place. A 429 (quota/rate-limit) is deliberately
+  // excluded — it won't resolve in a couple seconds, so retrying just burns another attempt
+  // against the same limit instead of helping.
+  let response;
+  try {
+    response = await doRequest();
+  } catch (err) {
+    const isOverloadErr = err.response?.status === 503 || err.code === 'ECONNABORTED' || (err.message || '').includes('timeout');
+    if (!isOverloadErr) throw err;
+    console.log(`[callGeminiModel] ${model} overloaded (${err.response?.status || err.code}) — retrying once after 1500ms`);
+    await new Promise(r => setTimeout(r, 1500));
+    response = await doRequest();
+  }
+
   try { trackGeminiUsage(model); } catch (e) { console.warn('[gemini-track]', e.message); }
   const candidate = response.data.candidates?.[0];
   if (!candidate?.content?.parts?.[0]?.text) {
