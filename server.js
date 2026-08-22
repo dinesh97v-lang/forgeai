@@ -1264,7 +1264,10 @@ DOES NOT APPLY TO: bug fixes, small snippets, single functions, adding one featu
   if (attachment?.type === 'image') {
     const imgPrompt = (prompt || '').trim() || 'Describe this image in detail.';
     console.log(`[attachment] Image "${attachment.name}" (${attachment.mimeType}) → ${MODELS.GEM_FLASH}`);
-    const isOverloadErr = e => e.response?.status === 503 || e.code === 'ECONNABORTED' || (e.message || '').includes('timeout');
+    // 429 included alongside 503/timeout — a rate-limited GEM_FLASH (even well under its own
+    // daily quota; Google's short-term per-minute limit can trip independently) previously gave
+    // up immediately instead of retrying/falling back to GEM_LITE like the 503 case already does.
+    const isOverloadErr = e => e.response?.status === 503 || e.response?.status === 429 || e.code === 'ECONNABORTED' || (e.message || '').includes('timeout');
     let reply, usedImgModel;
     try {
       try {
