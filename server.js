@@ -18,6 +18,7 @@ const Database = require('better-sqlite3');
 const { Readability } = require('@mozilla/readability');
 const { JSDOM } = require('jsdom');
 const archiver = require('archiver');
+const Babel = require(path.join(__dirname, 'public', 'vendor', 'babel.min.js'));
 
 const app = express();
 app.use(cors());
@@ -1996,7 +1997,37 @@ app.get('/api/preview', requireAuth, async (req, res) => {
 // ============================================
 // CODE PIPELINE — check / fix / zip
 // ============================================
+// Server-side JSX precompile for the exported ZIP — transpiles each <script type="text/babel">
+// block to plain JS (via the already-vendored Babel Standalone, loaded here through Node's own
+// require() since its UMD wrapper supports CommonJS directly) and strips the Babel CDN/vendor
+// <script src> loader tag, so a downloaded app doesn't need to fetch or run Babel at load time.
+// React/ReactDOM CDN tags are left untouched — Babel's classic-runtime output still calls the
+// global React, so those remain a runtime dependency of the exported file. No-ops (returns html
+// unchanged) when there's no text/babel script at all, which covers every non-React export.
+// Throws (propagating Babel's own SyntaxError) on malformed JSX — callers must catch this.
+function precompileJSX(html) {
+  if (!/type\s*=\s*["']text\/babel["']/i.test(html)) return html;
+  let sawBabelBlock = false;
+  let out = html.replace(/<script\b([^>]*)>([\s\S]*?)<\/script>/gi, (tag, attrs, body) => {
+    if (!/\btype\s*=\s*["']text\/babel["']/i.test(attrs)) return tag;
+    sawBabelBlock = true;
+    const { code } = Babel.transform(body, { presets: ['react'] });
+    const newAttrs = attrs.replace(/\s*\btype\s*=\s*["']text\/babel["']/i, '');
+    return `<script${newAttrs}>${code}</script>`;
+  });
+  if (!sawBabelBlock) return html;
+  out = out.replace(/<script\b[^>]*\bsrc\s*=\s*["'][^"']*babel[^"']*["'][^>]*>\s*<\/script>\s*/gi, '');
+  return out;
+}
 async function runCodeCheck(files, model = MODELS.GROQ_70B) {
+  // Real parse check ahead of the LLM review below — Babel.transform() throws a genuine
+  // SyntaxError on malformed JSX, catching a class of bug the LLM-only review can miss entirely.
+  const jsxIssues = [];
+  for (const f of files) {
+    if (!/\.html?$/i.test(f.filename || '')) continue;
+    try { precompileJSX(String(f.content || '')); }
+    catch (err) { jsxIssues.push(`${f.filename}: JSX syntax error — ${err.message}`); }
+  }
   const content = files.map(f => `=== ${f.filename} ===\n${f.content}`).join('\n\n').slice(0, 8000);
   const sysMsg = 'You are a code reviewer. Check the following files for syntax errors, obvious bugs, missing dependencies, and security issues (hardcoded secrets, eval). Respond in this exact JSON format only: { "status": "pass" or "issues", "issues": ["issue 1", "issue 2"] }. If code is fine, status is pass with empty issues array.';
   let raw;
@@ -2020,9 +2051,11 @@ async function runCodeCheck(files, model = MODELS.GROQ_70B) {
   }
   const stripped = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```[\s\S]*$/i, '').trim();
   const parsed = extractFirstJson(stripped);
-  return (parsed && (parsed.status === 'pass' || parsed.status === 'issues'))
+  const llmResult = (parsed && (parsed.status === 'pass' || parsed.status === 'issues'))
     ? parsed
     : { status: 'issues', issues: ['Could not parse check result'] };
+  if (jsxIssues.length) return { status: 'issues', issues: [...jsxIssues, ...(llmResult.issues || [])] };
+  return llmResult;
 }
 
 app.post('/api/code-check', requireAuth, async (req, res) => {
@@ -2281,14 +2314,25 @@ app.post('/api/code-fix', requireAuth, async (req, res) => {
 app.post('/api/export-zip', requireAuth, async (req, res) => {
   const { files, projectName } = req.body;
   const pName = (projectName || 'project').replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 50);
-  res.setHeader('Content-Type', 'application/zip');
-  res.setHeader('Content-Disposition', `attachment; filename="${pName}.zip"`);
   try {
     if (!Array.isArray(files) || files.length === 0) throw new Error('no files');
+    // Precompile JSX out of any HTML file before zipping, so the downloaded app doesn't need
+    // Babel at runtime. Runs before the zip headers go out — a JSX syntax error fails the
+    // request cleanly with a real message instead of shipping a broken/partial ZIP.
+    let processedFiles;
+    try {
+      processedFiles = files.map(f => /\.html?$/i.test(f.filename || '')
+        ? { ...f, content: precompileJSX(String(f.content || '')) }
+        : f);
+    } catch (err) {
+      return res.status(400).json({ error: `Your app has a JSX syntax error, can't export — ${err.message}` });
+    }
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader('Content-Disposition', `attachment; filename="${pName}.zip"`);
     const archive = archiver('zip', { zlib: { level: 6 } });
     archive.on('error', err => { console.error('[export-zip] archiver error:', err.message); });
     archive.pipe(res);
-    for (const f of files) {
+    for (const f of processedFiles) {
       const safeFn = (f.filename || 'file.txt').replace(/\.\.[/\\]/g, '').replace(/^[/\\]+/, '') || 'file.txt';
       archive.append(Buffer.from(String(f.content || ''), 'utf8'), { name: safeFn });
     }
