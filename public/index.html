@@ -396,6 +396,7 @@ body.ab-flow-active .mac[onclick^="regenMsg"]{display:none!important}
 .fl-qr-btn:hover:not(:disabled){background:var(--accent);color:white;transform:scale(1.06);box-shadow:0 4px 12px rgba(0,0,0,.15)}
 .fl-qr-btn:active:not(:disabled){transform:scale(.98)}
 .fl-qr-btn:disabled{opacity:.4;cursor:not-allowed}
+.ab-guided .fl-qr-btn{border-color:var(--info);color:var(--info)}
 .ab-bar-done{opacity:.6}
 .ab-bar-done [data-qr-hint]{display:none}
 .cc-wrap{margin:2px 0 0 36px}
@@ -1523,7 +1524,7 @@ function chOpen(id){
             _abOpenBar=_abRenderFeatureBar(_abState.questions[_abState.step],'live');
             cm.appendChild(_abOpenBar);cm.scrollTop=cm.scrollHeight;
           }else{
-            _abOpenBar=flRenderQuickReply({options:m.qrOptions},cm,_abOpenLive?'live':'replay');
+            _abOpenBar=flRenderQuickReply({options:m.qrOptions},cm,_abOpenLive?'live':'replay',m.abQuestion===true);
           }
           _abOpenBarMap[i]={bar:_abOpenBar,container:cm,builtVia:(m.abKind==='multi'&&_abOpenLive)?'feature':'generic'};
           if(_abOpenLive){_abLiveBar=_abOpenBar;_abUILock();}
@@ -3039,7 +3040,7 @@ function _abBeginOverrideConfirm(newText){
   var div=document.createElement('div');div.className='msg';
   div.innerHTML='<div class="mav ai">F</div><div><div class="bub">'+esc(question)+'</div></div>';
   msgs.appendChild(div);
-  flRenderQuickReply({options:opts},msgs,'live');
+  flRenderQuickReply({options:opts},msgs,'live',true);
   msgs.scrollTop=msgs.scrollHeight;
   chatHistory.push({role:'assistant',content:question,qrOptions:opts,abQuestion:true,abKind:'confirm'});
   saveChat();chSync();
@@ -3167,7 +3168,7 @@ function _abResolveEscape(t){
   var reEscDiv=document.createElement('div');reEscDiv.className='msg';
   reEscDiv.innerHTML='<div class="mav ai">F</div><div><div class="bub">'+esc(reEscMsg)+'</div></div>';
   reEscMsgs.appendChild(reEscDiv);
-  flRenderQuickReply({options:opts},reEscMsgs,'live');
+  flRenderQuickReply({options:opts},reEscMsgs,'live',true);
   reEscMsgs.scrollTop=reEscMsgs.scrollHeight;
   chatHistory.push({role:'assistant',content:reEscMsg,qrOptions:opts.slice(),abQuestion:true,abKind:'escape'});
   saveChat();chSync();
@@ -3475,7 +3476,7 @@ function _abHandleAnswer(t){
       var escDiv=document.createElement('div');escDiv.className='msg';
       escDiv.innerHTML='<div class="mav ai">F</div><div><div class="bub">'+esc(escMsg)+'</div></div>';
       escMsgs.appendChild(escDiv);
-      flRenderQuickReply({options:escLabels},escMsgs,'live');
+      flRenderQuickReply({options:escLabels},escMsgs,'live',true);
       escMsgs.scrollTop=escMsgs.scrollHeight;
       // Tagged abQuestion:true with its own qrOptions so send()'s stale-state discard doesn't
       // null _abState before the user answers this.
@@ -3893,7 +3894,7 @@ function _abRenderPlanCard(){
   var div=document.createElement('div');div.className='msg';
   div.innerHTML='<div class="mav ai">F</div><div><div class="bub">'+formatMarkdown(content)+'</div></div>';
   msgs.appendChild(div);
-  flRenderQuickReply({options:qrOptions},msgs,'live');
+  flRenderQuickReply({options:qrOptions},msgs,'live',true);
   msgs.scrollTop=msgs.scrollHeight;
   _abSaveState();
 }
@@ -3917,7 +3918,7 @@ function _abRenderFeatureBar(qDef,mode){
   var _abStaleFeatBar=document.getElementById('ab-feat-bar');
   if(_abStaleFeatBar)_abStaleFeatBar.removeAttribute('id');
   var picked=(_abState&&Array.isArray(_abState.answers[_abState.step]))?_abState.answers[_abState.step]:[];
-  var bar=document.createElement('div');bar.className='fl-qr-bar';bar.id='ab-feat-bar';
+  var bar=document.createElement('div');bar.className='fl-qr-bar ab-guided';bar.id='ab-feat-bar';
   bar.innerHTML=qDef.options.map(function(o){
     var pickedStyle=picked.indexOf(o)!==-1?' style="background:var(--accent);color:#fff"':'';
     return '<button class="fl-qr-btn" onclick="_abToggleFeature(this)" data-opt="'+esc(o)+'"'+pickedStyle+'>'+esc(o)+'</button>';
@@ -4083,14 +4084,20 @@ function flParseQuickReply(text){
 // 'live' (guided-flow card — arms this bar as the sole live one, disabling whatever was live
 // before it), or 'replay' (history reconstruction — render disabled immediately; the caller
 // re-enables at most one bar afterward, only once it knows which step is genuinely still pending).
-function flRenderQuickReply(qr,msgs,mode){
-  var bar=document.createElement('div');bar.className='fl-qr-bar';
+// isGuided (optional): distinguishes an App Builder guided-flow bar from an ordinary chat's own
+// server-driven QUICK_REPLY chips — both render through this same function with otherwise
+// identical .fl-qr-bar/.fl-qr-btn markup, making it hard to tell which mode is active. Adds the
+// 'ab-guided' class (styled in CSS with the existing --info blue, not a new color) and prefixes
+// the bar's own hint text with a small icon — bar-level, once per bar, never touching data-opt/
+// button text, so option matching and click-handling are completely unaffected.
+function flRenderQuickReply(qr,msgs,mode,isGuided){
+  var bar=document.createElement('div');bar.className='fl-qr-bar'+(isGuided?' ab-guided':'');
   bar.innerHTML=qr.options.map(function(opt){return '<button class="fl-qr-btn" onclick="flQrClick(this)" data-opt="'+esc(opt)+'">'+esc(opt)+'</button>';}).join('');
   var hint=document.createElement('div');
   hint.setAttribute('data-qr-hint','1');
   hint.style.cssText='font-size:10px;color:var(--text2);padding:3px 0 0 2px;width:100%';
   var _hintEl=document.querySelector('#qr-hints [data-lang="'+(_learnLang||'english')+'"]')||document.querySelector('#qr-hints [data-lang="english"]');
-  hint.textContent=_hintEl?_hintEl.textContent:'or type your own answer ✍️';
+  hint.textContent=(isGuided?'🛠 ':'')+(_hintEl?_hintEl.textContent:'or type your own answer ✍️');
   bar.appendChild(hint);
   msgs.appendChild(bar);msgs.scrollTop=msgs.scrollHeight;
   if(mode==='live')_abArmBar(bar);
@@ -6328,7 +6335,7 @@ function initPageAll(){
               _abLastQrBar=_abRenderFeatureBar(_abState.questions[_abState.step],'live');
               cm.appendChild(_abLastQrBar);cm.scrollTop=cm.scrollHeight;
             }else{
-              _abLastQrBar=flRenderQuickReply({options:m.qrOptions},cm,_abRestoreLive?'live':'replay');
+              _abLastQrBar=flRenderQuickReply({options:m.qrOptions},cm,_abRestoreLive?'live':'replay',m.abQuestion===true);
             }
             _abRestoreBarMap[i]={bar:_abLastQrBar,container:cm,builtVia:(m.abKind==='multi'&&_abRestoreLive)?'feature':'generic'};
           }
