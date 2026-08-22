@@ -816,6 +816,7 @@ async function callWithFallback(primaryModel, prompt, sysPrompt, history, lang =
       if (status === 401) throw err; // bad API key — stop immediately
       // Preserve a more informative error — don't let a 404 (dead/inaccessible model) or 413 (request too large) clobber a prior 429 (rate limit)
       if (!(lastError?.response?.status === 429 && (status === 404 || status === 413))) {
+        err._lastModel = model;      // which model this particular error came from, for /api/chat's catch response
         lastError = err;             // 429 / 413 / 400 / 5xx -> try next in chain
       }
     }
@@ -839,6 +840,7 @@ async function callWithFallback(primaryModel, prompt, sysPrompt, history, lang =
         return { reply, model };
       } catch (err) {
         console.log(`[fallback] ${model} -> HTTP ${err.response?.status ?? err.code}: ${JSON.stringify(err.response?.data || err.message).slice(0, 120)}`);
+        err._lastModel = model;      // which model this particular error came from, for /api/chat's catch response
         lastError = err;
       }
     }
@@ -1586,6 +1588,9 @@ DOES NOT APPLY TO: bug fixes, small snippets, single functions, adding one featu
     } else if (error.code === 'ECONNABORTED' || error.message?.includes('timeout')) {
       errorMsg = 'Connection issue. Please try again.';
     }
+    // Which model this error actually came from (tagged in callWithFallback()'s two lastError
+    // sites) — absent for a 401, which throws immediately without going through lastError.
+    if (error._lastModel) errorMsg += ` (model: ${error._lastModel})`;
     res.status(statusCode).json({ error: errorMsg });
   }
 });

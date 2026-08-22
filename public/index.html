@@ -4462,6 +4462,33 @@ function _buildChatFetchBody(body){
   if(_abState&&_abState.phase==='building'){body.maxTokensOverride=8192;body.appBuilderBuild=true;}
   return body;
 }
+// Shared build-failure recovery UI — used by both send()'s .catch() (client-detected failures:
+// network error, the 90s build timeout, or a malformed/non-JSON response) and its success
+// .then() (server-reported failures: a valid-JSON {error:...} response from a failed model chain,
+// which .then(r=>r.json()) accepts same as a real success, and would otherwise be silently
+// rendered as a normal chat reply — see the _abState.phase==='building'&&d.error check in send()).
+// Shows a red failure bubble with the given (now cause-specific) message, and — if this build is
+// still the one the user is currently looking at — persists a "Build failed" notice and recovers
+// the guided flow to a genuinely resumable confirm state (fresh live plan card) instead of nulling
+// it outright. Same recovery shape 74ec793 already established for the .catch() path.
+function _abHandleBuildFailure(origChatId,msgs,message){
+  if(chCurId()===origChatId){
+    var ai=document.createElement('div');ai.className='msg';
+    ai.innerHTML='<div class="mav ai">F</div><div><div class="bub" style="color:var(--danger)">'+esc(message)+'</div>'+aiActBar()+'</div>';
+    msgs.appendChild(ai);msgs.scrollTop=msgs.scrollHeight;
+    if(_abState&&_abState.phase==='building'){
+      chatHistory.push({role:'assistant',content:'⚠️ Build failed — '+message+' Tap "Build it 🚀" below to try again.'});
+      saveChat();chSync();
+      _abState.phase='confirm';
+      _abRenderPlanCard();
+    }
+  }else if(_abState&&_abState.phase==='building'){
+    // User switched to a different chat while this build was failing in the background —
+    // recovering cross-chat is out of scope here (would need writing directly to the ORIGINAL
+    // chat's persisted storage without touching the current chat's live chatHistory/DOM).
+    var _abBcChatId=_abState.chatId;_abState=null;_abClearState(_abBcChatId);
+  }
+}
 function send(){
   if(_sendPending){_abBuildInFlight=false;return;}
   var inp=document.getElementById('chat-in');
@@ -4630,6 +4657,16 @@ function send(){
       if(_abBuildTimer)clearTimeout(_abBuildTimer);
       var ty=document.getElementById('typ');if(ty)ty.remove();
       _abBuildInFlight=false;
+      // Server-reported failure (bad key/quota/too-large/etc — a valid JSON {error:...} body from
+      // callWithFallback() exhausting every model) still parses successfully here same as a real
+      // reply, so it must be caught explicitly — otherwise it falls straight through to the normal
+      // reply-rendering below, gets displayed as if it were the generated app, and _abState gets
+      // silently nulled a few lines down with no persisted failure notice and no retry.
+      if(_abState&&_abState.phase==='building'&&d.error){
+        _abHandleBuildFailure(origChatId,msgs,d.error);
+        _unlockSend();
+        return;
+      }
       var sameChat=chCurId()===origChatId;
       // ── Quiz card: server returned structured test questions ───────────────
       if(d.testQuestions&&d.testQuestions.length>=1){
@@ -4695,37 +4732,19 @@ function send(){
       }
       if(!_abWillContinue)_unlockSend();
     })
-    .catch(function(){
+    .catch(function(err){
       if(_abBuildTimer)clearTimeout(_abBuildTimer);
       var ty=document.getElementById('typ');if(ty)ty.remove();
       _abBuildInFlight=false;
-      if(chCurId()===origChatId){
-        var ai=document.createElement('div');ai.className='msg';
-        ai.innerHTML='<div class="mav ai">F</div><div><div class="bub" style="color:var(--danger)">Connection error — is the server running?</div>'+aiActBar()+'</div>';
-        msgs.appendChild(ai);msgs.scrollTop=msgs.scrollHeight;
-        // Persist the failure so it survives a refresh (previously DOM-only, so a reload left no
-        // trace the build ever failed), and recover the guided flow to a genuinely resumable
-        // confirm state instead of nulling it outright. Nulling here meant the plan card's own
-        // "Build it 🚀" button rendered permanently disabled on the next load — even though
-        // _abState was gone, the OLD plan card was no longer the last tagged message either (the
-        // click + "Building..." spinner sit after it), so initPageAll()'s restore loop had no way
-        // to resurrect it even if _abState had survived. Pushing a FRESH plan card (via the same
-        // _abRenderPlanCard() the confirm step already uses) sidesteps both problems at once — the
-        // old plan card/click/spinner messages above are left untouched as the historical record
-        // of the failed attempt.
-        if(_abState&&_abState.phase==='building'){
-          chatHistory.push({role:'assistant',content:'⚠️ Build failed — connection error. Tap "Build it 🚀" below to try again.'});
-          saveChat();chSync();
-          _abState.phase='confirm';
-          _abRenderPlanCard();
-        }
-      }else if(_abState&&_abState.phase==='building'){
-        // User switched to a different chat while this build was failing in the background —
-        // recovering cross-chat is out of scope here (would need writing directly to the
-        // ORIGINAL chat's persisted storage without touching the current chat's live
-        // chatHistory/DOM) — same fallback as before this fix.
-        var _abBcChatId=_abState.chatId;_abState=null;_abClearState(_abBcChatId);
-      }
+      // Differentiate by cause instead of one generic string for every rejection: our own
+      // AbortController fires an AbortError (the 90s build timeout, see _abBuildTimer above); a
+      // response body that doesn't parse as JSON (e.g. a raw crash/error page) throws a
+      // SyntaxError from r.json(); anything else (offline, DNS failure, connection refused) is a
+      // genuine network-level failure.
+      var failMsg=(err&&err.name==='AbortError')?'Build took too long and timed out. Please try again.'
+        :(err&&err.name==='SyntaxError')?'Server sent back something unexpected. Please try again.'
+        :'Connection error — is the server running?';
+      _abHandleBuildFailure(origChatId,msgs,failMsg);
       _unlockSend();
     });
 }
