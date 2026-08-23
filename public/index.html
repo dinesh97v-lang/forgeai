@@ -2839,13 +2839,27 @@ function _abAsk(question,options){
 // drift out of sync with the fallback array, instead of four.
 // Always falls through to the fixed sequence, with or without a valid response (server
 // error, timeout, malformed questions — anything).
+// Cheap, local (no API call) check — does intentText already state where the app should run?
+// Mirrors _abDetectLang()'s no-network, regex-based approach; the static fallback below must
+// never depend on another model call, that's the whole reason it exists. Deliberately narrow/
+// high-precision (explicit platform words), not exhaustive — a false negative here just means
+// the fallback asks a redundant-but-harmless question, same as before this fix; a false positive
+// would silently skip a genuinely-needed question, which is worse.
+function _abPlatformAlreadyStated(text){
+  return /\b(web\s*app|website|web\s*application|desktop\s*app|desktop\s*only|mobile\s*app|phone\s*app|phone\s*only|android\s*app|ios\s*app|cross[- ]?platform|browser|responsive\s*web|tablet)\b/i.test(text||'');
+}
 function _abBeginGeneratedFlow(intentText){
   // _abSession identifies THIS specific flow attempt by object identity. If a reset/restart
   // (resend, edit, CTA handoff, a fresh build request) replaces _abState with a new object while
   // this intro fetch is still in flight, _abState!==_abSession becomes true and the stale response
   // below is discarded entirely — it must never render, persist, or re-ask the platform question
   // on top of whatever the newer action already established.
-  var _abSession=_abState=_abNewState({step:0,phase:'asking',questions:_abDefaultQuestions.slice(),answers:[],intentText:intentText});
+  // The seeded fallback (adopted if the generated-questions fetch below fails or is invalid)
+  // skips its own platform question when intentText already states it — see
+  // _abPlatformAlreadyStated(). A successful generated-questions response further down replaces
+  // this entirely and is unaffected either way.
+  var _abSeedQuestions=_abPlatformAlreadyStated(intentText)?_abDefaultQuestions.filter(function(q){return q.label!=='Platform';}):_abDefaultQuestions.slice();
+  var _abSession=_abState=_abNewState({step:0,phase:'asking',questions:_abSeedQuestions,answers:[],intentText:intentText});
   _abUILock();
   var msgs=document.getElementById('chat-msgs');
   var typ=document.createElement('div');typ.id='ab-intro-typ';typ.className='msg';
