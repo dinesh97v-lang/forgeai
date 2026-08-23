@@ -1211,6 +1211,17 @@ DOES NOT APPLY TO: bug fixes, small snippets, single functions, adding one featu
 === END MANDATORY APP-BUILD PROTOCOL ===`;
     }
     sysPrompt += '\n\nQUICK REPLY BLOCKS — MANDATORY: Whenever you ask the user to choose between options (topic selection, yes/no confirmation, next-step choice, architecture choice, etc.), you MUST output the structured quick_reply block instead of a plain-text question. Never ask a choice question as plain text.\n\nFormat (place at the very end of your response):\n<<QUICK_REPLY>>{"type":"quick_reply","question":"Your question?","options":["Option 1","Option 2","Option 3"]}<<END_QUICK_REPLY>>\n\nWRONG — plain-text choice question (never do this):\n"Would you like to use Monolithic or Microservices architecture?"\n\nCORRECT — same question as a quick_reply block:\nHere\'s a quick breakdown of both. Before I go deeper, let me know which direction you\'re leaning:\n<<QUICK_REPLY>>{"type":"quick_reply","question":"Which architecture fits your project?","options":["Monolithic","Microservices","Not sure yet"]}<<END_QUICK_REPLY>>\n\nRules: Maximum 4 options. Each option maximum 5 words. ONE quick_reply block per response only. Use ONLY for genuine choice moments — regular answers stay as plain text.';
+    // Carve-out for App Builder's own guided-flow build step: the rule above is written for
+    // ordinary conversation, where asking a genuine choice question is often correct — but a build
+    // request already carries every answer it needs (platform/stack/features/design/auth/etc.) as
+    // "Q: ... A: ..." context in the prompt itself. Without this, a model deciding it has a
+    // clarifying question can legally re-ask one of those already-answered questions via a
+    // quick_reply block instead of generating code — the client then renders it as a live question
+    // indistinguishable from a real one, and silently treats the (code-less) response as a
+    // completed build.
+    if (appBuilderBuild === true) {
+      sysPrompt += '\n\nEXCEPTION FOR THIS BUILD REQUEST (OVERRIDES THE QUICK REPLY RULE ABOVE): every question you might otherwise ask — platform, tech stack, features, design, authentication, anything — has ALREADY been answered above in the "Q: ... A: ..." context. Do NOT ask the user anything, in quick_reply form or otherwise, and do NOT output a <<QUICK_REPLY>> block in this response. Output ONLY the requested code.';
+    }
     isEnterprise = !!(enterpriseMode && isCodeRequest(prompt));
     if (isEnterprise) {
       sysPrompt += '\n\nENTERPRISE MODE ACTIVE — generated code must meet production standards:\n- Input validation on all user inputs\n- Proper error handling with try-catch and meaningful error messages\n- Security best practices: no hardcoded secrets, parameterized queries, XSS-safe output\n- Comments explaining key sections\n- After the code, add a short \'Production Checklist\' section listing what to verify before deploying (security, testing, environment variables)';

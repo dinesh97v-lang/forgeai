@@ -4727,7 +4727,18 @@ function send(){
         // _abContinueBuild takes over the send lock from here — do NOT unlock below in this case.
         _abWillContinue=!!(fetchBody.appBuilderBuild&&_abFenceOpenUnclosed(_reply));
         if(_abWillContinue)_abContinueBuild(msgs,ai,1);
-        if(_abState&&_abState.phase==='building'){var _abBsChatId=_abState.chatId;_abPostBuildChatId=origChatId;_abState=null;_abClearState(_abBsChatId);}
+        if(_abState&&_abState.phase==='building'){
+          // A build response with no code fence at all (not still mid-continuation either) means
+          // the model answered in prose or re-asked a question instead of generating the app —
+          // silently clearing _abState here would strand the user with no code, no error, and no
+          // way back to a live retryable plan card. Route it through the same failure-recovery UI
+          // real network/server failures already get, instead of treating it as a finished build.
+          if(!_abWillContinue&&!/```/.test(_reply)){
+            _abHandleBuildFailure(origChatId,msgs,'The build didn\'t produce any code — please try again.');
+          }else{
+            var _abBsChatId=_abState.chatId;_abPostBuildChatId=origChatId;_abState=null;_abClearState(_abBsChatId);
+          }
+        }
       }else{
         chSaveToOrigin(origChatId,{role:'assistant',content:_reply});
       }
