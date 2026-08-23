@@ -1712,7 +1712,7 @@ function _abMarkContinuationFailed(aiDiv,reason){
 // terminal path (done, cap reached, empty reply, or a request error) so the UI can never be left
 // stuck locked.
 var _abContinueCap=3;
-function _abContinueBuild(msgs,aiDiv,attempt){
+function _abContinueBuild(msgs,aiDiv,attempt,nsInfo){
   var lastMsg=chatHistory[chatHistory.length-1];
   if(!lastMsg||lastMsg.role!=='assistant'){_unlockSend();return;}
   var info=_abFenceOpenUnclosed(lastMsg.content||'');
@@ -1755,7 +1755,7 @@ function _abContinueBuild(msgs,aiDiv,attempt){
       var _abTagMismatch=_abDetectTagMismatch(newCode,_AB_BLOCK_TAGS);
       if(_abTagMismatch){
         console.log('[_abContinueBuild] tag-mismatch: '+_abTagMismatch);
-        _abContinueBuild(msgs,aiDiv,attempt+1);
+        _abContinueBuild(msgs,aiDiv,attempt+1,nsInfo);
         return;
       }
       // Split-opening-tag guard: catches an OPENING tag's NAME landing across the truncation
@@ -1766,7 +1766,7 @@ function _abContinueBuild(msgs,aiDiv,attempt){
       var _abSplitTag=_abDetectSplitOpeningTag(info.code,verdict.code,_AB_BLOCK_TAGS);
       if(_abSplitTag){
         console.log('[_abContinueBuild] split-opening-tag: reconstructed "'+_abSplitTag+'" at the stitch seam');
-        _abContinueBuild(msgs,aiDiv,attempt+1);
+        _abContinueBuild(msgs,aiDiv,attempt+1,nsInfo);
         return;
       }
       // JS-expression-mismatch guard: catches the overlap-strip consuming real content along with
@@ -1776,7 +1776,7 @@ function _abContinueBuild(msgs,aiDiv,attempt){
       var _abExprMismatch=_abDetectExprMismatch(newCode);
       if(_abExprMismatch){
         console.log('[_abContinueBuild] js-expression-mismatch: '+_abExprMismatch);
-        _abContinueBuild(msgs,aiDiv,attempt+1);
+        _abContinueBuild(msgs,aiDiv,attempt+1,nsInfo);
         return;
       }
       var done=verdict.done&&_abLooksComplete(newCode);
@@ -1787,8 +1787,15 @@ function _abContinueBuild(msgs,aiDiv,attempt){
       var bub=aiDiv&&aiDiv.querySelector('.bub');
       if(bub)bub.innerHTML=formatMarkdown(newContent);
       pvAutoUpdate();
-      if(done)_unlockSend();
-      else _abContinueBuild(msgs,aiDiv,attempt+1);
+      if(done){
+        if(nsInfo){
+          var _abCcWrap2=aiDiv&&aiDiv.nextElementSibling&&aiDiv.nextElementSibling.classList.contains('cc-wrap')?aiDiv.nextElementSibling:null;
+          var _abNsDiv2=document.createElement('div');
+          _abNsDiv2.innerHTML=_abNextStepsHtml(nsInfo,newCode);
+          if(_abCcWrap2)msgs.insertBefore(_abNsDiv2,_abCcWrap2);else msgs.appendChild(_abNsDiv2);
+        }
+        _unlockSend();
+      }else _abContinueBuild(msgs,aiDiv,attempt+1,nsInfo);
     })
     .catch(function(){
       _abMarkContinuationFailed(aiDiv,'connection error');
@@ -3893,6 +3900,34 @@ function _abTriggerBuild(){
     throw e;
   }
 }
+// Short, client-side-templated "Next steps" block shown once a guided-flow build genuinely
+// completes (never model-generated — the build prompt already ends with its own one-line
+// summary, and this must not touch that prompt). Tailored from the same s.answers/buildHints
+// already collected for the build, plus a plain regex check of the actual generated code for
+// CDN script tags (pvBuild() only rewrites those for the live preview iframe — the downloaded
+// ZIP keeps the original CDN URLs, so this is a real, per-build fact, not a blanket assumption).
+function _abNextStepsHtml(s,replyText){
+  var techStack=s&&s.buildHints&&s.buildHints.techStack;
+  var needsInternet=/<script[^>]+src=["']https?:/i.test(replyText||'');
+  var runLine='Click <b>Check &amp; Download ZIP</b> below, unzip it, and open <code>index.html</code> in your browser — no install or server needed.';
+  if(needsInternet)runLine+=' You\'ll need an internet connection the first time you open it, since it loads '+(techStack==='React'?'React and Tailwind':'Tailwind')+' from a CDN.';
+  var featBullet='';
+  if(s&&Array.isArray(s.questions)&&Array.isArray(s.answers)){
+    var fi=-1;
+    for(var i=0;i<s.questions.length;i++){if(s.questions[i].multi){fi=i;break;}}
+    if(fi!==-1){
+      var ans=Array.isArray(s.answers[fi])?s.answers[fi].slice():[];
+      var custom=(s.customFeatures&&Array.isArray(s.customFeatures[fi]))?s.customFeatures[fi]:[];
+      var feats=ans.concat(custom).slice(0,3);
+      if(feats.length)featBullet='<li>Try it out — test: '+feats.map(function(f){return esc(f);}).join(', ')+'.</li>';
+    }
+  }
+  return '<div class="cc-card" style="margin-top:6px"><div style="font-weight:700;margin-bottom:4px">Next steps</div><ul style="margin:0;padding-left:18px;line-height:1.6">'
+    +'<li>Run it — '+runLine+'</li>'
+    +featBullet
+    +'<li>Go further — this is a single-file demo (no real backend, database, or login beyond what runs in your browser), so a page refresh may reset unsaved data. The full code is in the message above — click Copy to grab it, or ▶ Preview to explore it live.</li>'
+    +'</ul></div>';
+}
 function _abRenderPlanCard(){
   var s=_abState;
   var lines=[];
@@ -4747,7 +4782,7 @@ function send(){
         // continue and stitch, so the user gets one complete file instead of a truncated one.
         // _abContinueBuild takes over the send lock from here — do NOT unlock below in this case.
         _abWillContinue=!!(fetchBody.appBuilderBuild&&_abFenceOpenUnclosed(_reply));
-        if(_abWillContinue)_abContinueBuild(msgs,ai,1);
+        if(_abWillContinue)_abContinueBuild(msgs,ai,1,_abState);
         if(_abState&&_abState.phase==='building'){
           // A build response with no code fence at all (not still mid-continuation either) means
           // the model answered in prose or re-asked a question instead of generating the app —
@@ -4757,6 +4792,11 @@ function send(){
           if(!_abWillContinue&&!/```/.test(_reply)){
             _abHandleBuildFailure(origChatId,msgs,'The build didn\'t produce any code — please try again.');
           }else{
+            if(!_abWillContinue){
+              var _abNsDiv=document.createElement('div');
+              _abNsDiv.innerHTML=_abNextStepsHtml(_abState,_reply);
+              msgs.insertBefore(_abNsDiv,ccWrap);
+            }
             var _abBsChatId=_abState.chatId;_abPostBuildChatId=origChatId;_abState=null;_abClearState(_abBsChatId);
           }
         }
