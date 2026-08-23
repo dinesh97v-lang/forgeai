@@ -1453,8 +1453,15 @@ function chNewChat(){
   chatHistory=[];localStorage.removeItem('forgeai_chat_history');
   localStorage.removeItem(_acKey());
   chatFieldMode=null;fieldModeUpdate();
-  var _abNcChatId=_abState&&_abState.chatId;
-  _abState=null;_abClearState(_abNcChatId);_abLiveBar=null;
+  // Leaving a chat with an active guided-flow state must PARK it (persist to localStorage via
+  // _abSaveState(), same as chOpen()'s own "belongs to a DIFFERENT chat" branch) rather than
+  // destroy it — _abClearState() deletes the persisted blob outright, which silently drops the
+  // pending question's option bar the next time the user switches back to that chat. Still needs
+  // the UI-unlock _abClearState() used to provide as a side effect (the new chat's own UI must
+  // not stay locked by the old chat's guided flow), just via an explicit _abUIUnlock() call
+  // instead, since _abSaveState() itself locks (for the chat it just saved), not unlocks.
+  if(_abState){_abSaveState();}
+  _abState=null;_abUIUnlock();_abLiveBar=null;
   document.getElementById('chat-msgs').innerHTML=welcomeHTML();
   chDraw();
   var ni=document.querySelector((isSimple()?'#simple-nav':'#pro-nav')+' .ni');if(ni)go('chat',ni);
