@@ -107,6 +107,17 @@ function isLowQuota(model) {
   return s.limit !== Infinity && s.remaining < s.limit * 0.05;
 }
 
+// ── REASONING TELEMETRY — shared file-append for every Groq call site with reasoning_effort
+// wired in. Mirrors each site's own console.log line to a persistent file so the data survives a
+// restart and can be grepped/analyzed later without needing to redirect the live process's stdout.
+// require('fs') inline (not a new top-level const) — avoids colliding with the existing
+// `const fs = require('fs')` declared later for the testing-panel endpoints.
+const REASONING_LOG_FILE = path.join(__dirname, 'reasoning-telemetry.log');
+function appendReasoningLog(line) {
+  try { require('fs').appendFileSync(REASONING_LOG_FILE, line + '\n'); }
+  catch (e) { console.warn('[reasoning-telemetry] file write failed:', e.message); }
+}
+
 // Gemini has no quota response headers — track daily usage ourselves.
 // Resets at midnight PT (America/Los_Angeles) to match Google's quota window.
 const GEMINI_DAILY_LIMITS = { [MODELS.GEM_LITE]: 1000, [MODELS.GEM_FLASH]: 250 };
@@ -593,7 +604,7 @@ async function rewriteSearchQuery(userPrompt, history) {
 // ============================================
 // GROQ API — parameterized model
 // ============================================
-async function callGroqModel(model, prompt, sysPrompt, history = [], maxTokensOverride = null, timeoutMs = 30000, returnFull = false) {
+async function callGroqModel(model, prompt, sysPrompt, history = [], maxTokensOverride = null, timeoutMs = 30000, returnFull = false, reasoningEffort = null, endpointLabel = 'unknown') {
   const MAX_OUT = { [MODELS.GROQ_8B]: 1500, [MODELS.GROQ_70B]: 4096, [MODELS.GROQ_SCOUT]: 8192 };
   const maxTok = maxTokensOverride ?? MAX_OUT[model] ?? 2048;
   const response = await axios.post(
@@ -605,7 +616,8 @@ async function callGroqModel(model, prompt, sysPrompt, history = [], maxTokensOv
         ...history,
         { role: 'user', content: prompt }
       ],
-      max_tokens: maxTok
+      max_tokens: maxTok,
+      ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {})
     },
     {
       headers: { 'Authorization': `Bearer ${GROQ_KEY}`, 'Content-Type': 'application/json' },
@@ -613,7 +625,14 @@ async function callGroqModel(model, prompt, sysPrompt, history = [], maxTokensOv
     }
   );
   try { updateGroqQuota(model, response.headers); } catch (e) { console.warn('[quota-track]', e.message); }
-  console.log(`[callGroqModel] model=${model} maxTokens=${maxTok} finishReason=${response.data.choices[0].finish_reason || 'unknown'} outputLength=${response.data.choices[0].message.content.length}`);
+  {
+    const _usage = response.data.usage || null;
+    const _reasoningTokens = _usage?.completion_tokens_details?.reasoning_tokens ?? 'unavailable';
+    const _completionTokens = _usage?.completion_tokens ?? 'unavailable';
+    const _logLine = `[callGroqModel] endpoint=${endpointLabel} model=${model} maxTokens=${maxTok} reasoningEffort=${reasoningEffort || 'unset'} finishReason=${response.data.choices[0].finish_reason || 'unknown'} outputLength=${response.data.choices[0].message.content.length} reasoning_tokens=${_reasoningTokens} completion_tokens=${_completionTokens} ts=${new Date().toISOString()}`;
+    console.log(_logLine);
+    appendReasoningLog(_logLine);
+  }
   if (returnFull) return { text: response.data.choices[0].message.content, finishReason: response.data.choices[0].finish_reason || null, usage: response.data.usage || null };
   return response.data.choices[0].message.content;
 }
@@ -740,6 +759,11 @@ const _GROQ_CHAIN = [MODELS.GROQ_70B, MODELS.GROQ_8B, MODELS.GROQ_SCOUT];
 // Per-model safe output budget — caps a caller-supplied maxTokensOverride so it can't
 // request more output than a smaller model's TPM budget can hold alongside input tokens.
 const _MODEL_OUTPUT_BUDGET = { [MODELS.GROQ_70B]: 8000, [MODELS.GROQ_8B]: 2000 };
+// Explicit reasoning-effort control for /api/chat's gpt-oss calls — GROQ_70B (complex/code
+// routes) gets deep reasoning, GROQ_8B (simple English route) gets minimal reasoning.
+// GROQ_SCOUT intentionally excluded (undefined -> callGroqModel sends no reasoning_effort,
+// same behavior as before this change) — its fallback role is a separate concern.
+const _CHAT_REASONING_EFFORT = { [MODELS.GROQ_70B]: 'high', [MODELS.GROQ_8B]: 'low' };
 
 async function callWithFallback(primaryModel, prompt, sysPrompt, history, lang = 'english', maxTokensOverride = null, appBuilderBuild = false) {
   const isTamilLang = lang === 'tamil' || lang === 'thanglish';
@@ -808,7 +832,7 @@ async function callWithFallback(primaryModel, prompt, sysPrompt, history, lang =
 
       const reply = isGemini(model)
         ? await callGeminiModel(model, prompt, sysPrompt, safeHistory, maxTokensOverride)
-        : await callGroqModel(model, prompt, sysPrompt, safeHistory, effectiveMaxTokens);
+        : await callGroqModel(model, prompt, sysPrompt, safeHistory, effectiveMaxTokens, undefined, false, _CHAT_REASONING_EFFORT[model], '/api/chat');
       return { reply, model };
     } catch (err) {
       const status = err.response?.status;
@@ -865,7 +889,7 @@ async function callWithFieldFallback(primaryModel, prompt, fullSysPrompt, compac
         : fitHistory(history, fullSysPrompt, prompt, MODEL_INPUT_LIMITS[primaryModel] ?? 4000);
       const reply = isGemini(primaryModel)
         ? await callGeminiModel(primaryModel, prompt, fullSysPrompt, safeHistory, maxTokens)
-        : await callGroqModel(primaryModel, prompt, fullSysPrompt, safeHistory, maxTokens);
+        : await callGroqModel(primaryModel, prompt, fullSysPrompt, safeHistory, maxTokens, undefined, false, _CHAT_REASONING_EFFORT[primaryModel]);
       return { reply, model: primaryModel, didFallback: false };
     } catch (err) {
       const status = err.response?.status;
@@ -896,7 +920,7 @@ async function callWithFieldFallback(primaryModel, prompt, fullSysPrompt, compac
         : fitHistory(history, compactSysPrompt, prompt, MODEL_INPUT_LIMITS[model] ?? 4000);
       const reply = isGemini(model)
         ? await callGeminiModel(model, prompt, compactSysPrompt, safeHistory, maxTokens)
-        : await callGroqModel(model, prompt, compactSysPrompt, safeHistory, maxTokens);
+        : await callGroqModel(model, prompt, compactSysPrompt, safeHistory, maxTokens, undefined, false, _CHAT_REASONING_EFFORT[model]);
       return { reply, model, didFallback: true };
     } catch (err) {
       const status = err.response?.status;
@@ -1698,7 +1722,7 @@ app.post('/api/app-build-intro', requireAuth, async (req, res) => {
 
   const callWith = (m) => m === MODELS.GEM_FLASH
     ? callGeminiModel(m, ideaText, APP_BUILD_INTRO_PROMPT, [], 3000, 15000, true)
-    : callGroqModel(m, ideaText, APP_BUILD_INTRO_PROMPT, [], 3000, 15000, true);
+    : callGroqModel(m, ideaText, APP_BUILD_INTRO_PROMPT, [], 3000, 15000, true, 'high', '/api/app-build-intro');
   const callOnce = () => callWith(model);
   // Second-attempt model for the Tamil/Thanglish branch only: retry on GROQ_70B instead of
   // hitting Gemini again — a same-model retry doesn't help when Gemini's failure mode is
@@ -1878,7 +1902,7 @@ app.post('/api/ab-extract-plan', requireAuth, async (req, res) => {
   const model = (lang === 'tamil' || lang === 'thanglish') ? MODELS.GEM_FLASH : MODELS.GROQ_70B;
   const callWith = (m) => m === MODELS.GEM_FLASH
     ? callGeminiModel(m, ideaText, AB_EXTRACT_PLAN_PROMPT, [], 2000, 15000, true)
-    : callGroqModel(m, ideaText, AB_EXTRACT_PLAN_PROMPT, [], 2000, 15000, true);
+    : callGroqModel(m, ideaText, AB_EXTRACT_PLAN_PROMPT, [], 2000, 15000, true, 'high', '/api/ab-extract-plan');
 
   try {
     const reply = await callWith(model);
@@ -1964,11 +1988,18 @@ app.post('/api/search', requireAuth, async (req, res) => {
               { role: 'user', content: synthPrompt }
             ],
             max_tokens: 400,
-            temperature: 0.3
+            temperature: 0.3,
+            reasoning_effort: 'medium'
           },
           { headers: { Authorization: `Bearer ${GROQ_KEY}` }, timeout: 15000 }
         );
         aiAnswer = groqRes.data?.choices?.[0]?.message?.content || '';
+        const _usage = groqRes.data?.usage || null;
+        const _reasoningTokens = _usage?.completion_tokens_details?.reasoning_tokens ?? 'unavailable';
+        const _completionTokens = _usage?.completion_tokens ?? 'unavailable';
+        const _logLine = `[search-synth] endpoint=/api/search model=${MODELS.GROQ_70B} reasoningEffort=medium reasoning_tokens=${_reasoningTokens} completion_tokens=${_completionTokens} ts=${new Date().toISOString()}`;
+        console.log(_logLine);
+        appendReasoningLog(_logLine);
       }
     } catch (synthErr) {
       console.error('[search-synth] AI synthesis failed:', synthErr.message);
@@ -2038,7 +2069,7 @@ function precompileJSX(html) {
   out = out.replace(/<script\b[^>]*\bsrc\s*=\s*["'][^"']*babel[^"']*["'][^>]*>\s*<\/script>\s*/gi, '');
   return out;
 }
-async function runCodeCheck(files, model = MODELS.GROQ_70B) {
+async function runCodeCheck(files, model = MODELS.GROQ_70B, endpointLabel = '/api/code-check') {
   // Real parse check ahead of the LLM review below — Babel.transform() throws a genuine
   // SyntaxError on malformed JSX, catching a class of bug the LLM-only review can miss entirely.
   const jsxIssues = [];
@@ -2062,11 +2093,18 @@ async function runCodeCheck(files, model = MODELS.GROQ_70B) {
           { role: 'user', content: content }
         ],
         max_tokens: 800,
-        temperature: 0
+        temperature: 0,
+        reasoning_effort: 'high'
       },
       { headers: { Authorization: `Bearer ${GROQ_KEY}` }, timeout: 20000 }
     );
     raw = resp.data?.choices?.[0]?.message?.content || '';
+    const _usage = resp.data?.usage || null;
+    const _reasoningTokens = _usage?.completion_tokens_details?.reasoning_tokens ?? 'unavailable';
+    const _completionTokens = _usage?.completion_tokens ?? 'unavailable';
+    const _logLine = `[code-check] endpoint=${endpointLabel} model=${model} reasoningEffort=high reasoning_tokens=${_reasoningTokens} completion_tokens=${_completionTokens} ts=${new Date().toISOString()}`;
+    console.log(_logLine);
+    appendReasoningLog(_logLine);
   }
   const stripped = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```[\s\S]*$/i, '').trim();
   const parsed = extractFirstJson(stripped);
@@ -2115,11 +2153,22 @@ async function abMatchOption(text, options, question) {
       // previous non-reasoning Llama model. 800 is the smallest budget directly tested that let
       // a real complex case finish naturally (finish_reason=stop) with room to spare; simpler
       // calls just finish sooner and cost less, since this is a ceiling, not a fixed cost.
+      // reasoning_effort:'low' added separately — max_tokens intentionally left untouched here
+      // pending re-verification of safe headroom (see investigation notes).
       max_tokens: 800,
-      temperature: 0
+      temperature: 0,
+      reasoning_effort: 'low'
     },
     { headers: { Authorization: `Bearer ${GROQ_KEY}` }, timeout: 8000 }
   );
+  {
+    const _usage = resp.data?.usage || null;
+    const _reasoningTokens = _usage?.completion_tokens_details?.reasoning_tokens ?? 'unavailable';
+    const _completionTokens = _usage?.completion_tokens ?? 'unavailable';
+    const _logLine = `[ab-match-option] endpoint=/api/ab-match-option model=${MODELS.GROQ_8B} reasoningEffort=low reasoning_tokens=${_reasoningTokens} completion_tokens=${_completionTokens} ts=${new Date().toISOString()}`;
+    console.log(_logLine);
+    appendReasoningLog(_logLine);
+  }
   const raw = (resp.data?.choices?.[0]?.message?.content || '').trim();
   const match = options.find(o => o === raw);
   return { match: match || null, raw };
@@ -2173,14 +2222,22 @@ app.post('/api/ab-reasoned-ack', requireAuth, async (req, res) => {
   }
   const userMsg = priorText + `Question: ${question}\nAnswer: ${answer}`;
   try {
+    console.log(`[ab-reasoned-ack] model=${MODELS.GROQ_70B} reasoningEffort=low`);
     const resp = await axios.post(
       'https://api.groq.com/openai/v1/chat/completions',
-      { model: MODELS.GROQ_70B, messages: [{ role: 'system', content: AB_REASONED_ACK_PROMPT }, { role: 'user', content: userMsg }], max_tokens: 300, temperature: 0.7 },
+      { model: MODELS.GROQ_70B, messages: [{ role: 'system', content: AB_REASONED_ACK_PROMPT }, { role: 'user', content: userMsg }], max_tokens: 300, temperature: 0.7, reasoning_effort: 'low' },
       { headers: { Authorization: `Bearer ${GROQ_KEY}` }, timeout: 4500 }
     );
     try { updateGroqQuota(MODELS.GROQ_70B, resp.headers); } catch (e) { console.warn('[quota-track]', e.message); }
     const ack = (resp.data?.choices?.[0]?.message?.content || '').trim();
-    console.log(`[ab-reasoned-ack] success — model=${MODELS.GROQ_70B} outputLength=${ack.length}`);
+    {
+      const _usage = resp.data?.usage || null;
+      const _reasoningTokens = _usage?.completion_tokens_details?.reasoning_tokens ?? 'unavailable';
+      const _completionTokens = _usage?.completion_tokens ?? 'unavailable';
+      const _logLine = `[ab-reasoned-ack] endpoint=/api/ab-reasoned-ack success — model=${MODELS.GROQ_70B} reasoningEffort=low outputLength=${ack.length} reasoning_tokens=${_reasoningTokens} completion_tokens=${_completionTokens} ts=${new Date().toISOString()}`;
+      console.log(_logLine);
+      appendReasoningLog(_logLine);
+    }
     res.json({ ack: ack || null });
   } catch (err) {
     console.error('[ab-reasoned-ack]', err.message);
@@ -2217,14 +2274,22 @@ app.post('/api/ab-offtopic-reply', requireAuth, async (req, res) => {
   }
   const userMsg = priorText + `Pending question: ${question}\nUser's message (not an answer to it): ${text}`;
   try {
+    console.log(`[ab-offtopic-reply] model=${MODELS.GROQ_70B} reasoningEffort=low`);
     const resp = await axios.post(
       'https://api.groq.com/openai/v1/chat/completions',
-      { model: MODELS.GROQ_70B, messages: [{ role: 'system', content: AB_OFFTOPIC_REPLY_PROMPT }, { role: 'user', content: userMsg }], max_tokens: 300, temperature: 0.7 },
+      { model: MODELS.GROQ_70B, messages: [{ role: 'system', content: AB_OFFTOPIC_REPLY_PROMPT }, { role: 'user', content: userMsg }], max_tokens: 300, temperature: 0.7, reasoning_effort: 'low' },
       { headers: { Authorization: `Bearer ${GROQ_KEY}` }, timeout: 4500 }
     );
     try { updateGroqQuota(MODELS.GROQ_70B, resp.headers); } catch (e) { console.warn('[quota-track]', e.message); }
     const reply = (resp.data?.choices?.[0]?.message?.content || '').trim();
-    console.log(`[ab-offtopic-reply] success — model=${MODELS.GROQ_70B} outputLength=${reply.length}`);
+    {
+      const _usage = resp.data?.usage || null;
+      const _reasoningTokens = _usage?.completion_tokens_details?.reasoning_tokens ?? 'unavailable';
+      const _completionTokens = _usage?.completion_tokens ?? 'unavailable';
+      const _logLine = `[ab-offtopic-reply] endpoint=/api/ab-offtopic-reply success — model=${MODELS.GROQ_70B} reasoningEffort=low outputLength=${reply.length} reasoning_tokens=${_reasoningTokens} completion_tokens=${_completionTokens} ts=${new Date().toISOString()}`;
+      console.log(_logLine);
+      appendReasoningLog(_logLine);
+    }
     res.json({ reply: reply || null });
   } catch (err) {
     console.error('[ab-offtopic-reply]', err.message);
@@ -2251,16 +2316,23 @@ app.post('/api/code-fix', requireAuth, async (req, res) => {
     let groqWas429 = false;
 
     // Try GROQ_70B first
-    console.log(`[code-fix] attempting ${MODELS.GROQ_70B} (timeout:30s)...`);
+    console.log(`[code-fix] attempting ${MODELS.GROQ_70B} (timeout:30s) reasoningEffort=high...`);
     try {
       const resp = await axios.post(
         'https://api.groq.com/openai/v1/chat/completions',
-        { model: MODELS.GROQ_70B, messages: [{ role: 'system', content: fixSys }, { role: 'user', content: fixUser }], max_tokens: 4000, temperature: 0 },
+        { model: MODELS.GROQ_70B, messages: [{ role: 'system', content: fixSys }, { role: 'user', content: fixUser }], max_tokens: 4000, temperature: 0, reasoning_effort: 'high' },
         { headers: { Authorization: `Bearer ${GROQ_KEY}` }, timeout: 30000 }
       );
       raw = resp.data?.choices?.[0]?.message?.content || '';
       const finishReason = resp.data?.choices?.[0]?.finish_reason || 'unknown';
-      console.log(`[code-fix] ${MODELS.GROQ_70B} OK — finish_reason:${finishReason} rawLen:${raw.length}`);
+      {
+        const _usage = resp.data?.usage || null;
+        const _reasoningTokens = _usage?.completion_tokens_details?.reasoning_tokens ?? 'unavailable';
+        const _completionTokens = _usage?.completion_tokens ?? 'unavailable';
+        const _logLine = `[code-fix] endpoint=/api/code-fix model=${MODELS.GROQ_70B} reasoningEffort=high finish_reason:${finishReason} rawLen:${raw.length} reasoning_tokens=${_reasoningTokens} completion_tokens=${_completionTokens} ts=${new Date().toISOString()}`;
+        console.log(_logLine);
+        appendReasoningLog(_logLine);
+      }
     } catch (groqErr) {
       const status = groqErr.response?.status;
       if (status === 429) {
@@ -2295,7 +2367,7 @@ app.post('/api/code-fix', requireAuth, async (req, res) => {
       recheck = { status: 'check-skipped' };
     } else {
       try {
-        recheck = await runCodeCheck(parsed.files);
+        recheck = await runCodeCheck(parsed.files, MODELS.GROQ_70B, '/api/code-fix-recheck');
         console.log(`[code-fix] recheck done — status:${recheck.status}`);
       } catch (recheckErr) {
         if (recheckErr.response?.status === 429) {
@@ -2309,7 +2381,7 @@ app.post('/api/code-fix', requireAuth, async (req, res) => {
             return res.json({ files: parsed.files, recheck: { status: 'check-failed' } });
           }
           try {
-            recheck = await runCodeCheck(parsed.files, MODELS.GEM_FLASH);
+            recheck = await runCodeCheck(parsed.files, MODELS.GEM_FLASH, '/api/code-fix-recheck');
             console.log(`[code-fix] recheck via Gemini Flash done — status:${recheck.status}`);
           } catch (gemRecheckErr) {
             console.log('[code-fix] Gemini Flash recheck also failed:', gemRecheckErr.message);
