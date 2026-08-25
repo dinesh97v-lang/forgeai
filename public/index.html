@@ -4550,6 +4550,17 @@ function send(){
   if(_sendPending){_abBuildInFlight=false;return;}
   var inp=document.getElementById('chat-in');
   var t=inp.value.trim();if(!t&&!attachData){_abBuildInFlight=false;return;}
+  // Captured here, before any App Builder routing below, so every branch — including the ones
+  // that construct and dispatch their own message without ever reaching the ordinary-chat tail
+  // further down — can tell whether an attachment is present and warn instead of silently
+  // dropping it. Snapshot is safe: nothing between here and the ordinary tail's own (now-removed)
+  // re-snapshot ever mutates attachData except attachHandle() (external, not called from send())
+  // and attachClear() (only reached past this point via the ordinary tail itself).
+  var attSnap=attachData;
+  // Narrow fix only: warn instead of silently dropping the image when a message routes into one
+  // of the App Builder branches below (none of them forward attachData) — does NOT thread the
+  // attachment through to make it actually work there; that's explicitly deferred.
+  var _abAttachWarnMsg='Image attachments aren\'t supported when starting or continuing an app build — please remove the image or rephrase your message';
   var _abSkipOpenerClassify=_abOpenerBypass;_abOpenerBypass=false;
   console.log('[ab-diag] appBuilder='+FEATURES.appBuilder+' simple='+isSimple()+' _abState='+JSON.stringify(_abState)+' detectIntent='+_abDetectIntent(t)+' specificBuildRequest='+_abIsSpecificBuildRequest(t));
   if(FEATURES.appBuilder&&!isSimple()&&!_abBuildInFlight){
@@ -4568,6 +4579,7 @@ function send(){
     // reply answers "start fresh or keep going", not the guided-flow's own current step, so it
     // must never reach _abHandleAnswer or the specific-build-request check.
     if(_abState&&_abState.pendingOverride){
+      if(attSnap)notify(_abAttachWarnMsg);
       var _abM0=document.getElementById('chat-msgs'),_abU0=document.createElement('div');
       _abU0.className='msg u';_abU0.innerHTML=renderUserBub({content:t});
       _abM0.appendChild(_abU0);inp.value='';rsz(inp);_abM0.scrollTop=_abM0.scrollHeight;
@@ -4579,6 +4591,7 @@ function send(){
     // same priority as pendingOverride above — this reply answers "pick from options or start
     // over", not the guided-flow's own current step.
     if(_abState&&_abState.pendingEscape){
+      if(attSnap)notify(_abAttachWarnMsg);
       var _abM1=document.getElementById('chat-msgs'),_abU1=document.createElement('div');
       _abU1.className='msg u';_abU1.innerHTML=renderUserBub({content:t});
       _abM1.appendChild(_abU1);inp.value='';rsz(inp);_abM1.scrollTop=_abM1.scrollHeight;
@@ -4603,6 +4616,7 @@ function send(){
     // _abIsSpecificBuildRequest itself is untouched — only the routing here changes.
     var _abPostBuildSkip=_abNi&&!_abState&&_abPostBuildChatId===chCurId();
     if((_abFa||_abNi)&&!_abPostBuildSkip){
+      if(attSnap)notify(_abAttachWarnMsg);
       var _abM=document.getElementById('chat-msgs'),_abU=document.createElement('div');
       _abU.className='msg u';_abU.innerHTML=renderUserBub({content:t});
       _abM.appendChild(_abU);inp.value='';rsz(inp);_abM.scrollTop=_abM.scrollHeight;
@@ -4638,6 +4652,7 @@ function send(){
     if(!_abNi&&!_abState&&!_abSkipOpenerClassify){
       _abClassifyOpeningBuildRequest(t,function(_abOpenResult){
         if(_abOpenResult==='build'){
+          if(attSnap)notify(_abAttachWarnMsg);
           var _abM2=document.getElementById('chat-msgs'),_abU2=document.createElement('div');
           _abU2.className='msg u';_abU2.innerHTML=renderUserBub({content:t});
           _abM2.appendChild(_abU2);inp.value='';rsz(inp);_abM2.scrollTop=_abM2.scrollHeight;
@@ -4653,7 +4668,7 @@ function send(){
   }
   var msgs=document.getElementById('chat-msgs');
   var qtSnap=qtText;
-  var attSnap=attachData; // snapshot before clearing
+  // attSnap already captured at the top of send(), before the App Builder routing above.
   // App Builder build-trigger message: show a short friendly label instead of the full prompt (API still gets the full prompt via apiPrompt/t below)
   var displayT=(_abState&&_abState.phase==='building')?('🚀 Build: '+(_abState.intentText||'')):t;
   var u=document.createElement('div');u.className='msg u';
