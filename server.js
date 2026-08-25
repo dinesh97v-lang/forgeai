@@ -717,6 +717,124 @@ async function callGeminiWithImage(model, prompt, sysPrompt, history, attachment
 }
 
 // ============================================
+// STREAMING — Piece 1 of ForgeAI's streaming rollout: /api/chat's ordinary-chat path only.
+// These two generators mirror callGroqModel/callGeminiModel's exact request shape (same model,
+// max_tokens, reasoning_effort, retry behavior) with stream:true added — never a different
+// prompt, model, or token budget. Each yields normalized {type, ...} events so the orchestrator
+// below (streamChatWithFallback) doesn't need to know each provider's raw SSE shape.
+// ============================================
+
+// Groq streams the model's hidden chain-of-thought as separate delta.reasoning chunks (confirmed
+// live: openai/gpt-oss-20b emitted 13 delta.reasoning chunks before any delta.content). Those are
+// filtered out HERE, at the source — this generator never yields a 'reasoning' event at all, so no
+// caller can accidentally forward it. This matches what callGroqModel already does today: it only
+// ever returns message.content, discarding the model's hidden reasoning.
+async function* streamGroqCompletion(model, prompt, sysPrompt, history = [], maxTokensOverride = null, reasoningEffort = null, timeoutMs = 30000) {
+  const MAX_OUT = { [MODELS.GROQ_8B]: 1500, [MODELS.GROQ_70B]: 4096, [MODELS.GROQ_SCOUT]: 8192 };
+  const maxTok = maxTokensOverride ?? MAX_OUT[model] ?? 2048;
+  const response = await axios.post(
+    'https://api.groq.com/openai/v1/chat/completions',
+    {
+      model,
+      messages: [
+        { role: 'system', content: sysPrompt },
+        ...history,
+        { role: 'user', content: prompt }
+      ],
+      max_tokens: maxTok,
+      stream: true,
+      stream_options: { include_usage: true },
+      ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {})
+    },
+    {
+      headers: { 'Authorization': `Bearer ${GROQ_KEY}`, 'Content-Type': 'application/json' },
+      timeout: timeoutMs,
+      responseType: 'stream'
+    }
+  );
+  // Headers arrive before any body content in HTTP — quota tracking fires exactly as early as
+  // it does today for the non-streaming call, unaffected by streaming the body.
+  try { updateGroqQuota(model, response.headers); } catch (e) { console.warn('[quota-track]', e.message); }
+  let buf = '';
+  for await (const chunk of response.data) {
+    buf += chunk.toString('utf8');
+    let idx;
+    while ((idx = buf.indexOf('\n\n')) !== -1) {
+      const frame = buf.slice(0, idx);
+      buf = buf.slice(idx + 2);
+      const line = frame.split('\n').find(l => l.startsWith('data:'));
+      if (!line) continue;
+      const dataStr = line.slice(5).trim();
+      if (dataStr === '[DONE]') return;
+      let json;
+      try { json = JSON.parse(dataStr); } catch (e) { continue; }
+      const choice = json.choices && json.choices[0];
+      if (choice) {
+        const delta = choice.delta || {};
+        if (delta.content) yield { type: 'content', text: delta.content };
+        // delta.reasoning intentionally never read/yielded — filtered here.
+        if (choice.finish_reason) yield { type: 'finish', finishReason: choice.finish_reason };
+      }
+      if (json.usage) yield { type: 'usage', usage: json.usage };
+    }
+  }
+}
+
+// Mirrors callGeminiModel's request shape and its one-retry-on-overload resilience exactly,
+// with streamGenerateContent+alt=sse instead of generateContent. Gemini's SSE deltas are already
+// incremental (confirmed live), so each candidate's text is forwarded as-is.
+async function* streamGeminiCompletion(model, prompt, sysPrompt, history = [], maxTokensOverride = null, timeoutMs = 60000) {
+  const contents = history.map(msg => ({
+    role: msg.role === 'assistant' ? 'model' : 'user',
+    parts: [{ text: msg.content }]
+  }));
+  contents.push({ role: 'user', parts: [{ text: prompt }] });
+
+  const doRequest = () => axios.post(
+    `https://generativelanguage.googleapis.com/v1beta/models/${model}:streamGenerateContent?alt=sse&key=${GEMINI_KEY}`,
+    {
+      system_instruction: { parts: [{ text: sysPrompt }] },
+      contents,
+      generationConfig: { maxOutputTokens: maxTokensOverride ?? 8192 }
+    },
+    { timeout: timeoutMs, responseType: 'stream' }
+  );
+
+  let response;
+  try {
+    response = await doRequest();
+  } catch (err) {
+    const isOverloadErr = err.response?.status === 503 || err.code === 'ECONNABORTED' || (err.message || '').includes('timeout');
+    if (!isOverloadErr) throw err;
+    console.log(`[streamGeminiCompletion] ${model} overloaded (${err.response?.status || err.code}) — retrying once after 1500ms`);
+    await new Promise(r => setTimeout(r, 1500));
+    response = await doRequest();
+  }
+  try { trackGeminiUsage(model); } catch (e) { console.warn('[gemini-track]', e.message); }
+
+  let buf = '';
+  for await (const chunk of response.data) {
+    buf += chunk.toString('utf8');
+    let idx;
+    while ((idx = buf.indexOf('\n\n')) !== -1) {
+      const frame = buf.slice(0, idx);
+      buf = buf.slice(idx + 2);
+      const line = frame.split('\n').find(l => l.startsWith('data:'));
+      if (!line) continue;
+      const dataStr = line.slice(5).trim();
+      if (!dataStr) continue;
+      let json;
+      try { json = JSON.parse(dataStr); } catch (e) { continue; }
+      const cand = json.candidates && json.candidates[0];
+      const text = cand?.content?.parts?.[0]?.text;
+      if (text) yield { type: 'content', text };
+      if (cand?.finishReason) yield { type: 'finish', finishReason: cand.finishReason };
+      if (json.usageMetadata) yield { type: 'usage', usage: json.usageMetadata };
+    }
+  }
+}
+
+// ============================================
 // COMPACT SYSTEM PROMPT — used when quality-critical fieldMode paths
 // fall back to a smaller model (8B / Scout). Short prompts are followed
 // more reliably by small models than the full 500-word version.
@@ -870,6 +988,163 @@ async function callWithFallback(primaryModel, prompt, sysPrompt, history, lang =
     }
   }
   throw lastError || new Error('All models in fallback chain exhausted');
+}
+
+// ============================================
+// STREAMING ORCHESTRATOR — /api/chat's ordinary-chat path only (never invoked for
+// appBuilderBuild/appBuilderClientOwns/fieldMode/fieldPreviewMode/evaluateTest — the /api/chat
+// handler's canStream gate keeps those on the existing non-streaming callWithFallback path
+// entirely unchanged). Mirrors callWithFallback's chain-selection and per-model skip logic
+// EXACTLY for the non-appBuilderBuild case — same models, same order, same reasoning_effort,
+// same max_tokens budgeting — so silent fallback before any content reaches the client behaves
+// identically to today. The one deliberate behavior change: once a content chunk has actually
+// been written to the client, a subsequent failure can no longer silently retry under a
+// different model (that model has no idea what the first one already said — splicing them would
+// read as an incoherent, self-contradicting reply) — instead the stream ends with a distinct
+// 'interrupted' event for a future client to catch and offer a "regenerate" affordance (Piece 2).
+//
+// Throws (mirroring callWithFallback's own final throw) only when every model failed BEFORE any
+// content was sent — SSE headers were never written in that case, so the error propagates to
+// the /api/chat handler's existing catch block and gets the same res.status(...).json({error})
+// response a non-streaming failure gets today. Once SSE headers ARE written, this function never
+// throws again — every subsequent failure is handled internally via the 'interrupted' event.
+async function streamChatWithFallback(primaryModel, prompt, sysPrompt, history, lang, maxTokensOverride, res, endpointLabel, meta) {
+  const isTamilLang = lang === 'tamil' || lang === 'thanglish';
+  const isGemini = m => m.startsWith('gemini');
+  const groqChain = isTamilLang ? [MODELS.GROQ_70B, MODELS.GROQ_SCOUT] : _GROQ_CHAIN;
+
+  let chain;
+  if (isGemini(primaryModel)) {
+    const alt = primaryModel === MODELS.GEM_FLASH ? MODELS.GEM_LITE : MODELS.GEM_FLASH;
+    chain = [primaryModel, alt, ...groqChain];
+  } else {
+    const others = groqChain.filter(m => m !== primaryModel);
+    chain = [primaryModel, ...others];
+  }
+  // Same "Gemini as last resort" tail callWithFallback appends when the main chain never
+  // included one (primary wasn't Gemini) — see callWithFallback's own comment for why. Tracked
+  // in its own set (not inferred from position) so the daily-quota check below applies ONLY to
+  // these two tail entries, exactly matching callWithFallback's separate tail loop — a
+  // primary-or-alt Gemini model reached via the isGemini(primaryModel) branch above never gets
+  // this pre-check in callWithFallback either, it just gets called and any real error is caught
+  // generically like every other chain entry.
+  let tailModels = new Set();
+  if (GEMINI_KEY && !chain.some(isGemini)) {
+    chain = [...chain, MODELS.GEM_FLASH, MODELS.GEM_LITE];
+    tailModels = new Set([MODELS.GEM_FLASH, MODELS.GEM_LITE]);
+  }
+
+  let lastError;
+  let headersSent = false;
+  let firstContentSent = false;
+  const sendSSE = (event, data) => { res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`); };
+
+  for (const model of chain) {
+    if (deadModels.has(model)) { console.log(`[stream-fallback] Skip ${model} — decommissioned (detected at startup)`); continue; }
+    if (isLowQuota(model)) { console.log(`[stream-fallback] Skip ${model} — < 5% quota`); continue; }
+    // Gemini-as-last-resort tail entries aren't in groqChain, so they skip straight past the
+    // Groq-only budget check below — mirrors callWithFallback's separate final-tail loop, which
+    // never applies _MODEL_OUTPUT_BUDGET/fitHistory to that tail either.
+    let effectiveMaxTokens = maxTokensOverride;
+    if (!isGemini(model) && maxTokensOverride != null && _MODEL_OUTPUT_BUDGET[model] != null) {
+      effectiveMaxTokens = Math.min(maxTokensOverride, _MODEL_OUTPUT_BUDGET[model]);
+      if (effectiveMaxTokens < 1000) { console.log(`[stream-fallback] Skip ${model} — effective output budget ${effectiveMaxTokens} too small for this request`); continue; }
+    }
+    // Gemini daily-quota check for the last-resort tail only — callWithFallback's own tail loop
+    // does the identical check before calling GEM_FLASH/GEM_LITE as a final fallback.
+    if (tailModels.has(model)) {
+      const _lim = GEMINI_DAILY_LIMITS[model];
+      const _c = geminiCounters[model];
+      const _today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
+      const _used = (_c && _c.date === _today) ? _c.count : 0;
+      if (_lim && _used >= _lim) { console.log(`[stream-fallback] Skip ${model} — daily quota exhausted (${_used}/${_lim})`); continue; }
+    }
+    try {
+      const safeHistory = isGemini(model) ? history : fitHistory(history, sysPrompt, prompt, MODEL_INPUT_LIMITS[model] ?? 4000);
+      const gen = isGemini(model)
+        ? streamGeminiCompletion(model, prompt, sysPrompt, safeHistory, effectiveMaxTokens)
+        : streamGroqCompletion(model, prompt, sysPrompt, safeHistory, effectiveMaxTokens, _CHAT_REASONING_EFFORT[model]);
+      let fullText = '';
+      let usage = null;
+      let finishReason = null;
+      for await (const ev of gen) {
+        if (ev.type === 'content') {
+          if (!headersSent) {
+            res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' });
+            headersSent = true;
+          }
+          firstContentSent = true;
+          fullText += ev.text;
+          sendSSE('content', { text: ev.text });
+        } else if (ev.type === 'usage') {
+          usage = ev.usage;
+        } else if (ev.type === 'finish') {
+          finishReason = ev.finishReason;
+        }
+      }
+      // Empty Gemini completion — callGeminiModel (the non-streaming equivalent) explicitly
+      // throws in this exact case ("Gemini returned no text — finishReason: ...") specifically so
+      // callWithFallback treats it as a failure and retries the next model in the chain, rather
+      // than silently "succeeding" with an empty reply. Replicated here for the same reason —
+      // confirmed live this path is real: gemini-flash-lite-latest returned finishReason=unknown
+      // with zero content chunks on one attempt during testing. Groq is deliberately NOT given
+      // this same treatment — callGroqModel has no equivalent check and already tolerates an
+      // empty completion as a valid reply today, so throwing here for Groq would be a new
+      // behavior, not a preserved one.
+      if (isGemini(model) && fullText === '') {
+        throw new Error(`Gemini returned no text — finishReason: ${finishReason || 'unknown'}`);
+      }
+      // This model's stream completed without throwing. Apply the SAME deterministic
+      // platform-question quick-reply fixup the non-streaming path applies (server.js's /api/chat
+      // handler, qr-inject block) — reusing the identical condition/strings, just fired once
+      // against the accumulated full text at stream-end instead of against a parsed JSON body, so
+      // streamed and non-streamed replies stay textually equivalent for this edge case.
+      const qrPresent = fullText.includes('<<QUICK_REPLY>>');
+      if (!meta.simpleMode && !qrPresent) {
+        if (/where\s+should\s+your\s+app\s+run/i.test(fullText)) {
+          sendSSE('content', { text: '\n<<QUICK_REPLY>>{"type":"quick_reply","question":"Where should your app run?","options":["Phone only","Desktop only","Both","Not sure"]}<<END_QUICK_REPLY>>' });
+          console.log('[qr-inject] injected deterministic platform quick-reply (English) — streaming');
+        } else if (/unga\s+app\s+enga|app\s+enga\s+use\s+aaganum/i.test(fullText)) {
+          sendSSE('content', { text: '\n<<QUICK_REPLY>>{"type":"quick_reply","question":"Unga app enga use aaganum?","options":["Phone-la mattum","Computer-la mattum","Rendulayum","Theriyala"]}<<END_QUICK_REPLY>>' });
+          console.log('[qr-inject] injected deterministic platform quick-reply (Tanglish) — streaming');
+        }
+      }
+      // Telemetry — same reasoning_tokens/completion_tokens line added last session for
+      // callGroqModel, adapted to read usage from the streamed terminal chunk (Groq only —
+      // Gemini has no reasoning_effort/reasoning_tokens concept in this codebase).
+      if (!isGemini(model)) {
+        const reasoningTokens = usage?.completion_tokens_details?.reasoning_tokens ?? 'unavailable';
+        const completionTokens = usage?.completion_tokens ?? 'unavailable';
+        const logLine = `[streamGroqCompletion] endpoint=${endpointLabel} model=${model} maxTokens=${effectiveMaxTokens ?? 'default'} reasoningEffort=${_CHAT_REASONING_EFFORT[model] || 'unset'} finishReason=${finishReason || 'unknown'} outputLength=${fullText.length} reasoning_tokens=${reasoningTokens} completion_tokens=${completionTokens} ts=${new Date().toISOString()}`;
+        console.log(logLine);
+        appendReasoningLog(logLine);
+      }
+      console.log(`[stream-fallback] ${model} completed — outputLength=${fullText.length} finishReason=${finishReason || 'unknown'}${model !== primaryModel ? ` (fallback from ${primaryModel})` : ''}`);
+      sendSSE('done', { model, reason: meta.reason, time: ((Date.now() - meta.startTime) / 1000).toFixed(2) + 's', searched: meta.searched, enterprise: meta.enterprise });
+      res.end();
+      return;
+    } catch (err) {
+      err._lastModel = model;
+      lastError = err;
+      if (firstContentSent) {
+        console.error(`[stream-fallback] ${model} failed mid-stream after first content chunk:`, err.message);
+        sendSSE('interrupted', { error: 'Response interrupted — please regenerate.', model });
+        res.end();
+        return;
+      }
+      // NOTE: unlike callWithFallback's equivalent log line, err.response.data is NOT
+      // JSON.stringify'd here — with responseType:'stream' (required to iterate the body as it
+      // arrives), axios attaches the raw, unconsumed response stream as err.response.data on a
+      // non-2xx error instead of a parsed body, and that stream holds a circular reference back to
+      // its own TLS socket — JSON.stringify on it throws "Converting circular structure to JSON"
+      // (confirmed live). err.message already carries axios's own status-code summary.
+      console.log(`[stream-fallback] ${model} failed before any content — trying next model: HTTP ${err.response?.status ?? err.code ?? 'ERR'}: ${(err.message || '').slice(0, 200)}`);
+    }
+  }
+  // Every model failed and no content was ever sent — headers were never written, so throwing
+  // here is safe and lets the /api/chat handler's existing catch block send a normal JSON error
+  // response, identical to a non-streaming total failure today.
+  throw lastError || new Error('All models in fallback chain exhausted (streaming)');
 }
 
 // ============================================
@@ -1105,6 +1380,22 @@ app.post('/api/chat', requireAuth, async (req, res) => {
   // this old server protocol never had) — the server's own MANDATORY APP-BUILD PROTOCOL must
   // never take over in that case, or the two mechanisms fight over the same conversation.
   const isProtocolContinuation = appBuilderBuild !== true && appBuilderClientOwns !== true && (awaitingApproval === true || _lastWasPlatformQuestion);
+
+  // STREAMING GATE — Piece 1: opt-in only (req.body.stream === true), so the existing
+  // non-streaming client (public/index.html, unchanged in this piece) never triggers it — it
+  // never sends this field. Scoped to /api/chat's ordinary-chat path only: excludes every
+  // fieldMode-family flag, image attachments (their own early-return branch below, listed here
+  // too for clarity), and App Builder's build-generation/protocol-continuation paths, which stay
+  // on the untouched non-streaming callWithFallback path regardless of this flag.
+  const wantsStream = req.body.stream === true;
+  const canStream = wantsStream
+    && !(fieldMode && fieldMode.trim())
+    && !(fieldPreviewMode && fieldPreviewMode.trim())
+    && !evaluateTest
+    && !(attachment && attachment.type === 'image')
+    && appBuilderBuild !== true
+    && appBuilderClientOwns !== true
+    && !isProtocolContinuation;
 
   const startTime  = Date.now();
   let intent       = detectIntent(prompt);
@@ -1433,7 +1724,20 @@ DOES NOT APPLY TO: bug fixes, small snippets, single functions, adding one featu
     // Quality-critical fieldMode paths get retry + compact-prompt fallback.
     // All other paths (preview, normal chat) use the standard chain.
     let reply, usedModel;
-    if (fieldMode && fieldMode.trim()) {
+    if (canStream) {
+      // SSE path — streamChatWithFallback owns the entire response from here (headers, content
+      // events, the terminal done/interrupted event, and res.end()). Returning immediately after
+      // it resolves skips every fieldMode-only post-processing block and the res.json(...) call
+      // below, both unreachable for this path since canStream already excludes fieldMode/
+      // fieldPreviewMode/evaluateTest. A total failure (every model failed before any content was
+      // sent) throws instead of resolving, propagating to this try's own catch below — identical
+      // res.status(...).json({error}) handling a non-streaming total failure gets today, since no
+      // SSE headers were ever written in that case.
+      await streamChatWithFallback(primaryModel, finalPrompt, sysPrompt, recentHistory, lang, maxTokensOverride, res, '/api/chat', {
+        reason: decision.reason, searched, enterprise: isEnterprise, simpleMode, startTime
+      });
+      return;
+    } else if (fieldMode && fieldMode.trim()) {
       const fld = fieldMode.trim().slice(0, 100);
       let compactPrompt = makeFieldCompactPrompt(fld);
       if (learnLang && learnLang !== 'english') {
