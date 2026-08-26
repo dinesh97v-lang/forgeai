@@ -16,7 +16,7 @@ const session = require('express-session');
 const ConnectSQLite3 = require('connect-sqlite3')(session);
 const Database = require('better-sqlite3');
 const { Readability } = require('@mozilla/readability');
-const { JSDOM } = require('jsdom');
+const { JSDOM, VirtualConsole } = require('jsdom');
 const archiver = require('archiver');
 const Babel = require(path.join(__dirname, 'public', 'vendor', 'babel.min.js'));
 
@@ -2431,6 +2431,125 @@ app.post('/api/code-check', requireAuth, async (req, res) => {
     }
     console.error('[code-check]', err.message);
     res.status(500).json({ error: 'Code check failed' });
+  }
+});
+
+// Real (non-LLM) runtime check for One Prompt's stage-4 verification only — parses the
+// generated HTML with jsdom and actually executes its inline <script> content (runScripts:
+// 'dangerously'), capturing genuine uncaught JS errors (syntax errors and runtime exceptions)
+// the same way a real browser's console-error capture would, then probes basic interactive
+// elements (buttons, forms) to confirm their wired handlers don't throw when triggered.
+// External resource loading is deliberately left off (no `resources: 'usable'` passed to
+// JSDOM) — this only ever executes the app's own inline script against its own already-parsed
+// DOM, it never fetches anything over the network, so it carries none of a real per-build
+// headless-browser check's SSRF-adjacent risk (see this session's prior investigation into
+// full headless-browser verification, which flagged that as a mandatory new security control —
+// not needed here since no resource loading ever happens).
+//
+// Deliberately NOT folded into runCodeCheck()/the shared /api/code-check endpoint above: that
+// endpoint is also used by ccRunCheck() (public/index.html), a generic "code check" widget
+// attached to any code block in chat — including App Builder's own generated-app messages and
+// ordinary Chat's code snippets. Keeping this as its own function + endpoint means those paths
+// are completely untouched; only One Prompt's stage-4 flow calls this one.
+async function runJsdomRuntimeCheck(files) {
+  const issues = [];
+  for (const f of files) {
+    if (!/\.html?$/i.test(f.filename || '')) continue;
+    const html = String(f.content || '');
+    const capturedErrors = [];
+    let dom = null;
+    try {
+      // jsdom reports EVERY uncaught script error (both real SyntaxErrors at script-compile
+      // time and runtime exceptions) through the same window 'error' event first, falling back
+      // to virtualConsole's 'jsdomError' ('unhandled-exception') only when nothing handled that
+      // event — confirmed by reading jsdom's own reportException() implementation. During the
+      // constructor's own synchronous initial parse, no window listener can exist yet (chicken-
+      // and-egg: window isn't available until construction returns), so errors from THAT phase
+      // only ever reach us via this virtualConsole fallback. Anything else jsdom emits here
+      // (type 'not-implemented' — e.g. real <form>.submit() navigation, canvas, etc. — or CSS
+      // parse notices) is a jsdom environment limitation, not an app bug, and is ignored.
+      const virtualConsole = new VirtualConsole();
+      virtualConsole.on('jsdomError', (err) => {
+        if (err && err.type === 'unhandled-exception') {
+          capturedErrors.push({ phase: 'load', message: err.message });
+        }
+      });
+      // A real (non-opaque) origin URL is required for jsdom's own localStorage/sessionStorage
+      // to work at all — with no url, jsdom treats the document as an opaque origin and
+      // localStorage throws "not available for opaque origins" on first access, which would
+      // false-positive on every generated app (One Prompt's own build prompts explicitly
+      // require localStorage-backed persistence). Unrelated to external resource loading —
+      // that's governed solely by the separate `resources` option, left unset here — setting
+      // `url` does not itself cause any network fetch.
+      dom = new JSDOM(html, { runScripts: 'dangerously', virtualConsole, pretendToBeVisual: true, url: 'http://localhost/' });
+
+      // Bounded settle for any DOMContentLoaded-deferred init — most single-file generated apps
+      // run everything synchronously during the initial parse (script tags at the end of body,
+      // referencing already-parsed elements), so this typically resolves immediately without
+      // ever waiting on the fallback timer.
+      await new Promise((resolve) => {
+        const doc = dom.window.document;
+        if (doc.readyState === 'complete') { resolve(); return; }
+        doc.addEventListener('DOMContentLoaded', resolve, { once: true });
+        setTimeout(resolve, 400);
+      });
+
+      const win = dom.window;
+      const doc = win.document;
+      win.addEventListener('error', (e) => {
+        e.preventDefault(); // marks the event "handled" — suppresses jsdom's own jsdomError fallback for this same error, avoiding double-counting
+        capturedErrors.push({ phase: 'interaction', message: (e.error && e.error.message) || e.message || 'Unknown error' });
+      });
+
+      // Basic interactivity probe (not a functional-correctness check — the real preview
+      // iframe already covers genuine usage): dispatch a real click/submit on the first N
+      // interactive controls and confirm doing so doesn't throw. Capped so a pathological app
+      // with hundreds of controls can't blow up check time.
+      const clickable = Array.from(doc.querySelectorAll('button, input[type=button], input[type=submit], [onclick]')).slice(0, 25);
+      for (const el of clickable) {
+        const before = capturedErrors.length;
+        try { el.click(); }
+        catch (err) { capturedErrors.push({ phase: 'interaction', message: `threw: ${err.message}` }); }
+        if (capturedErrors.length > before) {
+          const last = capturedErrors[capturedErrors.length - 1];
+          const label = (el.textContent || el.value || el.id || 'element').trim().slice(0, 60);
+          last.message = `Clicking "${label}" ${last.message}`;
+        }
+      }
+      const forms = Array.from(doc.querySelectorAll('form')).slice(0, 10);
+      for (const el of forms) {
+        const before = capturedErrors.length;
+        try { el.dispatchEvent(new win.Event('submit', { bubbles: true, cancelable: true })); }
+        catch (err) { capturedErrors.push({ phase: 'interaction', message: `threw: ${err.message}` }); }
+        if (capturedErrors.length > before) {
+          const last = capturedErrors[capturedErrors.length - 1];
+          last.message = `Submitting form "${el.id || '(unnamed)'}" ${last.message}`;
+        }
+      }
+    } catch (err) {
+      capturedErrors.push({ phase: 'parse', message: err.message });
+    } finally {
+      // jsdom keeps internal timers/listeners alive for a runScripts:'dangerously' window until
+      // explicitly closed — required to avoid leaking one per checked build.
+      if (dom) { try { dom.window.close(); } catch (e) { /* already torn down */ } }
+    }
+    for (const ce of capturedErrors) {
+      issues.push(`${f.filename}: [runtime-check/${ce.phase}] ${ce.message}`);
+    }
+  }
+  return issues.length ? { status: 'issues', issues } : { status: 'pass', issues: [] };
+}
+
+app.post('/api/dw-runtime-check', requireAuth, async (req, res) => {
+  const { files } = req.body;
+  if (!Array.isArray(files) || files.length === 0) return res.status(400).json({ error: 'No files provided' });
+  try {
+    res.json(await runJsdomRuntimeCheck(files));
+  } catch (err) {
+    console.error('[dw-runtime-check]', err.message);
+    // Never block the pipeline on this check's own failure — matches runCodeCheck()'s existing
+    // rate-limit-skip precedent just above; a bug in the check itself shouldn't fail the build.
+    res.json({ status: 'pass', issues: [] });
   }
 });
 

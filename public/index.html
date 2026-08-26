@@ -5088,17 +5088,23 @@ function _dwFetchWithTimeout(url,opts){
 }
 function _dwRunStage4Check(html){
   var fname=((document.getElementById('dw-name')||{value:''}).value.trim()||'app')+'.html';
-  return _dwFetchWithTimeout('/api/code-check',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({files:[{filename:fname,content:html}]})})
-    .then(function(r){return r.json();})
-    .then(function(ck){
-      if(ck.status==='pass'){_dwMarkStage(4,'done');return html;}
-      if(ck.issues&&ck.issues.length){
-        return _dwFetchWithTimeout('/api/code-fix',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({files:[{filename:fname,content:html}],issues:ck.issues})})
-          .then(function(r){return r.json();})
-          .then(function(fx){_dwMarkStage(4,'done');return(fx.files&&fx.files[0]&&fx.files[0].content)||html;});
-      }
-      _dwMarkStage(4,'done');return html;
-    });
+  var filesPayload=JSON.stringify({files:[{filename:fname,content:html}]});
+  // Runs the existing LLM+JSX review (/api/code-check) alongside the new jsdom-based real
+  // runtime check (/api/dw-runtime-check, server.js) in parallel — additive, not a replacement.
+  // The runtime check's own endpoint never blocks stage 4 on its own failure (falls back to a
+  // silent pass server-side and, defensively, here too) since a bug in the check itself
+  // shouldn't fail an otherwise-fine build.
+  return Promise.all([
+    _dwFetchWithTimeout('/api/code-check',{method:'POST',headers:{'Content-Type':'application/json'},body:filesPayload}).then(function(r){return r.json();}),
+    _dwFetchWithTimeout('/api/dw-runtime-check',{method:'POST',headers:{'Content-Type':'application/json'},body:filesPayload}).then(function(r){return r.json();}).catch(function(){return{status:'pass',issues:[]};})
+  ]).then(function(results){
+    var ck=results[0],rt=results[1];
+    var mergedIssues=(ck.issues||[]).concat(rt.issues||[]);
+    if(!mergedIssues.length){_dwMarkStage(4,'done');return html;}
+    return _dwFetchWithTimeout('/api/code-fix',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({files:[{filename:fname,content:html}],issues:mergedIssues})})
+      .then(function(r){return r.json();})
+      .then(function(fx){_dwMarkStage(4,'done');return(fx.files&&fx.files[0]&&fx.files[0].content)||html;});
+  });
 }
 function _dwStreamViewReset(){
   var el=document.getElementById('dw-live-code');
