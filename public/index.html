@@ -5292,6 +5292,17 @@ function startBuild(){
     // model to ADD auth, only to structure it correctly if the user's own idea already implies
     // one, matching the anti-scope-creep guardrail already in App Builder's own build prompt.
     +' Within the CSS, set up a real design-token system in :root — --color-primary, --color-text, --color-muted, --color-border, --radius-sm, --radius-md, --radius-lg, --shadow-sm, --shadow-md — and a typography scale: h1 large and bold with tight letter-spacing, h2 medium and semibold, body text around 15px with comfortable line-height, small/meta text uppercase with slightly wide letter-spacing and a muted color. If this app includes a login or signup feature, also set up the auth-flow structure now: wrap the login screen in <div id="login-screen"> and ALL main app content in <div id="main-app" class="hidden">, with a .hidden{display:none} rule in the CSS — the page must load showing ONLY the login screen (a later stage wires up the actual login behavior). If this app has no login or signup feature, skip that part entirely.'
+    // Silent requirement expansion, same ALLOWED/NOT ALLOWED line as App Builder's own
+    // anti-scope-creep guardrail (index.html:3872, "Do not add features, screens, or flows
+    // that were not requested... this includes login, signup, or authentication"). One Prompt
+    // has no equivalent instruction at all today, so without this the model either under-builds
+    // (leaves obvious gaps like "no way to view existing bookings") or, left fully unconstrained,
+    // could over-build into unrequested feature categories the same way App Builder's guardrail
+    // was added to stop. Placed in stage 1 only — this decides the app's scope, and stage 2/3 both
+    // operate strictly on the HTML stage 1 already produced (stage 2 gated on divs already being
+    // present, stage 3 explicitly "WITHOUT changing functionality"), so neither can introduce a
+    // new feature category on its own even without repeating this instruction.
+    +' Also fill in the small, obvious gaps a real version of this app would need — features clearly implied by the user\'s own description, not separate additions (for example: a booking app implies letting users view or cancel their existing bookings; a todo app implies marking items complete and deleting them; a blog implies a comment section). Do NOT add an entire feature category the user did not ask for — specifically, do not add login, signup, or authentication, a payment or checkout system, or an admin panel, unless the user\'s own app description explicitly mentions one of those. Each of those is a separate product decision, not an implied detail. If unsure whether something is an implied detail versus a separate feature category, leave it out.'
     +' Output ONLY a complete single-file HTML in one html code block.';
   _dwStageCall(1,s1,'',true)
     .then(function(h1){
