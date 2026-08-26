@@ -5100,21 +5100,126 @@ function _dwRunStage4Check(html){
       _dwMarkStage(4,'done');return html;
     });
 }
+function _dwStreamViewReset(){
+  var el=document.getElementById('dw-live-code');
+  if(!el)return;
+  el.textContent='';
+  el.style.display='block';
+}
+function _dwStreamViewAppend(text){
+  var el=document.getElementById('dw-live-code');
+  if(!el)return;
+  el.textContent+=text;
+  el.scrollTop=el.scrollHeight;
+}
+function _dwStreamViewHide(){
+  var el=document.getElementById('dw-live-code');
+  if(el)el.style.display='none';
+}
+// Idle timeout, not a fixed total-call timeout like DW_STAGE_TIMEOUT_MS above: streaming gives
+// continuous liveness evidence a plain buffered fetch never had, so "no bytes arrived in 30s" is
+// a much earlier and more correct dead-connection signal than "the whole call took >150s" —
+// the idle timer resets on every chunk actually read off the wire, including the
+// reasoning-capable Groq models' hidden delta.reasoning chunks (filtered from the visible view
+// below, never from liveness detection — a real reasoning phase can legitimately run for many
+// seconds producing nothing but those before the first delta.content arrives, confirmed live
+// this session: one call spent 2998 of a 3000-token budget on reasoning alone). Kept alongside
+// a generous absolute backstop purely as a defensive outer bound, not the primary mechanism.
+var DW_STREAM_IDLE_MS=30000;
+var DW_STREAM_ABS_CEILING_MS=300000;
+// Parses the SSE protocol streamChatWithFallback already emits server-side for any /api/chat
+// caller that sends stream:true (server.js — shared with ordinary chat's streaming path,
+// untouched by this change): event: content -> {text}, event: done -> assembled reply complete,
+// event: interrupted -> a failure after some content had already streamed. Classifies purely on
+// HTTP status, NOT content-type: a non-2xx response is the one real "never entered SSE at all"
+// case (every model failed before any content — server sends a plain JSON error, mirroring
+// _dwStageCall's original non-streaming error handling via d.error). A 2xx status is ALWAYS a
+// real SSE body from this path, even on the one server-side edge case where its Content-Type
+// header comes back wrong: streamChatWithFallback only calls res.writeHead (setting
+// text/event-stream) inside the content-event branch — a model that produces a genuinely empty
+// completion (a pre-existing, deliberately-tolerated Groq behavior, confirmed live this session)
+// sends only a 'done' event with no content ever having triggered that header write, so
+// content-type comes back null even though the body is still well-formed SSE text. Gating on
+// content-type here mis-classified that real, valid case as "not a stream" and then failed a
+// SECOND time trying to JSON.parse SSE-formatted text as JSON — confirmed live, this is what
+// that exact bug looked like. Status-based gating handles it correctly without needing to touch
+// the shared server-side streaming code (out of scope for this change).
+function _dwStreamFetch(url,opts,onDelta){
+  var controller=new AbortController();
+  opts=opts||{};opts.signal=controller.signal;
+  var idleTimer=null;
+  function armIdle(){clearTimeout(idleTimer);idleTimer=setTimeout(function(){controller.abort();},DW_STREAM_IDLE_MS);}
+  var absTimer=setTimeout(function(){controller.abort();},DW_STREAM_ABS_CEILING_MS);
+  function clearTimers(){clearTimeout(idleTimer);clearTimeout(absTimer);}
+  armIdle();
+
+  function run(){
+    return fetch(url,opts).then(function(res){
+      if(!res.ok){
+        return res.json().then(function(d){throw new Error((d&&d.error)||'Stage failed');});
+      }
+      var reader=res.body.getReader();
+      var decoder=new TextDecoder();
+      var buf='',fullText='';
+      function pump(){
+        return reader.read().then(function(result){
+          if(result.done)throw new Error('Stream ended unexpectedly');
+          armIdle();
+          buf+=decoder.decode(result.value,{stream:true});
+          var idx;
+          while((idx=buf.indexOf('\n\n'))!==-1){
+            var frame=buf.slice(0,idx);buf=buf.slice(idx+2);
+            var lines=frame.split('\n');
+            var evLine=lines.find(function(l){return l.indexOf('event:')===0;});
+            var dataLine=lines.find(function(l){return l.indexOf('data:')===0;});
+            if(!evLine||!dataLine)continue;
+            var ev=evLine.slice(6).trim();
+            var data;try{data=JSON.parse(dataLine.slice(5).trim());}catch(e){continue;}
+            if(ev==='content'){
+              fullText+=data.text;
+              if(onDelta)onDelta(data.text);
+            }else if(ev==='done'){
+              return fullText;
+            }else if(ev==='interrupted'){
+              throw new Error(data.error||'Response interrupted');
+            }
+          }
+          return pump();
+        });
+      }
+      return pump();
+    });
+  }
+  return run().then(
+    function(text){clearTimers();return text;},
+    function(err){clearTimers();throw err;}
+  );
+}
 function _dwStageCall(n,prompt,prev,hard){
   _dwMarkStage(n,'active');
+  _dwStreamViewReset();
   // maxTokensOverride:8192 mirrors App Builder's own build call (send()'s body.maxTokensOverride
   // at _abState.phase==='building') — without it, this fell back to callGroqModel's small
   // per-model default (1500/4096), which live testing confirmed truncates real stage output
   // (finishReason=length) on anything beyond a trivial app.
-  return _dwFetchWithTimeout('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt:prompt,history:[],enterpriseMode:true,maxTokensOverride:8192})})
-    .then(function(r){return r.json();})
-    .then(function(d){
-      var html=(d&&!d.error)?_dwCleanHtml(d.reply||''):'';
-      if(html){_dwMarkStage(n,'done');_dwUpdateLoadingPreview(html);return html;}
-      if(hard)throw new Error(d.error||'Stage '+n+' failed');
-      _dwMarkStage(n,'skipped');return prev;
+  // stream:true opts this call into the SAME server-side streaming path already shipped for
+  // ordinary chat (server.js's canStream gate) — confirmed this call qualifies unmodified
+  // (history is always [], none of the fieldMode/appBuilder/attachment flags are set here).
+  return _dwStreamFetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt:prompt,history:[],enterpriseMode:true,maxTokensOverride:8192,stream:true})},_dwStreamViewAppend)
+    .then(function(fullText){
+      var html=fullText?_dwCleanHtml(fullText):'';
+      if(html){_dwMarkStage(n,'done');_dwStreamViewHide();_dwUpdateLoadingPreview(html);return html;}
+      if(hard)throw new Error('Stage '+n+' failed');
+      _dwMarkStage(n,'skipped');_dwStreamViewHide();return prev;
     })
     .catch(function(err){
+      // A stream interruption (idle timeout, absolute ceiling, or the server's own 'interrupted'
+      // event) is just another failure feeding the SAME existing hard/soft branching — discards
+      // whatever partial text had streamed in (fullText never escapes this function on a
+      // rejection) and either throws (hard stage -> outer catch -> the existing non-streaming
+      // single-shot fallback, unchanged) or skips to the next stage with prev (soft stage),
+      // exactly as any other failure already did before this change.
+      _dwStreamViewHide();
       if(hard)throw err;
       _dwMarkStage(n,'skipped');return prev;
     });
@@ -5164,7 +5269,11 @@ function startBuild(){
           '</div>'+
         '</div>'+
       '</div>'+
-    '</div>';
+    '</div>'+
+    // Live streaming code view — cleared and shown fresh at the start of each of stages 1-3
+    // (_dwStreamViewReset/_dwStreamViewAppend below). Stage 4 (verification) never writes here;
+    // it stays the plain non-streamed "checking..." step per the investigation's own scope call.
+    '<div id="dw-live-code" style="display:none;margin-top:10px;background:var(--bg3);border:1px solid var(--border);border-radius:var(--r);padding:8px 10px;font-family:monospace;font-size:10px;line-height:1.5;color:var(--text2);max-height:140px;overflow-y:auto;white-space:pre-wrap;word-break:break-word"></div>';
   var pct=0,pTarget=20;
   var pTimer=setInterval(function(){pct=Math.min(pct+0.4,pTarget);prog.style.width=pct+'%';},600);
   function _advProg(t){
