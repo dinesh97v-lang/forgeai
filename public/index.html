@@ -4885,7 +4885,7 @@ function dwReset(){
   var nbtn=document.getElementById('dw-namegen-btn');if(nbtn){nbtn.disabled=false;nbtn.textContent='Get name ideas';}
   _dwCheckFiles=null;_dwCheckIssues=null;
   _dwErrLog=[];
-  window._dwCode=null;window._dwName=null;window._dwVersion=null;
+  window._dwCode=null;window._dwName=null;window._dwVersion=null;window._dwVersions=[];
   var p1=document.getElementById('dw-p1');if(p1)p1.scrollIntoView({behavior:'smooth',block:'start'});
 }
 var _sugPending=false,_sugItems=[];
@@ -5379,7 +5379,7 @@ function showResult(inp,code){
   document.getElementById('dws4').className='dws active';
   var customName=(document.getElementById('dw-name')||{value:''}).value.trim();
   var name=customName||inp.split(' ').slice(0,3).join('-').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'');
-  window._dwCode=code;window._dwName=name;window._dwVersion=1;
+  window._dwCode=code;window._dwName=name;window._dwVersion=1;window._dwVersions=[];
   var incomplete=!/<\/html>/i.test(code);
   var incWarn=incomplete?'<div style="background:var(--wbg);border:1px solid #f5d080;border-radius:var(--r);padding:10px 12px;margin-bottom:10px;font-size:11px;color:var(--warning)">⚠️ This app is large and may be incomplete. Try a simpler description, or use the \'Request a change\' box to ask for the missing part.</div>':'';
   document.getElementById('dw-p3').innerHTML=
@@ -5421,12 +5421,53 @@ function showResult(inp,code){
         '<button onclick="updateApp()" style="white-space:nowrap;padding:7px 13px;border-radius:var(--r);font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;background:var(--accent);color:white;border:none;transition:all .2s">Update App</button>'+
       '</div>'+
     '</div>'+
+    '<div style="display:flex;justify-content:flex-end;margin-bottom:10px">'+
+      '<button id="dw-prev-ver-btn" onclick="dwRestorePreviousVersion()" disabled style="font-size:11px;padding:4px 10px;border:1px solid var(--border2);border-radius:var(--r);background:var(--bg2);cursor:default;opacity:0.4;color:var(--text2);font-family:inherit;font-weight:600">&#8617; Previous version</button>'+
+    '</div>'+
     '<div style="background:var(--ibg);border:1px solid #b5d4f4;border-radius:var(--r);padding:10px 12px;margin-bottom:10px;font-size:11px;color:var(--info)">'+
       '🔜 <strong>One-click deploy to live URL</strong> — coming soon'+
     '</div>'+
     '<button class="btn ghost" style="width:100%;border-style:dashed" onclick="resetBuild()">Build Another App</button>';
   document.getElementById('dw-generated-code').textContent=code;
   _dwLoadPreview();
+  _dwUpdatePrevBtn();
+}
+// Client-side-only version history for One Prompt (in-memory, same volatility tier as
+// window._dwCode/_dwVersion themselves — neither is persisted to localStorage today, so a new
+// localStorage key here would be the odd one out: only the history would survive a reload while
+// the "current" version it points to still wouldn't). A real stack, oldest-to-newest: each
+// updateApp() call pushes the code it's about to replace, capped at DW_MAX_VERSIONS (oldest
+// dropped first). "Previous version" pops the most recent entry and applies it as current —
+// repeatable, since popping again walks one step further into whatever's left underneath, so a
+// restored version is itself just as restorable-from as any other past state. There's no
+// separate "redo": once you restore, the state you stepped away from isn't retained (matches a
+// plain undo stack with no redo, not full undo/redo branching) — running a fresh "Request a
+// change" from a restored version pushes THAT version onto the stack in turn when it lands, so
+// the chain stays accurate to what was actually current at each point.
+var DW_MAX_VERSIONS=8;
+function _dwApplyCode(code){
+  window._dwCode=code;
+  var codeEl=document.getElementById('dw-generated-code');
+  if(codeEl)codeEl.textContent=code;
+  _dwLoadPreview();
+}
+function _dwUpdatePrevBtn(){
+  var btn=document.getElementById('dw-prev-ver-btn');
+  if(!btn)return;
+  var n=(window._dwVersions||[]).length;
+  btn.disabled=n===0;
+  btn.style.opacity=n===0?'0.4':'1';
+  btn.style.cursor=n===0?'default':'pointer';
+  btn.title=n===0?'No previous version to restore':('Restore previous version ('+n+' more available after that)');
+}
+function dwRestorePreviousVersion(){
+  var versions=window._dwVersions||[];
+  if(!versions.length||!window._dwCode)return;
+  var prevEntry=versions.pop();
+  _dwApplyCode(prevEntry.code);
+  _dwUpdatePrevBtn();
+  var msgEl=document.getElementById('dw-update-msg');
+  if(msgEl)msgEl.innerHTML='<div style="font-size:11px;color:var(--text3);margin-bottom:6px">&#8617; Restored previous version.</div>';
 }
 function updateApp(){
   var req=document.getElementById('dw-change');
@@ -5434,7 +5475,6 @@ function updateApp(){
   var change=req.value.trim();
   if(!change){notify('Describe the change you want!');return;}
   var msgEl=document.getElementById('dw-update-msg');
-  var codeEl=document.getElementById('dw-generated-code');
   if(msgEl)msgEl.innerHTML='<div style="font-size:11px;color:var(--text3);margin-bottom:6px">⏳ Updating your app...</div>';
   req.disabled=true;
   var apiPrompt='Here is the current app code:\n'+window._dwCode+'\n\nApply this change: '+change+'\n\nOutput the COMPLETE updated single-file HTML app in one html code block. Keep everything else the same, only apply the requested change.';
@@ -5449,9 +5489,12 @@ function updateApp(){
       var ds=code.search(/<!DOCTYPE\s+html/i);if(ds>0)code=code.slice(ds);
       var de=code.search(/<\/html>/i);if(de>-1)code=code.slice(0,de+7);
       code=code.trim();
-      window._dwCode=code;
+      window._dwVersions=window._dwVersions||[];
+      window._dwVersions.push({code:window._dwCode,ts:Date.now()});
+      if(window._dwVersions.length>DW_MAX_VERSIONS)window._dwVersions.shift();
+      _dwApplyCode(code);
+      _dwUpdatePrevBtn();
       window._dwVersion=(window._dwVersion||1)+1;
-      if(codeEl)codeEl.textContent=code;
       req.value='';
       // Flash download button with "Re-download" label for 3 s
       var dlBtn=document.getElementById('dw-dl-btn');
@@ -5660,7 +5703,7 @@ function resetBuild(){
   document.getElementById('dw-in').value='';
   var nm=document.getElementById('dw-name');if(nm)nm.value='';
   var prev=document.getElementById('dw-name-preview');if(prev)prev.textContent='';
-  window._dwCode='';window._dwName='';
+  window._dwCode='';window._dwName='';window._dwVersions=[];
   var old=document.getElementById('dw-err');if(old)old.remove();
   ['dws1','dws2','dws3','dws4'].forEach(function(id,i){document.getElementById(id).className='dws'+(i===0?' active':'');});
 }
