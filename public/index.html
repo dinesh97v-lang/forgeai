@@ -5283,16 +5283,39 @@ function startBuild(){
     pTimer=setInterval(function(){pct=Math.min(pct+0.4,pTarget);prog.style.width=pct+'%';},600);
   }
   var currentHtml='';
-  var s1='Generate the HTML structural skeleton for this app: '+inp+'. Create ONLY the foundation: DOCTYPE, head with meta tags, page title, CSS variables (colors, fonts, border-radius), basic reset and layout. Add the main HTML sections with placeholder text (header, nav if needed, main content areas). Keep CSS minimal — layout structure only, no decorative styling yet. Output ONLY a complete single-file HTML in one html code block.';
+  var s1='Generate the HTML structural skeleton for this app: '+inp+'. Create ONLY the foundation: DOCTYPE, head with meta tags, page title, CSS variables (colors, fonts, border-radius), basic reset and layout. Add the main HTML sections with placeholder text (header, nav if needed, main content areas). Keep CSS minimal — layout structure only, no decorative styling yet.'
+    // Design-token foundation, adapted from App Builder's own DESIGN SYSTEM block
+    // (index.html:3850) — same underlying principles (CSS custom properties for a
+    // color/radius/shadow palette, a real typography scale) rewritten in plain CSS terms since
+    // that block is Tailwind-shorthand-only and One Prompt has no Tailwind dependency. Auth-flow
+    // portion is gated on the app actually having a login/signup feature — this doesn't ask the
+    // model to ADD auth, only to structure it correctly if the user's own idea already implies
+    // one, matching the anti-scope-creep guardrail already in App Builder's own build prompt.
+    +' Within the CSS, set up a real design-token system in :root — --color-primary, --color-text, --color-muted, --color-border, --radius-sm, --radius-md, --radius-lg, --shadow-sm, --shadow-md — and a typography scale: h1 large and bold with tight letter-spacing, h2 medium and semibold, body text around 15px with comfortable line-height, small/meta text uppercase with slightly wide letter-spacing and a muted color. If this app includes a login or signup feature, also set up the auth-flow structure now: wrap the login screen in <div id="login-screen"> and ALL main app content in <div id="main-app" class="hidden">, with a .hidden{display:none} rule in the CSS — the page must load showing ONLY the login screen (a later stage wires up the actual login behavior). If this app has no login or signup feature, skip that part entirely.'
+    +' Output ONLY a complete single-file HTML in one html code block.';
   _dwStageCall(1,s1,'',true)
     .then(function(h1){
       currentHtml=h1;_advProg(28);
-      var s2='Here is the current HTML skeleton:\n'+h1.slice(0,9000)+'\n\nOriginal app: '+inp+'\n\nNow ADD all functional features to this skeleton: working forms, button click handlers, JavaScript logic, localStorage data persistence, input validation, interactive elements. Keep the existing HTML structure — only add functionality and JS. Output the COMPLETE updated single-file HTML in one html code block.';
+      var s2='Here is the current HTML skeleton:\n'+h1.slice(0,9000)+'\n\nOriginal app: '+inp+'\n\nNow ADD all functional features to this skeleton: working forms, button click handlers, JavaScript logic, localStorage data persistence, input validation, interactive elements. Keep the existing HTML structure — only add functionality and JS.'
+        // Auth-flow BEHAVIOR half of the gated pattern from stage 1 (which sets up the
+        // #login-screen/#main-app divs structurally) — this is where the actual wiring belongs,
+        // since this stage is already responsible for adding functional JS. Still gated: only
+        // fires if the skeleton already has those divs, never adds them itself.
+        +' If this skeleton already has #login-screen and #main-app divs (a login/signup feature), wire up the actual behavior now: on successful login, run document.getElementById(\'login-screen\').classList.add(\'hidden\'); document.getElementById(\'main-app\').classList.remove(\'hidden\'); and include a logout button in the main app header that reverses this. If there\'s no login/signup feature, ignore this instruction.'
+        +' Output the COMPLETE updated single-file HTML in one html code block.';
       return _dwStageCall(2,s2,h1,false);
     })
     .then(function(h2){
       currentHtml=h2;_advProg(55);
-      var s3='Here is the current app HTML:\n'+h2.slice(0,10000)+'\n\nPolish the visual design WITHOUT changing functionality: professional color scheme, comfortable spacing and typography, smooth hover/focus states and CSS transitions, mobile-responsive layout with media queries, styled form elements and buttons. Output the COMPLETE updated single-file HTML in one html code block.';
+      var s3='Here is the current app HTML:\n'+h2.slice(0,10000)+'\n\nPolish the visual design WITHOUT changing functionality: professional color scheme, comfortable spacing and typography, smooth hover/focus states and CSS transitions, mobile-responsive layout with media queries, styled form elements and buttons.'
+        // Short reinforcement, not a restated design-system block — this stage is already the
+        // designated "polish" pass and already asks for color scheme/typography/hover states
+        // above; this just anchors that existing ask to the concrete tokens stage 1 already
+        // defined instead of leaving it vague, kept deliberately brief since stage 3's prompt
+        // already embeds up to 10,000 chars of prior HTML (the token-pressure risk the
+        // investigation flagged for the 8B fallback model).
+        +' Use the CSS custom properties and typography scale already defined in the skeleton consistently throughout — don\'t introduce new ad-hoc colors or spacing values. Every interactive element (buttons, links, form fields) needs a real hover/focus state that shifts more than just color: a slight upward transform plus a stronger shadow on hover, and a visible focus ring on inputs — never a flat color-only change.'
+        +' Output the COMPLETE updated single-file HTML in one html code block.';
       return _dwStageCall(3,s3,h2,false);
     })
     .then(function(h3){
