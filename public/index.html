@@ -5064,14 +5064,36 @@ function _dwUpdateLoadingPreview(html){
   screen.innerHTML='';
   screen.appendChild(ifr);
 }
+// Shared per-call timeout for One Prompt's build pipeline (stages 1-4 + the single-shot
+// fallback) — ports the SHAPE of App Builder's existing AbortController+timeout pattern
+// (send()'s _abBuildAbort/_abBuildTimer) to this feature's own call sites only, scoped
+// entirely to One Prompt: without this, a fetch that never resolves (server hangs, connection
+// stalls) leaves the progress bar spinning forever with no way to recover — this forces it to
+// reject within a bounded time instead, so it falls through to the failure handling paths that
+// already exist (hard-stage throw / soft-stage skip-and-continue / showBuildError).
+// 150s, not App Builder's 90s: live testing this session observed a single stage (Stage 3,
+// design polish) legitimately take ~98s end-to-end after cascading provider fallbacks before
+// succeeding. A shorter timeout would abort calls that are genuinely still working, trading a
+// slow success for a premature failure — 150s stays comfortably above that observed worst case
+// while still bounding the actual failure mode (a call that never resolves at all).
+var DW_STAGE_TIMEOUT_MS=150000;
+function _dwFetchWithTimeout(url,opts){
+  var controller=new AbortController();
+  var timer=setTimeout(function(){controller.abort();},DW_STAGE_TIMEOUT_MS);
+  opts=opts||{};opts.signal=controller.signal;
+  return fetch(url,opts).then(
+    function(r){clearTimeout(timer);return r;},
+    function(err){clearTimeout(timer);throw err;}
+  );
+}
 function _dwRunStage4Check(html){
   var fname=((document.getElementById('dw-name')||{value:''}).value.trim()||'app')+'.html';
-  return fetch('/api/code-check',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({files:[{filename:fname,content:html}]})})
+  return _dwFetchWithTimeout('/api/code-check',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({files:[{filename:fname,content:html}]})})
     .then(function(r){return r.json();})
     .then(function(ck){
       if(ck.status==='pass'){_dwMarkStage(4,'done');return html;}
       if(ck.issues&&ck.issues.length){
-        return fetch('/api/code-fix',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({files:[{filename:fname,content:html}],issues:ck.issues})})
+        return _dwFetchWithTimeout('/api/code-fix',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({files:[{filename:fname,content:html}],issues:ck.issues})})
           .then(function(r){return r.json();})
           .then(function(fx){_dwMarkStage(4,'done');return(fx.files&&fx.files[0]&&fx.files[0].content)||html;});
       }
@@ -5080,7 +5102,11 @@ function _dwRunStage4Check(html){
 }
 function _dwStageCall(n,prompt,prev,hard){
   _dwMarkStage(n,'active');
-  return fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt:prompt,history:[],enterpriseMode:true})})
+  // maxTokensOverride:8192 mirrors App Builder's own build call (send()'s body.maxTokensOverride
+  // at _abState.phase==='building') — without it, this fell back to callGroqModel's small
+  // per-model default (1500/4096), which live testing confirmed truncates real stage output
+  // (finishReason=length) on anything beyond a trivial app.
+  return _dwFetchWithTimeout('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt:prompt,history:[],enterpriseMode:true,maxTokensOverride:8192})})
     .then(function(r){return r.json();})
     .then(function(d){
       var html=(d&&!d.error)?_dwCleanHtml(d.reply||''):'';
@@ -5176,7 +5202,7 @@ function startBuild(){
       [2,3,4].forEach(function(n){_dwMarkStage(n,'skipped');});
       _advProg(90);
       var fbp='Generate a COMPLETE, production-quality single-file HTML app for: '+inp+'. Fully working, modern UI, localStorage persistence, input validation. Output ONLY the complete code in one html code block.';
-      fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt:fbp,history:[],enterpriseMode:true})})
+      _dwFetchWithTimeout('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt:fbp,history:[],enterpriseMode:true,maxTokensOverride:8192})})
         .then(function(r){return r.json();})
         .then(function(d){
           clearInterval(pTimer);prog.style.width='100%';
@@ -5187,7 +5213,14 @@ function startBuild(){
           document.getElementById('dws3').className='dws active';
           setTimeout(function(){showResult(inp,code);},400);
         })
-        .catch(function(){clearInterval(pTimer);showBuildError('Connection error. Is the server running?');});
+        .catch(function(err){
+          clearInterval(pTimer);
+          // Mirrors send()'s own cause-differentiated messaging (AbortError = our own timeout,
+          // not a generic connection failure) — dw-in's value is untouched by any of this, so
+          // the user's idea is still sitting in the box and "Build and Deploy" retries cleanly.
+          var msg=(err&&err.name==='AbortError')?'Build took too long and timed out. Please try again.':'Connection error. Is the server running?';
+          showBuildError(msg);
+        });
     });
 }
 function showResult(inp,code){
