@@ -45,6 +45,11 @@ db.exec(`CREATE TABLE IF NOT EXISTS users (
 // Migrate existing DBs — add columns if absent
 try { db.exec(`ALTER TABLE users ADD COLUMN security_question TEXT`); } catch(e) {}
 try { db.exec(`ALTER TABLE users ADD COLUMN security_answer_hash TEXT`); } catch(e) {}
+// One Prompt pattern memory (freeform) — a short rolling text summary of inferred build
+// preferences, plus the opt-out flag gating both capture and use. Default 1 (on) per the
+// decided opt-out/default-on design.
+try { db.exec(`ALTER TABLE users ADD COLUMN build_preferences_summary TEXT`); } catch(e) {}
+try { db.exec(`ALTER TABLE users ADD COLUMN pattern_memory_enabled INTEGER NOT NULL DEFAULT 1`); } catch(e) {}
 
 db.exec(`CREATE TABLE IF NOT EXISTS search_cache (
   query TEXT PRIMARY KEY,
@@ -2550,6 +2555,118 @@ app.post('/api/dw-runtime-check', requireAuth, async (req, res) => {
     // Never block the pipeline on this check's own failure — matches runCodeCheck()'s existing
     // rate-limit-skip precedent just above; a bug in the check itself shouldn't fail the build.
     res.json({ status: 'pass', issues: [] });
+  }
+});
+
+// ============================================
+// ONE PROMPT PATTERN MEMORY (freeform, opt-out/default-on) — decided design, not structured
+// fields: after a build completes, one small LLM call infers a short general preference
+// signal and rolls it into a per-user TEXT summary, which a future build's stage-1 prompt
+// splices in as a soft hint. Own endpoints only — no other feature reads or writes these
+// columns, and nothing here touches App Builder's or ordinary Chat's own prompt construction.
+// ============================================
+
+// Rolls a newly-inferred sentence into the existing stored summary. Append, not replace — a
+// single inference from one build is a weak signal on its own; the value is in what
+// accumulates across builds. Capped (not unbounded) for two reasons: keeps the per-build
+// splice into stage-1's prompt small and cheap (this is soft context, not worth meaningful
+// token budget), and keeps the summary itself readable in the settings UI rather than growing
+// into an ever-longer, less useful blob. When trimming to stay under the cap, the OLDEST
+// bullets are dropped first — recent inferences are more likely to reflect a user's current
+// preferences than something inferred many builds ago. Also skips appending outright if the
+// new sentence is already present (case-insensitive substring) — cheap dedup so a stable,
+// repeatedly-inferred preference doesn't spam the same line over and over.
+const DW_PREF_SUMMARY_CAP = 600;
+function mergePreferenceSummary(existing, newSentence) {
+  const clean = (newSentence || '').trim();
+  if (!clean) return existing || '';
+  const prior = existing || '';
+  const cleanLower = clean.toLowerCase();
+  // Two-way containment: skip if the new sentence is already covered by the existing text
+  // verbatim, OR if the new sentence is itself a longer rephrasing that fully contains an
+  // existing bullet's wording — catches the same repeated signal phrased slightly differently
+  // build to build (a plain one-way substring check only caught the first direction).
+  if (prior.toLowerCase().indexOf(cleanLower) !== -1) return prior;
+  const existingLines = prior.split('\n').map(l => l.replace(/^-\s*/, '').trim().toLowerCase()).filter(Boolean);
+  if (existingLines.some(l => l && cleanLower.indexOf(l) !== -1)) return prior;
+  let merged = prior ? (prior + '\n- ' + clean) : ('- ' + clean);
+  if (merged.length > DW_PREF_SUMMARY_CAP) {
+    const lines = merged.split('\n').filter(Boolean);
+    while (lines.length > 1 && lines.join('\n').length > DW_PREF_SUMMARY_CAP) lines.shift();
+    merged = lines.join('\n');
+  }
+  return merged;
+}
+
+// One small, cheap Groq call (8B, low reasoning effort, tiny output cap) — asks for ONE short
+// generalizable preference sentence, or the literal NONE when nothing beyond this single build
+// is reasonably inferable (deliberately conservative: a one-off request shouldn't get
+// generalized into a lasting "preference").
+async function summarizeBuildPreference(idea, codeExcerpt) {
+  const sysMsg = 'You infer ONE short, general preference signal (under 15 words) from a single app-building request and the app that resulted — something that plausibly applies to FUTURE apps this same user builds too, not just this one (examples: "prefers dark, minimal color schemes", "tends to build mobile-first, form-heavy apps", "likes playful/colorful UI"). If nothing general is clearly inferable — the request is too specific or one-off to generalize from — respond with exactly: NONE. Respond with ONLY the sentence or NONE. No preamble, no quotes, no trailing punctuation beyond the sentence itself.';
+  const userMsg = 'App idea: ' + String(idea || '').slice(0, 500) + '\n\nGenerated app (excerpt): ' + String(codeExcerpt || '').slice(0, 1500);
+  // 100, not a tighter cap matching the ~15-word target answer — live testing found GROQ_8B's
+  // own reasoning tokens (even at reasoning_effort:'low') can consume the entire budget before
+  // any answer text is emitted (finishReason:'length', outputLength:0), silently dropping a
+  // real signal in a way indistinguishable from a deliberate NONE response. Still small/cheap
+  // relative to the generation stages' 8192-token budgets.
+  const raw = (await callGroqModel(MODELS.GROQ_8B, userMsg, sysMsg, [], 100, 15000, false, 'low', '/api/dw-capture-preference')).trim();
+  if (!raw || /^NONE\.?$/i.test(raw)) return '';
+  return raw.replace(/^["'\-\s]+|["'\-\s]+$/g, '').slice(0, 150);
+}
+
+// Read-only — used both by startBuild()'s pre-build splice fetch and the settings UI. Absent
+// row values (new column on an existing account) default exactly like the DB column defaults:
+// enabled=true, summary=''.
+app.get('/api/dw-preferences', requireAuth, (req, res) => {
+  try {
+    const row = db.prepare('SELECT build_preferences_summary, pattern_memory_enabled FROM users WHERE id = ?').get(req.session.userId);
+    res.json({
+      summary: (row && row.build_preferences_summary) || '',
+      enabled: row ? !!row.pattern_memory_enabled : true
+    });
+  } catch (err) {
+    console.error('[dw-preferences GET]', err.message);
+    res.status(500).json({ error: 'Could not load preferences' });
+  }
+});
+
+// Settings-UI write path — edit/clear the raw text and/or toggle the opt-out flag. Either field
+// is optional so the toggle and the text editor can each save independently.
+app.post('/api/dw-preferences', requireAuth, (req, res) => {
+  try {
+    const { summary, enabled } = req.body;
+    if (typeof summary === 'string') {
+      db.prepare('UPDATE users SET build_preferences_summary = ? WHERE id = ?').run(summary.slice(0, 2000) || null, req.session.userId);
+    }
+    if (typeof enabled === 'boolean') {
+      db.prepare('UPDATE users SET pattern_memory_enabled = ? WHERE id = ?').run(enabled ? 1 : 0, req.session.userId);
+    }
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[dw-preferences POST]', err.message);
+    res.status(500).json({ error: 'Could not save preferences' });
+  }
+});
+
+// Fire-and-forget from the client after a build completes — never something the user is
+// waiting on, so failures here are logged and swallowed rather than surfaced. Checks the
+// opt-out flag itself (not just relying on the client to have checked) before spending an LLM
+// call, so a stale client-side toggle state can't cause an unwanted capture.
+app.post('/api/dw-capture-preference', requireAuth, async (req, res) => {
+  try {
+    const row = db.prepare('SELECT build_preferences_summary, pattern_memory_enabled FROM users WHERE id = ?').get(req.session.userId);
+    if (!row || !row.pattern_memory_enabled) return res.json({ ok: true, skipped: 'opted-out' });
+    const { idea, code } = req.body;
+    if (!idea || typeof idea !== 'string') return res.status(400).json({ error: 'Missing idea' });
+    const sentence = await summarizeBuildPreference(idea, String(code || ''));
+    if (!sentence) return res.json({ ok: true, added: false });
+    const merged = mergePreferenceSummary(row.build_preferences_summary, sentence);
+    db.prepare('UPDATE users SET build_preferences_summary = ? WHERE id = ?').run(merged, req.session.userId);
+    res.json({ ok: true, added: true, sentence });
+  } catch (err) {
+    console.error('[dw-capture-preference]', err.message);
+    res.json({ ok: true, added: false });
   }
 });
 

@@ -919,7 +919,26 @@ body.ab-flow-active .mac[onclick^="regenMsg"]{display:none!important}
           </div>
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
             <div style="font-size:10px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.5px">Quick examples:</div>
-            <button onclick="dwReset()" style="background:none;border:1px solid var(--border);border-radius:var(--r);cursor:pointer;font-size:10px;color:var(--text3);padding:2px 8px;font-family:inherit;line-height:1.6">&#8634; Reset</button>
+            <div style="display:flex;gap:6px">
+              <button onclick="dwTogglePrefPanel()" style="background:none;border:1px solid var(--border);border-radius:var(--r);cursor:pointer;font-size:10px;color:var(--text3);padding:2px 8px;font-family:inherit;line-height:1.6">&#129504; Preferences</button>
+              <button onclick="dwReset()" style="background:none;border:1px solid var(--border);border-radius:var(--r);cursor:pointer;font-size:10px;color:var(--text3);padding:2px 8px;font-family:inherit;line-height:1.6">&#8634; Reset</button>
+            </div>
+          </div>
+          <div id="dw-pref-panel" style="display:none;border:1px solid var(--border);border-radius:var(--r);padding:10px 12px;margin-bottom:10px;background:var(--bg2)">
+            <div style="font-size:11px;font-weight:700;color:var(--text2);margin-bottom:4px">What ForgeAI has learned about your build preferences</div>
+            <div style="font-size:10px;color:var(--text3);margin-bottom:8px">After each build, One Prompt notes any general preference it can infer (e.g. color style, platform) and softly applies it to future builds — never overriding what you explicitly ask for. Nothing is sent anywhere except this app's own server.</div>
+            <textarea id="dw-pref-text" placeholder="No preferences learned yet." style="width:100%;min-height:70px;border:1px solid var(--border2);border-radius:var(--r);padding:7px 9px;font-size:11px;font-family:inherit;resize:vertical;outline:none;color:var(--text);background:var(--bg)"></textarea>
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-top:8px;flex-wrap:wrap;gap:8px">
+              <label style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--text2);cursor:pointer">
+                <input id="dw-pref-enabled" type="checkbox" onchange="dwPrefToggleEnabled(this.checked)">
+                Remember my preferences across builds
+              </label>
+              <div style="display:flex;gap:6px">
+                <button onclick="dwPrefClear()" style="font-size:11px;padding:4px 10px;border:1px solid var(--border);border-radius:var(--r);background:var(--bg);cursor:pointer;color:var(--text2);font-family:inherit">Clear</button>
+                <button onclick="dwPrefSave()" style="font-size:11px;padding:4px 10px;border:1px solid var(--accent);border-radius:var(--r);background:var(--accent);color:white;cursor:pointer;font-family:inherit;font-weight:600">Save</button>
+              </div>
+            </div>
+            <div id="dw-pref-msg" style="font-size:10px;color:var(--text3);margin-top:6px"></div>
           </div>
           <div class="dw-examples">
             <div class="dw-ex" onclick="setPrompt('restaurant booking app with payments')"><div class="dw-ex-icon">🍽️</div><div class="dw-ex-text">Restaurant booking with payments</div></div>
@@ -5230,6 +5249,74 @@ function _dwStageCall(n,prompt,prev,hard){
       _dwMarkStage(n,'skipped');return prev;
     });
 }
+// One Prompt pattern memory settings UI — freeform text, opt-out toggle, both backed by
+// /api/dw-preferences (server.js). Self-contained inside dw-p1; nothing here touches App
+// Builder or ordinary Chat.
+function dwTogglePrefPanel(){
+  var panel=document.getElementById('dw-pref-panel');
+  if(!panel)return;
+  var opening=panel.style.display==='none';
+  panel.style.display=opening?'block':'none';
+  if(opening)dwPrefLoad();
+}
+function dwPrefLoad(){
+  var msgEl=document.getElementById('dw-pref-msg');
+  if(msgEl)msgEl.textContent='Loading...';
+  fetch('/api/dw-preferences')
+    .then(function(r){return r.json();})
+    .then(function(d){
+      var ta=document.getElementById('dw-pref-text');
+      var cb=document.getElementById('dw-pref-enabled');
+      if(ta)ta.value=d.summary||'';
+      if(cb)cb.checked=!!d.enabled;
+      if(msgEl)msgEl.textContent=d.summary?'':'No preferences learned yet.';
+    })
+    .catch(function(){if(msgEl)msgEl.textContent='Could not load — connection error.';});
+}
+function dwPrefSave(){
+  var ta=document.getElementById('dw-pref-text');
+  var msgEl=document.getElementById('dw-pref-msg');
+  if(!ta)return;
+  if(msgEl)msgEl.textContent='Saving...';
+  fetch('/api/dw-preferences',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({summary:ta.value})})
+    .then(function(r){return r.json();})
+    .then(function(d){if(msgEl)msgEl.textContent=d.error?d.error:'Saved ✅';})
+    .catch(function(){if(msgEl)msgEl.textContent='Save failed — connection error.';});
+}
+function dwPrefClear(){
+  var ta=document.getElementById('dw-pref-text');
+  if(ta)ta.value='';
+  dwPrefSave();
+}
+function dwPrefToggleEnabled(checked){
+  var msgEl=document.getElementById('dw-pref-msg');
+  fetch('/api/dw-preferences',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled:checked})})
+    .then(function(r){return r.json();})
+    .then(function(d){if(msgEl)msgEl.textContent=d.error?d.error:(checked?'Pattern memory enabled ✅':'Pattern memory disabled — nothing will be learned or applied.');})
+    .catch(function(){if(msgEl)msgEl.textContent='Could not save toggle — connection error.';});
+}
+// Pre-build splice — a soft hint, not a hard instruction, since this is inferred preference
+// data rather than something the user explicitly typed this time. Always resolves (never
+// rejects) so startBuild() never has to special-case a failure here — no hint, empty string,
+// exactly like today's behavior with no preference data.
+function _dwFetchPreferenceHint(){
+  return fetch('/api/dw-preferences')
+    .then(function(r){return r.ok?r.json():{summary:'',enabled:false};})
+    .then(function(d){
+      if(!d||!d.enabled||!d.summary)return '';
+      return ' Soft context, not a hard requirement — based on this user\'s past builds, they have generally shown these preferences: '+d.summary.replace(/^-\s*/gm,'').replace(/\n/g,'; ')+'. Only apply this where it does not conflict with anything explicitly requested above.';
+    })
+    .catch(function(){return '';});
+}
+// Post-build capture — fire-and-forget, called alongside showResult() (never awaited/blocking
+// it). The server itself re-checks the opt-out flag before spending an LLM call, so this is
+// safe to call unconditionally; kept as a no-network-call short-circuit here too purely to
+// avoid a pointless request when we already know from the pre-build fetch that memory is off
+// (best-effort — if that check was stale, the server-side check is still authoritative).
+function _dwCaptureBuildPreference(inp,code){
+  if(!inp||!code)return;
+  fetch('/api/dw-capture-preference',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({idea:inp,code:String(code).slice(0,4000)})}).catch(function(){});
+}
 var _dwStatusMsgs=['&#127912; Design ready aagudhu...','&#9889; Features wire aagudhu...','&#129513; Buttons fix aagudhu...','&#128241; Layout set aagudhu...','&#10024; Final touches...'];
 var _dwStatusTimer=null,_dwStatusIdx=0;
 function startBuild(){
@@ -5289,6 +5376,10 @@ function startBuild(){
     pTimer=setInterval(function(){pct=Math.min(pct+0.4,pTarget);prog.style.width=pct+'%';},600);
   }
   var currentHtml='';
+  // Pattern-memory splice happens before stage 1 is even constructed, since the hint (if any)
+  // needs to be part of s1's own string — see _dwFetchPreferenceHint() above (always resolves,
+  // never rejects, so this never delays or fails the build over a preferences-fetch hiccup).
+  _dwFetchPreferenceHint().then(function(prefHint){
   var s1='Generate the HTML structural skeleton for this app: '+inp+'. Create ONLY the foundation: DOCTYPE, head with meta tags, page title, CSS variables (colors, fonts, border-radius), basic reset and layout. Add the main HTML sections with placeholder text (header, nav if needed, main content areas). Keep CSS minimal — layout structure only, no decorative styling yet.'
     // Design-token foundation, adapted from App Builder's own DESIGN SYSTEM block
     // (index.html:3850) — same underlying principles (CSS custom properties for a
@@ -5309,6 +5400,7 @@ function startBuild(){
     // present, stage 3 explicitly "WITHOUT changing functionality"), so neither can introduce a
     // new feature category on its own even without repeating this instruction.
     +' Also fill in the small, obvious gaps a real version of this app would need — features clearly implied by the user\'s own description, not separate additions (for example: a booking app implies letting users view or cancel their existing bookings; a todo app implies marking items complete and deleting them; a blog implies a comment section). Do NOT add an entire feature category the user did not ask for — specifically, do not add login, signup, or authentication, a payment or checkout system, or an admin panel, unless the user\'s own app description explicitly mentions one of those. Each of those is a separate product decision, not an implied detail. If unsure whether something is an implied detail versus a separate feature category, leave it out.'
+    +prefHint
     +' Output ONLY a complete single-file HTML in one html code block.';
   _dwStageCall(1,s1,'',true)
     .then(function(h1){
@@ -5344,7 +5436,9 @@ function startBuild(){
       clearInterval(pTimer);prog.style.width='100%';
       document.getElementById('dws2').className='dws done';
       document.getElementById('dws3').className='dws active';
-      setTimeout(function(){showResult(inp,finalHtml||currentHtml);},400);
+      var doneCode=finalHtml||currentHtml;
+      setTimeout(function(){showResult(inp,doneCode);},400);
+      _dwCaptureBuildPreference(inp,doneCode); // fire-and-forget, never delays showResult() above
     })
     .catch(function(){
       _dwMarkStage(1,'skipped');
@@ -5361,6 +5455,7 @@ function startBuild(){
           document.getElementById('dws2').className='dws done';
           document.getElementById('dws3').className='dws active';
           setTimeout(function(){showResult(inp,code);},400);
+          _dwCaptureBuildPreference(inp,code); // fire-and-forget, never delays showResult() above
         })
         .catch(function(err){
           clearInterval(pTimer);
@@ -5371,6 +5466,7 @@ function startBuild(){
           showBuildError(msg);
         });
     });
+  });
 }
 function showResult(inp,code){
   document.getElementById('dw-p2').style.display='none';
