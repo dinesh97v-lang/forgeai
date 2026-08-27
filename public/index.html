@@ -4800,12 +4800,17 @@ function send(){
   if(chatFieldMode)console.log('[test-trigger] count='+_flTeachCount+' forceTest='+_ft);
   if(attSnap)fetchBody.attachment={type:attSnap.type,name:attSnap.name,mimeType:attSnap.mimeType,data:attSnap.data};
   // Streaming opt-in — mirrors server.js's own canStream exclusions client-side (reading the
-  // same fetchBody fields canStream itself checks, not reimplementing appBuilderClientOwns'
-  // isSimple()-derived logic) so this only ever attempts the SSE path when the server will
-  // actually take it. In Pro mode, _buildChatFetchBody already set appBuilderClientOwns=true
-  // above (untouched, out of scope) — canStream excludes that server-side too, so Pro-mode
-  // messages always fall through to the unchanged non-streaming fetch below exactly as before.
-  var _wantsStream=isSimple()&&!fetchBody.appBuilderBuild&&!fetchBody.appBuilderClientOwns&&!fetchBody.fieldMode&&!fetchBody.fieldPreviewMode&&!fetchBody.evaluateTest&&!fetchBody.attachment;
+  // same fetchBody fields canStream itself checks, not reimplementing any of their derivation
+  // logic) so this only ever attempts the SSE path when the server will actually take it.
+  // isSimple() and appBuilderClientOwns dropped from this condition (Piece 3, Step 2) — canStream
+  // itself no longer excludes on appBuilderClientOwns (Task A: it's set unconditionally on every
+  // Pro-mode message, not just real builds, so keeping it here would have kept blocking all
+  // Pro-mode chat from streaming even after that server-side fix). fetchBody.appBuilderBuild is
+  // the actual signal that distinguishes an in-flight guided-flow build from ordinary chat —
+  // _buildChatFetchBody only sets it true when _abState.phase==='building' (untouched, out of
+  // scope) — checking it directly here (already present below) is sufficient on its own, exactly
+  // mirroring canStream's own appBuilderBuild exclusion; no new detection mechanism needed.
+  var _wantsStream=!fetchBody.appBuilderBuild&&!fetchBody.fieldMode&&!fetchBody.fieldPreviewMode&&!fetchBody.evaluateTest&&!fetchBody.attachment;
   if(_wantsStream)fetchBody.stream=true;
   _lockSend();
   var origChatId=chCurId();
