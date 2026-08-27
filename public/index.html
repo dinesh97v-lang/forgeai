@@ -4944,15 +4944,37 @@ function send(){
     })
     .catch(function(err){
       if(_abBuildTimer)clearTimeout(_abBuildTimer);
-      var ty=document.getElementById('typ');if(ty)ty.remove();
+      // Detects _chatStreamFetch's interrupted-SSE-event rejection without touching
+      // _chatStreamFetch itself (out of scope) — it throws a plain Error whose .name is just
+      // 'Error', so there's no .name/property to key on directly. Matches on the server's own
+      // known message text instead (server.js's streamChatWithFallback hardcodes 'Response
+      // interrupted — please regenerate.' as the interrupted event's error field, untouched
+      // here) — a real but unavoidable string coupling given neither side of this can be
+      // modified in this fix; positive-matches on that specific wording rather than excluding
+      // the other known rejection shapes, so a genuine network failure (e.g. "Failed to fetch")
+      // can't be misclassified as an interruption.
+      var _isInterruptedError=!!(err&&/interrupted|regenerate/i.test(err.message||''));
+      var ty=document.getElementById('typ');
+      if(ty){
+        if(_isInterruptedError&&_streamBub&&_streamBub.textContent){
+          // Partial content already streamed into ty's own .bub — keep it visible instead of
+          // wiping it. Drop the id so a later send() call's own document.getElementById('typ')
+          // can't mistakenly grab this now-finalized (if incomplete) reply.
+          ty.removeAttribute('id');
+        }else{
+          ty.remove();
+        }
+      }
       _abBuildInFlight=false;
       // Differentiate by cause instead of one generic string for every rejection: our own
       // AbortController fires an AbortError (the 90s build timeout, see _abBuildTimer above); a
       // response body that doesn't parse as JSON (e.g. a raw crash/error page) throws a
-      // SyntaxError from r.json(); anything else (offline, DNS failure, connection refused) is a
-      // genuine network-level failure.
+      // SyntaxError from r.json(); an interrupted stream already carries the server's own
+      // specific, accurate message (see _isInterruptedError above); anything else (offline, DNS
+      // failure, connection refused) is a genuine network-level failure.
       var failMsg=(err&&err.name==='AbortError')?'Build took too long and timed out. Please try again.'
         :(err&&err.name==='SyntaxError')?'Server sent back something unexpected. Please try again.'
+        :_isInterruptedError?(err.message||'Response interrupted — please regenerate.')
         :'Connection error — is the server running?';
       _abHandleBuildFailure(origChatId,msgs,failMsg);
       _unlockSend();
