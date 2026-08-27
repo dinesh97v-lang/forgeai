@@ -1531,7 +1531,8 @@ function chOpen(id){
           var ccId='cc-r'+i;
           _ccStore[ccId]={files:null,fixedFiles:null,lastIssues:[]};
           var ccWrap=document.createElement('div');ccWrap.className='cc-wrap';ccWrap.id=ccId;
-          ccWrap.innerHTML='<button class="cc-check-btn" onclick="ccRunCheck(\''+ccId+'\')">&#10003; Check &amp; Download ZIP</button>';
+          ccWrap.innerHTML='<button class="cc-check-btn" onclick="ccRunCheck(\''+ccId+'\')">&#10003; Check &amp; Download ZIP</button>'
+            +'<button class="cc-check-btn" onclick="_ccSaveMsgToProject('+i+',this)">&#128193; Save to Project</button>';
           cm.appendChild(ccWrap);
         }
         // Live only if this card belongs to the chat _abState now carries (chatId, set/rehydrated
@@ -4892,6 +4893,12 @@ function send(){
         if(d.model)_histMsg.model=d.model;
         if(d.time)_histMsg.time=d.time;
         if(_qrParsed&&_qrParsed.qr)_histMsg.qrOptions=_qrParsed.qr.options;
+        // Captured now, while _abState still reflects THIS message (nulled a few lines below,
+        // only once this is a genuine build completion) — stored on the message itself so
+        // _ccSaveMsgToProject can read a real app name later (including after a reload/chat
+        // switch) without needing _abState at all, and without embedding free-form user text
+        // into an onclick="..." HTML attribute (a real escaping risk avoided entirely this way).
+        if(_abState&&_abState.phase==='building'&&_abState.intentText)_histMsg.appName=_abState.intentText.slice(0,60);
         chatHistory.push(_histMsg);
         saveChat();chSync();
         var ai=document.createElement('div');ai.className='msg';
@@ -4904,7 +4911,8 @@ function send(){
           var ccId='cc-'+Date.now();
           _ccStore[ccId]={files:null,fixedFiles:null,lastIssues:[]};
           var ccWrap=document.createElement('div');ccWrap.className='cc-wrap';ccWrap.id=ccId;
-          ccWrap.innerHTML='<button class="cc-check-btn" onclick="ccRunCheck(\''+ccId+'\')">&#10003; Check &amp; Download ZIP</button>';
+          ccWrap.innerHTML='<button class="cc-check-btn" onclick="ccRunCheck(\''+ccId+'\')">&#10003; Check &amp; Download ZIP</button>'
+            +'<button class="cc-check-btn" onclick="_ccSaveMsgToProject('+(chatHistory.length-1)+',this)">&#128193; Save to Project</button>';
           msgs.appendChild(ccWrap);
         }
         if(chatFieldMode){
@@ -6674,6 +6682,37 @@ function prjAssignChat(chatId,anchorEl){
   });
 }
 
+// Generic "Save to Project" for any code-fenced chat message (App Builder's generated-app
+// replies included — App Builder has no dedicated result panel of its own the way One Prompt
+// does, so this attaches to the same cc-wrap element the existing "Check & Download ZIP"
+// button already uses, at all 3 places that button gets rendered: send()'s own live-finalization
+// handler, chOpen(), and initPageAll()'s historical re-renders). Reuses prjSaveApp below exactly
+// as-is (One Prompt's own reference implementation, untouched) for the actual save — this is
+// purely a message-lookup + code-extraction layer in front of it, not a new save mechanism.
+// Own small fence-extraction copy rather than calling into ccGetFiles() (which scans the WHOLE
+// chatHistory for every code block across every message — overkill and semantically wrong here,
+// where the goal is "save THIS one reply's app") or _dwCleanHtml() (One Prompt's own, untouched)
+// — kept independent so neither existing feature gains a new dependency.
+function _ccExtractFirstCode(text){
+  var m=/```[^\n`]*\n?([\s\S]*?)```/.exec(text||'');
+  return m?m[1].trim():'';
+}
+// Looks the message up live from chatHistory by index at click time (mirrors ccRunCheck's own
+// id/lookup pattern) instead of embedding a potentially large code string — or free-form user
+// text for the name, a real HTML-attribute-escaping risk — directly into an onclick attribute.
+// The optional name comes from m.appName, set once at push time by send()'s live-finalization
+// handler only when the message is a genuine App Builder build completion (see _histMsg.appName
+// there) — reading it back from the message object itself means it survives a reload/chat
+// switch correctly and is never derived from the CURRENT global _abState here, which would be
+// wrong for any message other than whichever one _abState currently happens to reflect.
+// Messages with no stored appName (ordinary chat code blocks, or any older historical message)
+// correctly fall through to prjSaveApp's own 'App' default.
+function _ccSaveMsgToProject(idx,anchorEl){
+  var m=chatHistory[idx];
+  var code=m?_ccExtractFirstCode(m.content):'';
+  if(!code){notify('No app to save yet!');return;}
+  prjSaveApp(code,m.appName,anchorEl);
+}
 function prjSaveApp(code,name,anchorEl){
   if(!code){notify('No app to save yet!');return;}
   showProjPicker(anchorEl,function(projId){
@@ -6955,7 +6994,8 @@ function initPageAll(){
             var ccId='cc-r'+i;
             _ccStore[ccId]={files:null,fixedFiles:null,lastIssues:[]};
             var ccWrap=document.createElement('div');ccWrap.className='cc-wrap';ccWrap.id=ccId;
-            ccWrap.innerHTML='<button class="cc-check-btn" onclick="ccRunCheck(\''+ccId+'\')">&#10003; Check &amp; Download ZIP</button>';
+            ccWrap.innerHTML='<button class="cc-check-btn" onclick="ccRunCheck(\''+ccId+'\')">&#10003; Check &amp; Download ZIP</button>'
+              +'<button class="cc-check-btn" onclick="_ccSaveMsgToProject('+i+',this)">&#128193; Save to Project</button>';
             cm.appendChild(ccWrap);
           }
           // Render every historical card disabled by default — re-armed below, but only the
