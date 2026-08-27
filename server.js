@@ -1486,7 +1486,15 @@ LANGUAGE RULE (STRICT): Detect the language of the user's most recent message. I
     sysPrompt += `\n\n=== MANDATORY APP-BUILD PROTOCOL (NON-NEGOTIABLE) ===
 
 STEP 0 — PLATFORM CHECK (BLOCKING):
-Before ANY mockup, ANY code, or ANY tech suggestion, you MUST know the target platform. If the user has not stated it, your NEXT response must ask ONLY this question — in the user's language — with a QUICK_REPLY block and NOTHING else app-related:
+Before ANY mockup, ANY code, or ANY tech suggestion, you MUST know the target platform — either because the user stated it, or because it is genuinely obvious from what the app is.
+
+Skip STEP 0 entirely and go straight to STEP 1 (treat this exactly like the user answered "Both / Not sure" — mobile-first responsive web) when EITHER of these holds:
+- The user's own message already states the platform (e.g. "web app", "desktop app", "mobile app", "runs in a browser").
+- The app idea describes something overwhelmingly likely to be used on a phone in real-world use — the same instant, obvious judgment call a real developer would make without needing to ask. Decide this per request, based on what the app actually is, not by matching a fixed list — a personal fitness/workout tracker, a notes/todo app, a social or chat app, a food-ordering app, or a QR-scanning tool are EXAMPLES of this pattern, not an exhaustive checklist. If a case looks similar in spirit to these, infer; if it doesn't, don't force it.
+
+Still ask STEP 0's question — do not skip it — when platform is genuinely ambiguous (e.g. a generic "task management app" with no other context could reasonably be phone, desktop, or both) or the idea is non-consumer-facing (backend service, CLI tool, internal admin panel, API/key manager — these have no meaningful "phone-first" reading at all). This is a rule for the genuinely obvious cases, not a default to skip asking — when in doubt, ask.
+
+If the user has not stated it and it is not obviously inferable per the above, your NEXT response must ask ONLY this question — in the user's language — with a QUICK_REPLY block and NOTHING else app-related:
 
 English version:
 <<QUICK_REPLY>>{"type":"quick_reply","question":"Where should your app run?","options":["📱 Phone only","💻 Desktop only","🌐 Both","🤷 Not sure"]}<<END_QUICK_REPLY>>
@@ -1494,7 +1502,7 @@ English version:
 [Use this style ONLY when the user writes Tanglish/Tamil] Tanglish version: "Unga app enga use aaganum?"
 <<QUICK_REPLY>>{"type":"quick_reply","question":"Unga app enga use aaganum?","options":["📱 Phone-la mattum","💻 Computer-la mattum","🌐 Rendulayum","🤷 Theriyala"]}<<END_QUICK_REPLY>>
 
-FORBIDDEN before platform answer exists: generating a mockup, writing any code, or suggesting a tech stack.
+FORBIDDEN before platform is known (stated, inferred, or answered): generating a mockup, writing any code, or suggesting a tech stack.
 FORBIDDEN always: asking the user to pick a programming language or framework — that is your decision (STEP 1).
 
 STEP 1 — TECH DECISION (INTERNAL — NEVER DESCRIBE THIS STEP TO THE USER):
@@ -1502,6 +1510,7 @@ Pick the tech stack yourself using this table. Do not ask the user to choose, an
 - Phone only  →  React Native (Expo)
 - Desktop only  →  HTML web app
 - Both / Not sure  →  Responsive HTML web app (mobile-first 430px base + desktop media queries). NEVER offer "React Native vs HTML" as a choice — responsive web IS the answer for both.
+- Platform inferred rather than asked in Step 0 (the "overwhelmingly likely to be used on a phone" case)  →  same row as "Both / Not sure" above — mobile-first responsive HTML web app, not React Native. Inferring only skips the QUESTION, it never changes which build this table produces.
 - User explicitly named a tech ("React la pannu", "Flutter app venum", "Python script")  →  use exactly that and skip Step 0.
 Your entire reply for this step must be ONLY the one-line announcement below, adapted to the user's language — nothing else, no explanation of the choice:
   English: "Building as a web app — works on phone browser and desktop from one link."
@@ -1522,9 +1531,12 @@ PHASE 2 — APPROVAL: Immediately after the \`\`\`html block, write 1–2 senten
 PHASE 3 — CODE: Only after the user chooses "Build it" (or equivalent approval), start generating the full working code — one file at a time.
 
 COMPLIANCE EXAMPLES:
-CORRECT — User: "AI-powered productivity app venum" → AI asks the platform question with chips. No mockup, no code yet.
+CORRECT — User: "AI-powered productivity app venum" → AI asks the platform question with chips. No mockup, no code yet. (Genuinely ambiguous — "productivity app" could reasonably be phone, desktop, or both.)
 WRONG — User: "AI-powered productivity app venum" → AI outputs a mockup immediately. (Violation — platform unknown.)
 CORRECT — User: "React la oru dashboard pannu" → AI builds in React. (User named the tech; skip Step 0.)
+CORRECT — User: "a workout tracker to log my gym sets" → AI skips the platform question, goes straight to Step 1's one-line announcement, then the mockup. (Overwhelmingly phone-first in real use — the same instant call a developer would make; no need to ask.)
+WRONG — User: "a workout tracker to log my gym sets" → AI still asks "Where should your app run?" (Violation — this is exactly the case Step 0's inference rule exists for.)
+CORRECT — User: "an internal admin tool for managing employee records" → AI asks the platform question with chips. (Non-consumer-facing — no obvious "phone-first" reading, genuine ambiguity stays.)
 
 DOES NOT APPLY TO: bug fixes, small snippets, single functions, adding one feature to existing code, Enterprise Mode, or explicit single-file requests.
 
@@ -2029,9 +2041,20 @@ app.post('/api/app-build-intro', requireAuth, async (req, res) => {
   const lang = detectLanguage(ideaText);
   const model = (lang === 'tamil' || lang === 'thanglish') ? MODELS.GEM_FLASH : MODELS.GROQ_70B;
 
+  // 4500, not 3000 — live testing found the Groq branch (reasoning_effort:'high') can burn
+  // nearly the entire budget on internal reasoning alone (observed: reasoning_tokens=2998 of a
+  // 3000-token cap, leaving none for the actual JSON answer — finishReason:'length',
+  // outputLength:0 — a silent failure that forces the rigid fixed-question fallback instead of
+  // this endpoint's own adaptive questions). max_tokens caps reasoning+answer combined for these
+  // models; there's no separate reasoning-only cap to set instead, so the fix is headroom: 4500
+  // leaves real room for the ~300-600 tokens the actual intro+questions+buildHints JSON needs
+  // even after a worst-case-observed reasoning burn. Left timeoutMs (15000) and the retry
+  // structure untouched — that's tightly coupled to the client's fixed 35000ms race ceiling
+  // (see the comment below), not part of this failure mode. Bumped for both branches for
+  // consistency, though the observed failure was specifically on the Groq/high-reasoning path.
   const callWith = (m) => m === MODELS.GEM_FLASH
-    ? callGeminiModel(m, ideaText, APP_BUILD_INTRO_PROMPT, [], 3000, 15000, true)
-    : callGroqModel(m, ideaText, APP_BUILD_INTRO_PROMPT, [], 3000, 15000, true, 'high', '/api/app-build-intro');
+    ? callGeminiModel(m, ideaText, APP_BUILD_INTRO_PROMPT, [], 4500, 15000, true)
+    : callGroqModel(m, ideaText, APP_BUILD_INTRO_PROMPT, [], 4500, 15000, true, 'high', '/api/app-build-intro');
   const callOnce = () => callWith(model);
   // Second-attempt model for the Tamil/Thanglish branch only: retry on GROQ_70B instead of
   // hitting Gemini again — a same-model retry doesn't help when Gemini's failure mode is
