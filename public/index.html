@@ -4565,6 +4565,76 @@ function _abHandleBuildFailure(origChatId,msgs,message){
     var _abBcChatId=_abState.chatId;_abState=null;_abClearState(_abBcChatId);
   }
 }
+// Ordinary-chat streaming — same SSE protocol server.js's streamChatWithFallback already emits
+// (event: content/done/interrupted), same idle+ceiling timeout shape as One Prompt's own
+// _dwStreamFetch (public/index.html, DW_STREAM_IDLE_MS/DW_STREAM_ABS_CEILING_MS) — mirrored as
+// this feature's own copy rather than calling into One Prompt's, so the two stay fully
+// decoupled (matches how this session has kept every other feature pair independent). Resolves
+// with a full `d`-shaped object ({reply, model, time, searched, enterprise} or {reply:'',
+// error}) instead of a bare string, so send()'s existing .then(function(d){...}) handler below
+// can consume it completely unchanged for both the streaming and non-streaming cases.
+var CHAT_STREAM_IDLE_MS=30000;
+var CHAT_STREAM_ABS_CEILING_MS=300000;
+function _chatStreamFetch(url,opts,onDelta){
+  var controller=new AbortController();
+  opts=opts||{};opts.signal=controller.signal;
+  var idleTimer=null;
+  function armIdle(){clearTimeout(idleTimer);idleTimer=setTimeout(function(){controller.abort();},CHAT_STREAM_IDLE_MS);}
+  var absTimer=setTimeout(function(){controller.abort();},CHAT_STREAM_ABS_CEILING_MS);
+  function clearTimers(){clearTimeout(idleTimer);clearTimeout(absTimer);}
+  armIdle();
+
+  function run(){
+    return fetch(url,opts).then(function(res){
+      if(!res.ok){
+        // A total-failure response (every model in the chain failed) is a plain JSON {error:...}
+        // body with a non-2xx status — server.js's outer /api/chat catch block, identical to the
+        // non-streaming path's own failure shape. The EXISTING non-streaming code below displays
+        // this inline via d.error (never routes it to send()'s .catch()), so resolve with the
+        // same shape here instead of throwing, to keep streaming and non-streaming failures
+        // rendering identically.
+        return res.json().then(function(d){return {reply:'',error:(d&&d.error)||'Something went wrong. Please try again.'};});
+      }
+      var reader=res.body.getReader();
+      var decoder=new TextDecoder();
+      var buf='',fullText='';
+      function pump(){
+        return reader.read().then(function(result){
+          if(result.done)throw new Error('Stream ended unexpectedly');
+          armIdle();
+          buf+=decoder.decode(result.value,{stream:true});
+          var idx;
+          while((idx=buf.indexOf('\n\n'))!==-1){
+            var frame=buf.slice(0,idx);buf=buf.slice(idx+2);
+            var lines=frame.split('\n');
+            var evLine=lines.find(function(l){return l.indexOf('event:')===0;});
+            var dataLine=lines.find(function(l){return l.indexOf('data:')===0;});
+            if(!evLine||!dataLine)continue;
+            var ev=evLine.slice(6).trim();
+            var data;try{data=JSON.parse(dataLine.slice(5).trim());}catch(e){continue;}
+            if(ev==='content'){
+              fullText+=data.text;
+              if(onDelta)onDelta(data.text);
+            }else if(ev==='done'){
+              return Object.assign({reply:fullText},data);
+            }else if(ev==='interrupted'){
+              // Matches One Prompt's own _dwStreamFetch precedent: discard whatever partial text
+              // already streamed in and let this reject to send()'s existing .catch() handler,
+              // rather than trying to salvage/display a partial reply.
+              throw new Error(data.error||'Response interrupted');
+            }
+          }
+          return pump();
+        });
+      }
+      return pump();
+    });
+  }
+  return run().then(
+    function(d){clearTimers();return d;},
+    function(err){clearTimers();throw err;}
+  );
+}
 function send(){
   if(_sendPending){_abBuildInFlight=false;return;}
   var inp=document.getElementById('chat-in');
@@ -4729,6 +4799,14 @@ function send(){
   if(_ft)fetchBody.forceTest=true;
   if(chatFieldMode)console.log('[test-trigger] count='+_flTeachCount+' forceTest='+_ft);
   if(attSnap)fetchBody.attachment={type:attSnap.type,name:attSnap.name,mimeType:attSnap.mimeType,data:attSnap.data};
+  // Streaming opt-in — mirrors server.js's own canStream exclusions client-side (reading the
+  // same fetchBody fields canStream itself checks, not reimplementing appBuilderClientOwns'
+  // isSimple()-derived logic) so this only ever attempts the SSE path when the server will
+  // actually take it. In Pro mode, _buildChatFetchBody already set appBuilderClientOwns=true
+  // above (untouched, out of scope) — canStream excludes that server-side too, so Pro-mode
+  // messages always fall through to the unchanged non-streaming fetch below exactly as before.
+  var _wantsStream=isSimple()&&!fetchBody.appBuilderBuild&&!fetchBody.appBuilderClientOwns&&!fetchBody.fieldMode&&!fetchBody.fieldPreviewMode&&!fetchBody.evaluateTest&&!fetchBody.attachment;
+  if(_wantsStream)fetchBody.stream=true;
   _lockSend();
   var origChatId=chCurId();
   // Build requests (step 6) get a client-side abort timeout: fetch() has no timeout of its own,
@@ -4742,8 +4820,28 @@ function send(){
     _fetchOpts.signal=_abBuildAbort.signal;
     _abBuildTimer=setTimeout(function(){_abBuildAbort.abort();},90000);
   }
-  fetch('/api/chat',_fetchOpts)
-    .then(function(r){return r.json();})
+  // Live-growing plain-text bubble in place of the typing dots — plain textContent, never
+  // formatMarkdown, while chunks are still arriving (checked formatMarkdown: it tolerates an
+  // unterminated ``` fence at the very end of a string, but has no equivalent tolerance for a
+  // partial inline marker like an unclosed ** or [link](url — running it per-chunk could flicker
+  // broken-looking markup mid-stream). formatMarkdown still runs exactly once, on the complete
+  // text, in the unchanged .then(function(d){...}) handler below — identical final rendering to
+  // the non-streaming path, only the live-arrival visual is new.
+  var _streamBub=null;
+  function _chatStreamOnDelta(text){
+    if(!_streamBub){
+      var tyEl=document.getElementById('typ');
+      if(!tyEl)return;
+      tyEl.innerHTML='<div class="mav ai">F</div><div><div class="bub"></div></div>';
+      _streamBub=tyEl.querySelector('.bub');
+    }
+    _streamBub.textContent+=text;
+    msgs.scrollTop=msgs.scrollHeight;
+  }
+  var _chatFetchPromise=_wantsStream
+    ? _chatStreamFetch('/api/chat',_fetchOpts,_chatStreamOnDelta)
+    : fetch('/api/chat',_fetchOpts).then(function(r){return r.json();});
+  _chatFetchPromise
     .then(function(d){
       if(_abBuildTimer)clearTimeout(_abBuildTimer);
       var ty=document.getElementById('typ');if(ty)ty.remove();
