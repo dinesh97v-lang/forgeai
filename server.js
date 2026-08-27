@@ -1392,6 +1392,19 @@ app.post('/api/chat', requireAuth, async (req, res) => {
   // fieldMode-family flag, image attachments (their own early-return branch below, listed here
   // too for clarity), and App Builder's build-generation/protocol-continuation paths, which stay
   // on the untouched non-streaming callWithFallback path regardless of this flag.
+  //
+  // Piece 3 (Task A): appBuilderClientOwns !== true deliberately dropped from this list.
+  // appBuilderClientOwns is set unconditionally on EVERY Pro-mode message (public/index.html's
+  // _buildChatFetchBody, FEATURES.appBuilder && !isSimple() — untouched here), not just build
+  // traffic, so keeping it here excluded ALL Pro-mode chat from streaming, not just active
+  // builds. appBuilderBuild !== true already excludes real build-generation/continuation
+  // requests on its own (it's only ever true when _abState.phase==='building', at both its
+  // call sites — public/index.html's _buildChatFetchBody and _abContinueBuild's explicit
+  // fetch) — that exclusion, plus !isProtocolContinuation below, is sufficient on its own, so
+  // dropping the redundant appBuilderClientOwns check here re-admits ordinary (non-building)
+  // Pro-mode chat to streaming without touching what appBuilderClientOwns means or does
+  // anywhere else (isProtocolContinuation's own definition, Mechanism B's skip condition, and
+  // the quick-reply-injection backstop below all still read the real, unmodified value).
   const wantsStream = req.body.stream === true;
   const canStream = wantsStream
     && !(fieldMode && fieldMode.trim())
@@ -1399,7 +1412,6 @@ app.post('/api/chat', requireAuth, async (req, res) => {
     && !evaluateTest
     && !(attachment && attachment.type === 'image')
     && appBuilderBuild !== true
-    && appBuilderClientOwns !== true
     && !isProtocolContinuation;
 
   const startTime  = Date.now();
