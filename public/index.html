@@ -3424,13 +3424,23 @@ function _abClassifyRelevantAnswer(text,question,cb){
     console.log('[abRelevanceClassify] text='+JSON.stringify(text)+' question='+JSON.stringify(question)+' result='+JSON.stringify(result)+' elapsedMs='+Math.round(performance.now()-_t0));
     cb(result);
   }
-  var classifyQuestion='The user was asked: "'+question+'" during an app-building conversation, as a multiple-choice question. They typed a free-text reply that did not match any of the listed options. Is their reply actually attempting to answer that question in their own words, or is it an unrelated aside/comment that has nothing to do with the question?';
-  var options=['relevant answer','unrelated aside'];
+  // Three-way classification, not a binary — a real, live-reproduced bug (server logs confirmed
+  // it fired and confidently, not a timeout/null default) showed the original two-option framing
+  // ("attempting to answer" vs "has nothing to do with the question") has no category for a
+  // clarifying question directed AT the assistant about the SAME topic (e.g. "which field should
+  // I focus on first, suggest one" / "explain what interface means, then I'll pick a card") — that
+  // input is clearly on-topic, so the model reasonably but wrongly picked "relevant answer" for
+  // it. The third option below routes to the exact same 'aside' outcome unrelated asides already
+  // get (_abGenerateOffTopicReply, unmodified — it already generates a real reply and re-shows
+  // the pending question, which is the correct handling for a clarifying question too). The
+  // caller-facing return shape is unchanged: still only ever 'relevant'/'aside'/null.
+  var classifyQuestion='The user was asked: "'+question+'" during an app-building conversation, as a multiple-choice question. They typed a free-text reply that did not match any of the listed options. Which of these best describes their reply: (a) they are actually attempting to answer that question in their own words, (b) they are asking the assistant a question or requesting clarification about the SAME topic — for example asking what something means, asking the assistant to explain or suggest an option, or asking for more detail before they choose — or (c) it is an unrelated aside/comment that has nothing to do with the question?';
+  var options=['relevant answer','question for the assistant','unrelated aside'];
   fetch('/api/ab-match-option',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:text,options:options,question:classifyQuestion}),signal:_abRelAbort.signal})
     .then(function(r){return r.json();})
     .then(function(d){
       var m=(d&&typeof d.match==='string')?d.match:null;
-      finish(m==='relevant answer'?'relevant':(m==='unrelated aside'?'aside':null));
+      finish(m==='relevant answer'?'relevant':((m==='unrelated aside'||m==='question for the assistant')?'aside':null));
     })
     .catch(function(){finish(null);});
 }
