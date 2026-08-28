@@ -4844,7 +4844,25 @@ function send(){
   qCancel();attachClear();
   var typ=document.createElement('div');typ.id='typ';typ.className='msg';
   typ.innerHTML='<div class="mav ai">F</div><div class="bub"><div class="typing"><div class="dot"></div><div class="dot"></div><div class="dot"></div></div></div>';
-  msgs.appendChild(typ);msgs.scrollTop=msgs.scrollHeight;
+  msgs.appendChild(typ);
+  // Honest, real-lifecycle status caption for a genuine App Builder build or "Request a change"
+  // follow-up specifically — replaces buildLogs (confirmed dead/unused elsewhere in this file:
+  // zero consumers), which described fake stages ("Building backend...", "Running tests...") that
+  // never corresponded to anything actually happening. Ordinary chat gets no caption, unchanged.
+  // Deliberately a SEPARATE sibling element, not nested inside typ's own innerHTML: a follow-up
+  // request streams (_wantsStream, untouched here), and _chatStreamOnDelta (streaming
+  // infrastructure, out of scope for this fix) replaces typ's entire innerHTML the moment the
+  // first chunk arrives — nesting this caption inside typ would have it destroyed instantly.
+  // Kept as its own element instead, so it survives regardless of what typ's own content does.
+  var _abStatusText=(_abState&&_abState.phase==='building')?'Building your app… this can take a minute or two'
+    :(_abPostBuildSkip?'Applying your change… this can take a minute or two':'');
+  if(_abStatusText){
+    var _abStatusDiv=document.createElement('div');_abStatusDiv.id='ab-build-status';
+    _abStatusDiv.style.cssText='font-size:11px;color:var(--text2);margin:2px 0 6px 40px';
+    _abStatusDiv.textContent=_abStatusText;
+    msgs.appendChild(_abStatusDiv);
+  }
+  msgs.scrollTop=msgs.scrollHeight;
   go('chat',document.querySelector((isSimple()?'#simple-nav':'#pro-nav')+' .ni'));
   var apiPrompt=qtSnap?'Quoted text: "'+qtSnap+'"\n\nUser question: '+t:t;
   // Strip attachment from history items (no base64 replay; replace empty content with label)
@@ -4931,7 +4949,12 @@ function send(){
   _chatFetchPromise
     .then(function(d){
       if(_abBuildTimer)clearTimeout(_abBuildTimer);
-      var ty=document.getElementById('typ');if(ty)ty.remove();
+      // Not removed immediately here — for a genuine build/follow-up about to enter the
+      // self-correction pass (checked further below), it stays visible with updated text through
+      // that pass instead of vanishing into a silent gap. Every early-return path above/below that
+      // doesn't reach the self-correction check removes it explicitly, same as this line used to.
+      var ty=document.getElementById('typ');
+      var tyStatus=document.getElementById('ab-build-status');
       _abBuildInFlight=false;
       // Server-reported failure (bad key/quota/too-large/etc — a valid JSON {error:...} body from
       // callWithFallback() exhausting every model) still parses successfully here same as a real
@@ -4939,6 +4962,8 @@ function send(){
       // reply-rendering below, gets displayed as if it were the generated app, and _abState gets
       // silently nulled a few lines down with no persisted failure notice and no retry.
       if(_abState&&_abState.phase==='building'&&d.error){
+        if(ty)ty.remove();
+        if(tyStatus)tyStatus.remove();
         _abHandleBuildFailure(origChatId,msgs,d.error);
         _unlockSend();
         return;
@@ -4946,6 +4971,8 @@ function send(){
       var sameChat=chCurId()===origChatId;
       // ── Quiz card: server returned structured test questions ───────────────
       if(d.testQuestions&&d.testQuestions.length>=1){
+        if(ty)ty.remove();
+        if(tyStatus)tyStatus.remove();
         var qcId='fl-quiz-card-'+Date.now();
         if(sameChat){
           chatHistory.push({role:'assistant',content:'[quiz: '+d.testQuestions.join(' | ')+']'});
@@ -5058,11 +5085,20 @@ function send(){
         // this before _abRenderFinalReply means the follow-up diff view (built inside that
         // function from this same _reply) always diffs against the corrected code, never the raw
         // pre-fix model output.
+        // A real, previously-invisible phase — this network round trip already happened before
+        // this fix; only the status text is new. Kept visible (not removed) through it, so the
+        // typing indicator doesn't just vanish into a silent gap before the message appears.
+        var _abStatusEl=document.getElementById('ab-build-status');
+        if(_abStatusEl)_abStatusEl.textContent='Checking the result…';
         _abAutoCheckFix(_ccExtractFirstCode(_reply),'index.html').then(function(acRes){
+          if(ty)ty.remove();
+          if(_abStatusEl)_abStatusEl.remove();
           var finalReply=acRes.fixed?_abReplaceFirstCode(_reply,acRes.code):_reply;
           _abRenderFinalReply(finalReply,acRes.fixed);
         });
       }else{
+        if(ty)ty.remove();
+        if(tyStatus)tyStatus.remove();
         _abRenderFinalReply(_reply,false);
       }
     })
@@ -5078,6 +5114,8 @@ function send(){
       // the other known rejection shapes, so a genuine network failure (e.g. "Failed to fetch")
       // can't be misclassified as an interruption.
       var _isInterruptedError=!!(err&&/interrupted|regenerate/i.test(err.message||''));
+      var _abStatusElErr=document.getElementById('ab-build-status');
+      if(_abStatusElErr)_abStatusElErr.remove();
       var ty=document.getElementById('typ');
       if(ty){
         if(_isInterruptedError&&_streamBub&&_streamBub.textContent){
