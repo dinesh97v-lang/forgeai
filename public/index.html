@@ -3972,6 +3972,34 @@ function _abReplaceFirstCode(text,newCode){
   if(!m)return text;
   return (text||'').slice(0,m.index)+'```'+m[1]+'\n'+newCode+'\n```'+(text||'').slice(m.index+m[0].length);
 }
+// Scans chatHistory backward from just before index beforeIdx for the nearest prior assistant
+// message containing a fenced code block — "the app this follow-up is a change to." Same
+// extraction function the Save-to-Project feature uses (_ccExtractFirstCode), applied to a
+// different message than the one being saved/rendered right now.
+function _abFindPrevBuildCode(beforeIdx){
+  for(var i=beforeIdx-1;i>=0;i--){
+    if(chatHistory[i].role==='assistant'){
+      var c=_ccExtractFirstCode(chatHistory[i].content);
+      if(c)return c;
+    }
+  }
+  return '';
+}
+// Diff toggle for App Builder's "Request a change" follow-up replies — reuses the SAME
+// _ccDiffLines/_ccRenderDiffRows primitives ccRunFix()'s own diff view already uses (unmodified).
+// Unlike that toggle (collapsed by default — an issue-driven fix the user may or may not want to
+// inspect), this one starts EXPANDED: the user just asked for a specific change, so seeing what
+// actually changed is closer to the point of the request than something to dig for. Reuses the
+// existing _ccToggleDiff(diffId) click handler unmodified — it only flips relative to whatever
+// display/arrow state is already there, so starting open instead of closed needs no change to it.
+function _abFollowupDiffHtml(beforeCode,afterCode){
+  if(!beforeCode||!afterCode||beforeCode===afterCode)return '';
+  var diffId='ab-diff-'+Date.now();
+  var diffHtml=_ccRenderDiffRows(_ccDiffLines(beforeCode,afterCode,3));
+  return '<div onclick="_ccToggleDiff(\''+diffId+'\')" style="cursor:pointer;font-size:11px;color:var(--text2);margin:6px 0;user-select:none">'
+    +'<span id="'+diffId+'-arrow">&#9652;</span> View changes</div>'
+    +'<div id="'+diffId+'" style="display:block;border:1px solid var(--border);border-radius:var(--r);overflow:hidden;margin-bottom:8px;font-family:monospace;font-size:10.5px;max-height:300px;overflow-y:auto">'+diffHtml+'</div>';
+}
 function _abNextStepsHtml(s,replyText,autoFixed){
   var techStack=s&&s.buildHints&&s.buildHints.techStack;
   var needsInternet=/<script[^>]+src=["']https?:/i.test(replyText||'');
@@ -4837,7 +4865,13 @@ function send(){
   chatHistory.push(msgObj);
   saveChat();chSync();
   var fetchBody=_buildChatFetchBody({prompt:apiPrompt||'',history:histForApi,enterpriseMode:enterpriseMode,simpleMode:isSimple()});
-  if(_abPostBuildSkip)fetchBody.postBuildFollowup=true;
+  // Same output-token ceiling the original build got (public/index.html ~4539,
+  // _abState.phase==='building') — without this, a follow-up asked to reproduce nearly the whole
+  // app plus a change falls to the plain per-model default (4096 for GROQ_70B) instead of the
+  // budget an app-sized response actually needs. Only the token override is applied here, NOT
+  // appBuilderBuild — that flag also disables client-side streaming (_wantsStream above) and
+  // changes the server's fallback-chain ordering, neither of which this fix is scoped to touch.
+  if(_abPostBuildSkip){fetchBody.postBuildFollowup=true;fetchBody.maxTokensOverride=8192;}
   if(_appBuildAwaitingApproval){fetchBody.awaitingApproval=true;_appBuildAwaitingApproval=false;}
   if(chatFieldMode){fetchBody.fieldMode=chatFieldMode;fetchBody.learnLang=_learnLang;}
   if(_pendingSourceUrl){fetchBody.sourceUrl=_pendingSourceUrl;_pendingSourceUrl=null;}
@@ -4967,6 +5001,15 @@ function send(){
           var ccWrap=document.createElement('div');ccWrap.className='cc-wrap';ccWrap.id=ccId;
           ccWrap.innerHTML='<button class="cc-check-btn" onclick="ccRunCheck(\''+ccId+'\')">&#10003; Check &amp; Download ZIP</button>'
             +'<button class="cc-check-btn" onclick="_ccSaveMsgToProject('+(chatHistory.length-1)+',this)">&#128193; Save to Project</button>';
+          // "Request a change" follow-up — show what actually changed vs the app's previous
+          // version, reusing the SAME _ccDiffLines/_ccRenderDiffRows primitives ccRunFix()'s own
+          // diff view already uses, unmodified. Only applies to a genuine postBuildFollowup reply,
+          // never to an ordinary chat code block, which also hits this branch.
+          if(fetchBody.postBuildFollowup){
+            var _abPrevCode=_abFindPrevBuildCode(chatHistory.length-1);
+            var _abDiffHtml=_abFollowupDiffHtml(_abPrevCode,_ccExtractFirstCode(_reply));
+            if(_abDiffHtml)ccWrap.innerHTML+=_abDiffHtml;
+          }
           msgs.appendChild(ccWrap);
         }
         if(chatFieldMode){
