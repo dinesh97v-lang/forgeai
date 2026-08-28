@@ -1801,21 +1801,36 @@ function _abContinueBuild(msgs,aiDiv,attempt,nsInfo){
       }
       var done=verdict.done&&_abLooksComplete(newCode);
       if(verdict.done&&!done)console.log('[_abContinueBuild] fence closed but content failed the completeness sanity check — treating as still cut off');
-      var newContent=info.before+'```'+info.lang+'\n'+newCode+(done?'\n```':'');
-      lastMsg.content=newContent;
-      saveChat();chSync();
-      var bub=aiDiv&&aiDiv.querySelector('.bub');
-      if(bub)bub.innerHTML=formatMarkdown(newContent);
-      pvAutoUpdate();
-      if(done){
+      if(!done){
+        var newContent=info.before+'```'+info.lang+'\n'+newCode;
+        lastMsg.content=newContent;
+        saveChat();chSync();
+        var bub=aiDiv&&aiDiv.querySelector('.bub');
+        if(bub)bub.innerHTML=formatMarkdown(newContent);
+        pvAutoUpdate();
+        _abContinueBuild(msgs,aiDiv,attempt+1,nsInfo);
+        return;
+      }
+      // Stitched file is now complete — run the same automatic self-correction pass send()'s own
+      // build-completion path runs, before this stitched result is ever shown, so a build that
+      // needed continuation gets the same review a single-shot build gets rather than silently
+      // skipping it.
+      _abAutoCheckFix(newCode,'index.html').then(function(acRes){
+        var finalCode=acRes.fixed?acRes.code:newCode;
+        var finalContent=info.before+'```'+info.lang+'\n'+finalCode+'\n```';
+        lastMsg.content=finalContent;
+        saveChat();chSync();
+        var bub2=aiDiv&&aiDiv.querySelector('.bub');
+        if(bub2)bub2.innerHTML=formatMarkdown(finalContent);
+        pvAutoUpdate();
         if(nsInfo){
           var _abCcWrap2=aiDiv&&aiDiv.nextElementSibling&&aiDiv.nextElementSibling.classList.contains('cc-wrap')?aiDiv.nextElementSibling:null;
           var _abNsDiv2=document.createElement('div');
-          _abNsDiv2.innerHTML=_abNextStepsHtml(nsInfo,newCode);
+          _abNsDiv2.innerHTML=_abNextStepsHtml(nsInfo,finalContent,acRes.fixed);
           if(_abCcWrap2)msgs.insertBefore(_abNsDiv2,_abCcWrap2);else msgs.appendChild(_abNsDiv2);
         }
         _unlockSend();
-      }else _abContinueBuild(msgs,aiDiv,attempt+1,nsInfo);
+      });
     })
     .catch(function(){
       _abMarkContinuationFailed(aiDiv,'connection error');
@@ -3926,7 +3941,38 @@ function _abTriggerBuild(){
 // already collected for the build, plus a plain regex check of the actual generated code for
 // CDN script tags (pvBuild() only rewrites those for the live preview iframe — the downloaded
 // ZIP keeps the original CDN URLs, so this is a real, per-build fact, not a blanket assumption).
-function _abNextStepsHtml(s,replyText){
+// Automatic self-correction pass for a just-completed App Builder build — mirrors One Prompt's
+// own automatic stage-4 check (_dwRunStage4Check) by reusing the SAME /api/code-check +
+// /api/code-fix endpoints unmodified, not a new check/fix mechanism. Only the plain LLM/JSX
+// review runs here, not One Prompt's additional jsdom runtime check — that check's own comment
+// in server.js scopes it to One Prompt's pipeline specifically, out of scope for this feature.
+// Fails open at every step: a network error, a malformed response, or an unavailable fix must
+// never block or corrupt a build the user is already waiting on — any failure just resolves with
+// the original code unchanged, exactly as if no issue had been found.
+function _abAutoCheckFix(code,filename){
+  var files=[{filename:filename||'index.html',content:code}];
+  return fetch('/api/code-check',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({files:files})})
+    .then(function(r){return r.json();})
+    .then(function(ck){
+      if(!ck||ck.status!=='issues'||!ck.issues||!ck.issues.length)return{code:code,fixed:false};
+      return fetch('/api/code-fix',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({files:files,issues:ck.issues})})
+        .then(function(r){return r.json();})
+        .then(function(fx){
+          var fixedContent=fx&&fx.files&&fx.files[0]&&fx.files[0].content;
+          return fixedContent?{code:fixedContent,fixed:true}:{code:code,fixed:false};
+        });
+    })
+    .catch(function(){return{code:code,fixed:false};});
+}
+// Splices a corrected code block back into the assistant reply text in place of the first fenced
+// block, preserving the original fence's language tag and everything around it. Only called when
+// _abAutoCheckFix reports fixed:true, on a reply already confirmed to contain a fence.
+function _abReplaceFirstCode(text,newCode){
+  var m=/```([^\n`]*)\n?[\s\S]*?```/.exec(text||'');
+  if(!m)return text;
+  return (text||'').slice(0,m.index)+'```'+m[1]+'\n'+newCode+'\n```'+(text||'').slice(m.index+m[0].length);
+}
+function _abNextStepsHtml(s,replyText,autoFixed){
   var techStack=s&&s.buildHints&&s.buildHints.techStack;
   var needsInternet=/<script[^>]+src=["']https?:/i.test(replyText||'');
   var runLine='Click <b>Check &amp; Download ZIP</b> below, unzip it, and open <code>index.html</code> in your browser — no install or server needed.';
@@ -3942,7 +3988,8 @@ function _abNextStepsHtml(s,replyText){
       if(feats.length)featBullet='<li>Try it out — test: '+feats.map(function(f){return esc(f);}).join(', ')+'.</li>';
     }
   }
-  return '<div class="cc-card" style="margin-top:6px"><div style="font-weight:700;margin-bottom:4px">Next steps</div><ul style="margin:0;padding-left:18px;line-height:1.6">'
+  var autoFixNote=autoFixed?'<div style="font-size:11px;color:var(--text2);margin-bottom:6px">&#128260; An automatic review caught and fixed an issue in this code before showing it to you (AI-reviewed, not manually tested).</div>':'';
+  return autoFixNote+'<div class="cc-card" style="margin-top:6px"><div style="font-weight:700;margin-bottom:4px">Next steps</div><ul style="margin:0;padding-left:18px;line-height:1.6">'
     +'<li>Run it — '+runLine+'</li>'
     +featBullet
     +'<li>Go further — this is a single-file demo (no real backend, database, or login beyond what runs in your browser), so a page refresh may reset unsaved data. The full code is in the message above — click Copy to grab it, or ▶ Preview to explore it live.</li>'
@@ -4887,6 +4934,13 @@ function send(){
       var _qrParsed=flParseQuickReply(parsed.clean||'');
       parsed.clean=_qrParsed.clean;
       var _reply=parsed.clean||d.error||'';
+      // Genuine, complete (not still-truncated) App Builder build — the one case that gets the
+      // automatic self-correction pass below, run BEFORE any of this is pushed/rendered so the
+      // user only ever sees the corrected result, never the raw pre-fix version. Every other
+      // reply (ordinary chat, quiz cards, a still-truncated build about to auto-continue) renders
+      // exactly as before, with no added latency.
+      var _abBuildComplete=sameChat&&fetchBody.appBuilderBuild&&_abState&&_abState.phase==='building'&&/```/.test(_reply)&&!_abFenceOpenUnclosed(_reply);
+      function _abRenderFinalReply(_reply,_abAutoFixed){
       var _abWillContinue=false; // set below if a build response needs auto-continuation — keeps the send lock held across the whole sequence instead of releasing it at the end of this handler
       if(sameChat){
         var _histMsg={role:'assistant',content:_reply};
@@ -4939,7 +4993,7 @@ function send(){
           }else{
             if(!_abWillContinue){
               var _abNsDiv=document.createElement('div');
-              _abNsDiv.innerHTML=_abNextStepsHtml(_abState,_reply);
+              _abNsDiv.innerHTML=_abNextStepsHtml(_abState,_reply,_abAutoFixed);
               msgs.insertBefore(_abNsDiv,ccWrap);
             }
             var _abBsChatId=_abState.chatId;_abPostBuildChatId=origChatId;_abState=null;_abClearState(_abBsChatId);
@@ -4949,6 +5003,15 @@ function send(){
         chSaveToOrigin(origChatId,{role:'assistant',content:_reply});
       }
       if(!_abWillContinue)_unlockSend();
+      }
+      if(_abBuildComplete){
+        _abAutoCheckFix(_ccExtractFirstCode(_reply),'index.html').then(function(acRes){
+          var finalReply=acRes.fixed?_abReplaceFirstCode(_reply,acRes.code):_reply;
+          _abRenderFinalReply(finalReply,acRes.fixed);
+        });
+      }else{
+        _abRenderFinalReply(_reply,false);
+      }
     })
     .catch(function(err){
       if(_abBuildTimer)clearTimeout(_abBuildTimer);
