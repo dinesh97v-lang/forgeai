@@ -6399,6 +6399,34 @@ function ccShowResult(ccId,result,isRecheck){
     if(el){var sn=document.createElement('div');sn.style.cssText='font-size:11px;color:var(--text2);margin-top:6px;padding-top:6px;border-top:1px solid var(--border)';sn.textContent='Skipped '+st.skippedCount+' non-code block'+(st.skippedCount>1?'s':'')+' (directory tree / plain text)';el.appendChild(sn);}
   }
 }
+// Refreshes the live preview after ccRunFix() applies a fix, but ONLY when the fix was for the
+// exact app content currently sitting in the preview — ccGetFiles() (which populates st.files)
+// scans the WHOLE chatHistory, not one message, and pvFiles carries no message/ccId provenance
+// at all (confirmed by reading pvStore/formatMarkdown: it's purely "whatever HTML last rendered
+// anywhere in chat", with zero link back to which message/ccId produced it) — so filename alone
+// can't tell "this fix is the previewed App Builder app" apart from "this fix is an unrelated
+// ordinary-chat snippet that happens to share a filename". Content equality against the CURRENT
+// pvFiles.html is precise instead: preFixFiles holds the exact raw text ccGetFiles() extracted
+// from chatHistory (same source pvStore's own content derives from) — either one of them matches
+// what's currently previewed, or none does, and an unrelated snippet's content essentially never
+// coincides with it by chance. Only html is checked — every App Builder build today generates a
+// single HTML file (confirmed in _abTriggerBuild's own prompt), so css/js keys don't apply here.
+function _ccMaybeRefreshPreview(preFixFiles,fixedFiles){
+  if(!pvFiles.html)return; // nothing currently previewed — nothing to refresh
+  var matchedFilename=null;
+  for(var i=0;i<(preFixFiles||[]).length;i++){
+    if((preFixFiles[i].content||'').trim()===pvFiles.html.trim()){matchedFilename=preFixFiles[i].filename;break;}
+  }
+  if(!matchedFilename)return;
+  var fixed=(fixedFiles||[]).find(function(f){return f.filename===matchedFilename;});
+  if(!fixed||!fixed.content)return;
+  // Same escape step formatMarkdown() applies before pvStore() ever sees code (pvStore un-escapes
+  // &lt;/&gt;/&amp; on the way in) — matches the exact contract every other pvStore() call already
+  // relies on, not a new ad hoc format.
+  var escaped=fixed.content.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  pvStore('html',escaped,null);
+  pvAutoUpdate();
+}
 function ccRunFix(ccId){
   var wrap=document.getElementById(ccId);if(!wrap)return;
   var st=_ccStore[ccId]||{};
@@ -6419,6 +6447,7 @@ function ccRunFix(ccId){
         return;
       }
       _ccStore[ccId].fixedFiles=d.files;
+      _ccMaybeRefreshPreview(files,d.files);
       if(d.recheck&&d.recheck.status==='check-failed'){
         wrap.innerHTML='<div class="cc-card"><div style="color:var(--text2);margin-bottom:6px">Fix applied — verification unavailable (model busy). Download to review.</div>'
           +_ccDiffToggleHtml(ccId)
