@@ -4974,6 +4974,12 @@ function send(){
       // reply (ordinary chat, quiz cards, a still-truncated build about to auto-continue) renders
       // exactly as before, with no added latency.
       var _abBuildComplete=sameChat&&fetchBody.appBuilderBuild&&_abState&&_abState.phase==='building'&&/```/.test(_reply)&&!_abFenceOpenUnclosed(_reply);
+      // A "Request a change" follow-up reply — same self-correction pass genuine builds get,
+      // extended to this path since it currently bypasses _abBuildComplete entirely (_abState is
+      // always null during a follow-up, by definition of how postBuildFollowup gets set). Kept as
+      // an independent flag, not folded into _abBuildComplete's own condition, so that flag's
+      // gating for genuine builds stays completely unchanged.
+      var _abFollowupComplete=sameChat&&fetchBody.postBuildFollowup&&/```/.test(_reply);
       function _abRenderFinalReply(_reply,_abAutoFixed){
       var _abWillContinue=false; // set below if a build response needs auto-continuation — keeps the send lock held across the whole sequence instead of releasing it at the end of this handler
       if(sameChat){
@@ -5047,7 +5053,11 @@ function send(){
       }
       if(!_abWillContinue)_unlockSend();
       }
-      if(_abBuildComplete){
+      if(_abBuildComplete||_abFollowupComplete){
+        // Same _abAutoCheckFix/_abReplaceFirstCode pair either way — reused unmodified. Running
+        // this before _abRenderFinalReply means the follow-up diff view (built inside that
+        // function from this same _reply) always diffs against the corrected code, never the raw
+        // pre-fix model output.
         _abAutoCheckFix(_ccExtractFirstCode(_reply),'index.html').then(function(acRes){
           var finalReply=acRes.fixed?_abReplaceFirstCode(_reply,acRes.code):_reply;
           _abRenderFinalReply(finalReply,acRes.fixed);
