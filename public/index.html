@@ -6383,16 +6383,22 @@ function ccShowResult(ccId,result,isRecheck){
   var wrap=document.getElementById(ccId);if(!wrap)return;
   var st=_ccStore[ccId]||{};
   if(result.issues)st.lastIssues=result.issues;
+  // Only ever shown once a fix has actually been applied (st.fixedFiles truthy) — never on the
+  // first check, before Auto-Fix Issues has ever run. One-level undo only, matching what
+  // st.files/st.fixedFiles currently store — there's no path to a second fix on the same ccId
+  // today (fixBtn below is never shown once isRecheck is true), so there's nothing beyond this
+  // one pre-fix/post-fix pair to revert across.
+  var undoBtn=(st.fixedFiles&&st.fixedFiles.length)?'<button class="cc-btn sec" onclick="ccUndoFix(\''+ccId+'\')">Undo Fix</button>':'';
   if(result.status==='pass'){
     wrap.innerHTML='<div class="cc-card"><div style="color:var(--success);font-weight:700;margin-bottom:6px">'+(isRecheck?'Issues fixed and verified ✓':'All checks passed ✓')+'</div>'
       +(isRecheck?_ccDiffToggleHtml(ccId):'')
-      +'<button class="cc-btn prim" onclick="ccDownload(\''+ccId+'\')">Download ZIP</button></div>';
+      +'<button class="cc-btn prim" onclick="ccDownload(\''+ccId+'\')">Download ZIP</button>'+undoBtn+'</div>';
   }else{
     var issueHtml=(result.issues||[]).map(function(i){return '<div class="cc-issue">• '+esc(i)+'</div>';}).join('');
     var note=isRecheck?'<div style="color:var(--text2);font-size:11px;margin-bottom:4px">Some issues remain after auto-fix.</div>':'';
     var fixBtn=!isRecheck?'<button class="cc-btn prim" onclick="ccRunFix(\''+ccId+'\')">Auto-Fix Issues</button>':'';
     wrap.innerHTML='<div class="cc-card">'+note+issueHtml+(isRecheck?_ccDiffToggleHtml(ccId):'')+'<div>'+fixBtn
-      +'<button class="cc-btn sec" onclick="ccDownload(\''+ccId+'\')">'+(isRecheck?'Download ZIP':'Download Anyway')+'</button></div></div>';
+      +'<button class="cc-btn sec" onclick="ccDownload(\''+ccId+'\')">'+(isRecheck?'Download ZIP':'Download Anyway')+'</button>'+undoBtn+'</div></div>';
   }
   if((st.skippedCount||0)>0){
     var el=wrap.querySelector('.cc-card');
@@ -6426,6 +6432,23 @@ function _ccMaybeRefreshPreview(preFixFiles,fixedFiles){
   var escaped=fixed.content.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
   pvStore('html',escaped,null);
   pvAutoUpdate();
+}
+// One-level undo for ccRunFix()'s Auto-Fix Issues — reverts _ccStore[ccId] back to its pre-fix
+// state. Ordering matters: the preview-refresh call runs FIRST, while st.fixedFiles still holds
+// the fix that's about to be undone — _ccMaybeRefreshPreview needs that old value intact to match
+// against whatever's currently shown in pvFiles.html (which, if the preview is open, is the fixed
+// content). Called with (st.fixedFiles, st.files) — the exact reverse of ccRunFix's own
+// (st.files, st.fixedFiles) call — reusing the same function unmodified, just fixed/original
+// swapped, since it's already generic ("does pvFiles.html match something in the first array? if
+// so, replace it with the corresponding entry from the second"). Only one level: st.files/
+// st.fixedFiles hold exactly one pre-fix/post-fix pair, and ccShowResult never offers a second
+// Auto-Fix Issues run on the same ccId (fixBtn stays empty once isRecheck is true) — there's
+// nothing beyond this one pair to revert across.
+function ccUndoFix(ccId){
+  var st=_ccStore[ccId];if(!st||!st.fixedFiles)return;
+  _ccMaybeRefreshPreview(st.fixedFiles,st.files);
+  st.fixedFiles=null;
+  ccShowResult(ccId,{status:'issues',issues:st.lastIssues},false);
 }
 function ccRunFix(ccId){
   var wrap=document.getElementById(ccId);if(!wrap)return;
