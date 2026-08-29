@@ -154,6 +154,7 @@ body.ab-flow-active .mac[onclick^="regenMsg"]{display:none!important}
 .tag.r{background:var(--dbg);color:var(--danger)}
 .tag.a{background:var(--wbg);color:var(--warning)}
 .pills{display:flex;gap:5px;flex-wrap:wrap;padding:0 14px 8px}
+.pills:empty{padding:0}
 .pill{font-size:11px;padding:4px 9px;border:1px solid var(--border);border-radius:16px;color:var(--text2);cursor:pointer;background:var(--bg);transition:all .15s;white-space:nowrap}
 .pill:hover{background:var(--accent);color:white;border-color:var(--accent)}
 .cin-area{padding:10px 14px;border-top:1px solid var(--border);flex-shrink:0}
@@ -1305,12 +1306,7 @@ function switchMode(mode){
   if(chatIn)chatIn.placeholder=isPro?'Type in Tamil or English...':'How can I help you? Ask anything...';
   var pills=document.getElementById('chat-pills');
   if(isPro){
-  pills.innerHTML=[
-    {t:'Create project',a:'Create Next.js project'},
-    {t:'Run tests',a:'Run background tests'},
-    {t:'Deploy',a:'Deploy to Vercel'},
-    {t:'Security',a:'Run security scan'}
-  ].map(function(x){return '<div class="pill" onclick="ask(this.getAttribute(\'data-a\'))" data-a="'+x.a+'">'+x.t+'</div>';}).join('');
+  pills.innerHTML='';
   } else {
   pills.innerHTML=[
     {t:'Study help',a:'Study help Tamil'},
