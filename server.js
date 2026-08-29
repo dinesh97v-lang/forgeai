@@ -123,6 +123,17 @@ function appendReasoningLog(line) {
   catch (e) { console.warn('[reasoning-telemetry] file write failed:', e.message); }
 }
 
+// ── FIX FEEDBACK — same shared-file-append shape as REASONING TELEMETRY above, for App
+// Builder's Auto-Fix Issues thumbs up/down. A simple grep-later log, not a dashboard or DB
+// table — this app has no existing feedback-storage mechanism, and one JSON-per-line file
+// mirroring the already-established pattern above is the smallest thing that lets Dinesh
+// review fix-quality patterns manually later.
+const FIX_FEEDBACK_LOG_FILE = path.join(__dirname, 'fix-feedback.log');
+function appendFixFeedbackLog(line) {
+  try { require('fs').appendFileSync(FIX_FEEDBACK_LOG_FILE, line + '\n'); }
+  catch (e) { console.warn('[fix-feedback] file write failed:', e.message); }
+}
+
 // Gemini has no quota response headers — track daily usage ourselves.
 // Resets at midnight PT (America/Los_Angeles) to match Google's quota window.
 const GEMINI_DAILY_LIMITS = { [MODELS.GEM_LITE]: 1000, [MODELS.GEM_FLASH]: 250 };
@@ -2762,6 +2773,20 @@ app.post('/api/ab-match-option', requireAuth, async (req, res) => {
     console.error('[ab-match-option]', err.message);
     res.status(500).json({ match: null });
   }
+});
+
+// App Builder Auto-Fix Issues — thumbs up/down. No model call, just validate + log — same small
+// shape as /api/ab-match-option above. ccId/issues are passed straight from the client's own
+// _ccStore so the log line has real context without this endpoint needing to look anything up.
+app.post('/api/fix-feedback', requireAuth, (req, res) => {
+  const { ccId, vote, issues } = req.body;
+  if (typeof ccId !== 'string' || !ccId.trim() || (vote !== 'up' && vote !== 'down')) {
+    return res.status(400).json({ error: 'ccId and vote ("up" or "down") are required' });
+  }
+  const line = JSON.stringify({ ccId, vote, issues: Array.isArray(issues) ? issues : [], ts: new Date().toISOString() });
+  appendFixFeedbackLog(line);
+  console.log('[fix-feedback]', line);
+  res.json({ ok: true });
 });
 
 // ============================================

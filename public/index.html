@@ -6410,16 +6410,24 @@ function ccShowResult(ccId,result,isRecheck){
   // today (fixBtn below is never shown once isRecheck is true), so there's nothing beyond this
   // one pre-fix/post-fix pair to revert across.
   var undoBtn=(st.fixedFiles&&st.fixedFiles.length)?'<button class="cc-btn sec" onclick="ccUndoFix(\''+ccId+'\')">Undo Fix</button>':'';
+  // Thumbs up/down — same gating as Undo Fix (only once a fix has actually been applied). One
+  // rating per fix: st.feedbackGiven (set by ccRateFix) swaps the buttons for a static
+  // confirmation on every re-render, same as it looks right after the real click. Wrapped in a
+  // stable-id span so ccRateFix can update just this slot in place instead of re-rendering the
+  // whole card.
+  var rateBtns=(st.fixedFiles&&st.fixedFiles.length)?('<span id="'+ccId+'-rate">'+(st.feedbackGiven
+    ?'Thanks for the feedback!'
+    :'<button class="cc-btn sec" onclick="ccRateFix(\''+ccId+'\',\'up\')" title="Good fix">&#128077;</button><button class="cc-btn sec" onclick="ccRateFix(\''+ccId+'\',\'down\')" title="Bad fix">&#128078;</button>')+'</span>'):'';
   if(result.status==='pass'){
     wrap.innerHTML='<div class="cc-card"><div style="color:var(--success);font-weight:700;margin-bottom:6px">'+(isRecheck?'Issues fixed and verified ✓':'All checks passed ✓')+'</div>'
       +(isRecheck?_ccDiffToggleHtml(ccId):'')
-      +'<button class="cc-btn prim" onclick="ccDownload(\''+ccId+'\')">Download ZIP</button>'+undoBtn+'</div>';
+      +'<button class="cc-btn prim" onclick="ccDownload(\''+ccId+'\')">Download ZIP</button>'+undoBtn+rateBtns+'</div>';
   }else{
     var issueHtml=(result.issues||[]).map(function(i){return '<div class="cc-issue">• '+esc(i)+'</div>';}).join('');
     var note=isRecheck?'<div style="color:var(--text2);font-size:11px;margin-bottom:4px">Some issues remain after auto-fix.</div>':'';
     var fixBtn=!isRecheck?'<button class="cc-btn prim" onclick="ccRunFix(\''+ccId+'\')">Auto-Fix Issues</button>':'';
     wrap.innerHTML='<div class="cc-card">'+note+issueHtml+(isRecheck?_ccDiffToggleHtml(ccId):'')+'<div>'+fixBtn
-      +'<button class="cc-btn sec" onclick="ccDownload(\''+ccId+'\')">'+(isRecheck?'Download ZIP':'Download Anyway')+'</button>'+undoBtn+'</div></div>';
+      +'<button class="cc-btn sec" onclick="ccDownload(\''+ccId+'\')">'+(isRecheck?'Download ZIP':'Download Anyway')+'</button>'+undoBtn+rateBtns+'</div></div>';
   }
   if((st.skippedCount||0)>0){
     var el=wrap.querySelector('.cc-card');
@@ -6470,6 +6478,20 @@ function ccUndoFix(ccId){
   _ccMaybeRefreshPreview(st.fixedFiles,st.files);
   st.fixedFiles=null;
   ccShowResult(ccId,{status:'issues',issues:st.lastIssues},false);
+}
+// Thumbs up/down on an applied fix — POST to the small /api/fix-feedback utility endpoint (log-
+// only, no model call) and swap the buttons for a static confirmation in place. One rating per
+// fix: st.feedbackGiven guards against a double-click firing twice before the DOM updates, and
+// persists so a later re-render (e.g. after Undo re-renders this same wrap for an unrelated
+// reason) still shows the confirmation rather than the buttons again — no re-rating in this
+// version, and a rating already logged before an Undo is deliberately left as-is in the log, not
+// synced or cleared.
+function ccRateFix(ccId,vote){
+  var st=_ccStore[ccId];if(!st||st.feedbackGiven)return;
+  st.feedbackGiven=true;
+  var rateEl=document.getElementById(ccId+'-rate');
+  if(rateEl)rateEl.textContent='Thanks for the feedback!';
+  fetch('/api/fix-feedback',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ccId:ccId,vote:vote,issues:st.lastIssues||[]})}).catch(function(){});
 }
 function ccRunFix(ccId){
   var wrap=document.getElementById(ccId);if(!wrap)return;
