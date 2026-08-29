@@ -3898,7 +3898,18 @@ function _abTriggerBuild(){
   // "mandatory", comes last, and is far more specific), so nothing previously told the model to
   // reconcile the two. Only concrete, named specifics should override — vague style adjectives
   // ("modern", "clean") aren't a real conflict with the preset and shouldn't trigger this.
-  styleGuide+='\n- Design detail override: if the app idea or any answer above specifies a particular named color/color scheme, hex code, typeface, or accessibility standard, use those specifics instead of (or layered on top of) the preset colors/fonts above — only override for concrete specifics named by the user, not vague style adjectives like "modern" or "clean".';
+  // Font-loading template added: the preset blocks above tokenize color (":root CSS vars for
+  // palette") but never mention font-family anywhere, so a model told to "use" a named typeface
+  // had no concrete mechanism for HOW to actually load/apply one — colors had a real place to
+  // land, fonts didn't. Also strengthened to match the preset's own "(mandatory)" framing, since a
+  // single trailing bullet was competing against a much longer, earlier, more specific block.
+  // Live-tested regression found afterward: the model sometimes injected a Google Fonts link for
+  // "Inter" (the first example name below) even on builds where no typeface was named at all —
+  // the example names read as a default to reach for, not just an illustration of the mechanism.
+  // The counter-instruction below (added after re-testing) targets that directly: Inter/Poppins/
+  // Roboto are examples of HOW to load a font once one is named, never a fallback choice on their
+  // own.
+  styleGuide+='\n- Design detail override: if the app idea or any answer above specifies a particular named color/color scheme, hex code, typeface, or accessibility standard, those specific requirements OVERRIDE the preset defaults above — treat this with the same priority as the "(mandatory)" preset itself, not as optional. Only override for concrete specifics named by the user, not vague style adjectives like "modern" or "clean". If a specific typeface is named (e.g. "Inter", "Poppins", "Roboto"), load it via Google Fonts in <head>: <link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=FONTNAME:wght@400;600;700&display=swap" rel="stylesheet"> (replace FONTNAME with the actual font name, spaces encoded as +), then set it as the primary font on body and headings with a sane fallback, e.g. font-family: "FontName", sans-serif — overriding the default Tailwind sans stack. Inter/Poppins/Roboto above are only examples of that loading mechanism, never a default to apply — if the app idea and answers do not name any specific typeface at all, do NOT inject a Google Fonts link and do NOT set a custom font-family; leave typography exactly as the preset above already specifies.';
   styleGuide+='\n- Accessibility checklist (apply automatically whenever an accessibility standard like WCAG is named above): every <input> needs a <label> with matching for/id (or aria-label if no visible label); icon-only buttons need aria-label; landmark tags (nav/main/header) required; aria-required on required fields.';
   var qa=[];
   for(var _abQI=0;_abQI<s.questions.length;_abQI++){
