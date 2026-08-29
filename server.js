@@ -2899,12 +2899,24 @@ app.post('/api/ab-reasoned-ack', requireAuth, async (req, res) => {
 // quota-guard shape as AB_REASONED_ACK above, for the same reason: fires at most a handful of
 // times per flow, but must never contend with essential features for the shared GROQ_70B cap.
 // ============================================
-const AB_OFFTOPIC_REPLY_PROMPT = `You are a helpful product mentor guiding a non-technical founder through building an app. They are in the middle of a guided app-planning flow and were asked a specific question, but what they just typed is not an answer to it — it's an aside, a question, or an unrelated remark. Write a short, warm, natural reply (1-2 sentences) that responds to what they actually said. Do not pretend it was an answer to the pending question. Do not repeat the pending question back verbatim — it will be shown again separately right after your reply. Reply in the SAME language/style as their message (Tamil script in, Tamil script out; Thanglish in, Thanglish out; English in, English out — never switch or mix). Output ONLY the reply text, nothing else, no labels.`;
+// Core instruction widened from "respond warmly" to "explain in context, then recommend one real
+// option" — the previous version had no way to do this even if worded to ask for it: it received
+// only the pending question's TEXT, never its options or the app idea, so a reply like "which
+// field should I focus on first?" could only get generic advice back, never anchored to the
+// question's actual choices (confirmed live this session, prior to this fix). options/appIdea
+// below are optional in the prompt's own wording (not every call site has real ones — see the
+// confirm-phase call, which passes ['Build it 🚀','Start over']) so the model degrades to a plain
+// contextual reply rather than inventing options when none are given.
+const AB_OFFTOPIC_REPLY_PROMPT = `You are a helpful product mentor guiding a non-technical founder through building an app. They are in the middle of a guided app-planning flow and were asked a specific question with a list of options, but what they just typed is not an answer to it — it's an aside, a question, or an unrelated remark, often asking what something means or which option makes sense for their app.
+
+Write a short, natural reply (1-2 sentences): if they're asking what a term/concept means or which option to pick, briefly explain it in the context of the app idea given below (not generic advice), then recommend exactly ONE of the listed options by its actual name as a reasonable starting point. Phrase it as a suggestion, not a decision — they still need to pick it themselves (say something like "you could start with X" or "X is often a solid starting point," never "I've chosen X for you" or anything implying the choice is already made). If no options are given below, or their message genuinely isn't asking for guidance on the pending question, just respond naturally to what they said instead.
+
+Do not pretend their message was an answer to the pending question. Do not repeat the pending question back verbatim — it will be shown again separately right after your reply. Reply in the SAME language/style as their message (Tamil script in, Tamil script out; Thanglish in, Thanglish out; English in, English out — never switch or mix). Output ONLY the reply text, nothing else, no labels.`;
 
 const AB_OFFTOPIC_REPLY_QUOTA_THRESHOLD = 0.2;
 
 app.post('/api/ab-offtopic-reply', requireAuth, async (req, res) => {
-  const { text, question, priorQA } = req.body;
+  const { text, question, options, intentText, priorQA } = req.body;
   if (typeof text !== 'string' || !text.trim() || typeof question !== 'string' || !question.trim()) {
     return res.status(400).json({ error: 'text and question are required' });
   }
@@ -2917,7 +2929,15 @@ app.post('/api/ab-offtopic-reply', requireAuth, async (req, res) => {
   if (Array.isArray(priorQA) && priorQA.length) {
     priorText = 'Earlier in this conversation:\n' + priorQA.map(qa => `Q: ${qa.question}\nA: ${qa.answer}`).join('\n') + '\n\n';
   }
-  const userMsg = priorText + `Pending question: ${question}\nUser's message (not an answer to it): ${text}`;
+  let appIdeaText = '';
+  if (typeof intentText === 'string' && intentText.trim()) {
+    appIdeaText = `App idea: ${intentText.trim()}\n\n`;
+  }
+  let optionsText = '';
+  if (Array.isArray(options) && options.length) {
+    optionsText = `Options for the pending question: ${options.filter(o => typeof o === 'string' && o.trim()).join(', ')}\n`;
+  }
+  const userMsg = appIdeaText + priorText + `Pending question: ${question}\n${optionsText}User's message (not an answer to it): ${text}`;
   try {
     console.log(`[ab-offtopic-reply] model=${MODELS.GROQ_70B} reasoningEffort=low`);
     const resp = await axios.post(

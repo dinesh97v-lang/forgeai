@@ -3489,7 +3489,12 @@ function _abRenderReasonedAck(questionText,ackText){
 // network failure, all of which the caller falls back to today's reask() for. Builds its own
 // priorQA from _abState (same shape onMatchSingle builds for _abGenerateReasonedAck) so callers
 // only need to pass the text and the pending question.
-function _abGenerateOffTopicReply(text,question,cb){
+// options/intentText widen what the reply can ground itself in — both were already sitting in
+// every call site's own local scope (qDef.options, _abState.intentText) and simply weren't being
+// threaded through. No new capture anywhere; options defaults to [] and intentText to '' so a
+// call site with nothing real to offer (see the confirm-phase call below) doesn't need special
+// null-handling here.
+function _abGenerateOffTopicReply(text,question,options,intentText,cb){
   var _t0=performance.now();
   _lockSend();
   var _abOffTopicAbort=new AbortController();
@@ -3497,7 +3502,7 @@ function _abGenerateOffTopicReply(text,question,cb){
   function finish(result){
     clearTimeout(_abOffTopicTimer);
     _unlockSend();
-    console.log('[abOffTopicReply] text='+JSON.stringify(text)+' question='+JSON.stringify(question)+' result='+JSON.stringify(result)+' elapsedMs='+Math.round(performance.now()-_t0));
+    console.log('[abOffTopicReply] text='+JSON.stringify(text)+' question='+JSON.stringify(question)+' options='+JSON.stringify(options)+' result='+JSON.stringify(result)+' elapsedMs='+Math.round(performance.now()-_t0));
     cb(result);
   }
   var _abPriorQA=[];
@@ -3506,7 +3511,7 @@ function _abGenerateOffTopicReply(text,question,cb){
     if(_abPQA===undefined)continue;
     _abPriorQA.push({question:_abState.questions[_abPQI].question,answer:Array.isArray(_abPQA)?_abPQA.join(', '):_abPQA});
   }
-  fetch('/api/ab-offtopic-reply',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:text,question:question,priorQA:_abPriorQA}),signal:_abOffTopicAbort.signal})
+  fetch('/api/ab-offtopic-reply',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:text,question:question,options:(options||[]),intentText:(intentText||''),priorQA:_abPriorQA}),signal:_abOffTopicAbort.signal})
     .then(function(r){return r.json();})
     .then(function(d){
       var reply=(d&&typeof d.reply==='string'&&d.reply.trim())?d.reply.trim():null;
@@ -3683,7 +3688,7 @@ function _abHandleAnswer(t){
               if(_abTrackStuckStep())return;
               // Nothing in the whole typed answer matched anything — try a conversational reply
               // before falling back to reask()'s canned dead-end text.
-              _abGenerateOffTopicReply(t,qDef.question,function(replyText){
+              _abGenerateOffTopicReply(t,qDef.question,qDef.options,_abState.intentText,function(replyText){
                 if(replyText){
                   _abRenderReasonedAck(qDef.question,replyText);
                   var _abOtLast=chatHistory.length?chatHistory[chatHistory.length-1]:null;
@@ -3789,7 +3794,7 @@ function _abHandleAnswer(t){
               // indefinitely postpone the escape hatch. If the escape offer fires here, stop — it
               // and the off-topic-reply must never both try to render on the same turn.
               if(_abTrackStuckStep())return;
-              _abGenerateOffTopicReply(_tt,qDef.question,function(replyText){
+              _abGenerateOffTopicReply(_tt,qDef.question,opts,_abState.intentText,function(replyText){
                 if(replyText){
                   _abRenderReasonedAck(qDef.question,replyText);
                   var _abOtLast3=chatHistory.length?chatHistory[chatHistory.length-1]:null;
@@ -3837,7 +3842,7 @@ function _abHandleAnswer(t){
         if(_abTrackStuckStep())return;
         // Try a conversational reply before falling back to reask()'s canned dead-end text —
         // the plan card is already on screen and unchanged either way, nothing to re-render there.
-        _abGenerateOffTopicReply(t,'Ready to build?',function(replyText){
+        _abGenerateOffTopicReply(t,'Ready to build?',opts,_abState.intentText,function(replyText){
           if(replyText){
             _abRenderReasonedAck('Ready to build?',replyText);
             var _abOtLast2=chatHistory.length?chatHistory[chatHistory.length-1]:null;
