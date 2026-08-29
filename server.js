@@ -2424,6 +2424,51 @@ function precompileJSX(html) {
   out = out.replace(/<script\b[^>]*\bsrc\s*=\s*["'][^"']*babel[^"']*["'][^>]*>\s*<\/script>\s*/gi, '');
   return out;
 }
+
+// ── AUTO-FORMAT (export-time only, /api/export-zip) — same vendoring pattern precompileJSX uses
+// above (a standalone bundle in public/vendor/, no npm dependency), just Prettier v3's standalone
+// build instead of Babel's. Prettier v3 ships ESM (.mjs) rather than Babel's UMD bundle, so it's
+// loaded via Node's dynamic import() (pathToFileURL'd for Windows-safe absolute paths) instead of
+// require() — cached after the first call so later exports don't re-import every time. Purely
+// cosmetic and export-time only: NOT wired into runCodeCheck() or the issues array — a formatting
+// failure must never block or corrupt an export the way a real precompileJSX syntax error
+// legitimately should, so any error here falls back to the ORIGINAL unformatted content unchanged
+// rather than throwing. Live-verified this session: Tailwind's Play CDN only requires the
+// <style type="text/tailwindcss"> block to be the next SIBLING ELEMENT after the Tailwind
+// <script src> tag, not literal byte-adjacency — whitespace/indentation between them (exactly
+// what Prettier adds) does not break @apply processing. Also verified live: Prettier's HTML
+// plugin recognizes type="text/babel" as JSX, formats it correctly via the babel/estree plugins,
+// and preserves the type="text/babel" attribute unchanged, so running this BEFORE precompileJSX
+// (format the original source first, then transpile) is safe and lets precompileJSX's own
+// type="text/babel" detection keep working exactly as before.
+let _prettierModulesPromise = null;
+function loadPrettierModules() {
+  if (!_prettierModulesPromise) {
+    const { pathToFileURL } = require('url');
+    const dir = path.join(__dirname, 'public', 'vendor', 'prettier');
+    _prettierModulesPromise = Promise.all([
+      import(pathToFileURL(path.join(dir, 'standalone.mjs')).href),
+      import(pathToFileURL(path.join(dir, 'html.mjs')).href),
+      import(pathToFileURL(path.join(dir, 'babel.mjs')).href),
+      import(pathToFileURL(path.join(dir, 'estree.mjs')).href),
+      import(pathToFileURL(path.join(dir, 'postcss.mjs')).href),
+    ]).then(([prettier, html, babel, estree, postcss]) => ({
+      format: prettier.format,
+      plugins: [html.default, babel.default, estree.default, postcss.default]
+    }));
+  }
+  return _prettierModulesPromise;
+}
+async function formatHtml(html) {
+  try {
+    const { format, plugins } = await loadPrettierModules();
+    return await format(html, { parser: 'html', plugins });
+  } catch (err) {
+    console.warn('[auto-format] formatting failed, shipping unformatted content:', err.message);
+    return html;
+  }
+}
+
 async function runCodeCheck(files, model = MODELS.GROQ_70B, endpointLabel = '/api/code-check') {
   // Real parse check ahead of the LLM review below — Babel.transform() throws a genuine
   // SyntaxError on malformed JSX, catching a class of bug the LLM-only review can miss entirely.
@@ -3007,14 +3052,19 @@ app.post('/api/export-zip', requireAuth, async (req, res) => {
   const pName = (projectName || 'project').replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 50);
   try {
     if (!Array.isArray(files) || files.length === 0) throw new Error('no files');
-    // Precompile JSX out of any HTML file before zipping, so the downloaded app doesn't need
-    // Babel at runtime. Runs before the zip headers go out — a JSX syntax error fails the
+    // Auto-format (Prettier, cosmetic only) runs BEFORE precompileJSX, so it formats the original
+    // JSX source rather than the already-transpiled output — formatHtml() never throws (falls
+    // back to unformatted content on any error), so it can't affect the JSX-syntax-error path
+    // below. Precompile JSX out of any HTML file before zipping, so the downloaded app doesn't
+    // need Babel at runtime. Runs before the zip headers go out — a JSX syntax error fails the
     // request cleanly with a real message instead of shipping a broken/partial ZIP.
     let processedFiles;
     try {
-      processedFiles = files.map(f => /\.html?$/i.test(f.filename || '')
-        ? { ...f, content: precompileJSX(String(f.content || '')) }
-        : f);
+      processedFiles = await Promise.all(files.map(async f => {
+        if (!/\.html?$/i.test(f.filename || '')) return f;
+        const formatted = await formatHtml(String(f.content || ''));
+        return { ...f, content: precompileJSX(formatted) };
+      }));
     } catch (err) {
       return res.status(400).json({ error: `Your app has a JSX syntax error, can't export — ${err.message}` });
     }
