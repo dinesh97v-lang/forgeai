@@ -3704,15 +3704,28 @@ function _abHandleAnswer(t){
         }
         console.log('[_abHandleAnswer] step'+_abState.step+' no local match for piece '+JSON.stringify(unmatched[i]));
         _abTryModelFallback(unmatched[i],qDef.options,qDef.question,function(matched){
-          if(matched){
-            matchedAny=true;
-            // Same already-matched-this-send guard as the local-match loop above — defensive here,
-            // since a piece routed to fallback already failed to match locally, but the model
-            // fallback and a local match could in principle resolve to the same option.
-            if(matchedOptions.indexOf(matched)===-1){matchedOptions.push(matched);onMatchMulti(matched);}
-            else console.log('[_abHandleAnswer] step'+_abState.step+' fallback match '+matched+' already matched this send — skipping duplicate toggle');
-          }
-          processFallback(i+1);
+          if(!matched){processFallback(i+1);return;}
+          // Same false-positive gate as the single-select branch above — the fallback matcher's
+          // binary "one of these options, or NONE" framing has no category for "asking which to
+          // pick," so a piece that's really a clarifying question (not a feature pick) can still
+          // come back with a guessed option instead of NONE. Only a non-'aside' relevance verdict
+          // lets the match stand; an 'aside' piece is just dropped, same as a piece neither tier
+          // matched at all (unchanged: a real pick elsewhere in the same send still counts, and
+          // this piece silently contributes nothing rather than toggling a feature the user never
+          // asked for).
+          _abClassifyRelevantAnswer(unmatched[i],qDef.question,function(relResult){
+            if(relResult!=='aside'){
+              matchedAny=true;
+              // Same already-matched-this-send guard as the local-match loop above — defensive here,
+              // since a piece routed to fallback already failed to match locally, but the model
+              // fallback and a local match could in principle resolve to the same option.
+              if(matchedOptions.indexOf(matched)===-1){matchedOptions.push(matched);onMatchMulti(matched);}
+              else console.log('[_abHandleAnswer] step'+_abState.step+' fallback match '+matched+' already matched this send — skipping duplicate toggle');
+            }else{
+              console.log('[_abHandleAnswer] step'+_abState.step+' fallback match '+matched+' for piece '+JSON.stringify(unmatched[i])+' discarded — classified as aside/question, not a genuine pick');
+            }
+            processFallback(i+1);
+          });
         });
       }
       processFallback(0);
@@ -3773,51 +3786,61 @@ function _abHandleAnswer(t){
       if(m){onMatchSingle(m);return true;}
       console.log('[_abHandleAnswer] step'+_abState.step+' no match for '+JSON.stringify(t));
       _abTryModelFallback(t,opts,qDef.question,function(matched){
-        if(matched){onMatchSingle(matched);}
-        else if(_tt){
-          // Neither tier matched anything in options — before accepting the typed text verbatim
-          // as a free-text answer (last resort, not first — see below), check whether it's even
-          // attempting to answer this question. A confident "unrelated aside" routes through the
-          // same off-topic-reply handling the multi-select/confirm dead-ends already use, instead
-          // of silently storing something like "enaku oru coffee venum" as the answer; any
-          // failure/timeout/low-confidence result still falls through to accepting the text
-          // verbatim exactly as before — uncertainty never blocks a real answer.
-          _abClassifyRelevantAnswer(_tt,qDef.question,function(relResult){
-            if(relResult==='aside'){
-              // nullStreak now counts every unresolved turn on this step, not just canned-reask
-              // misses — increment (and possibly preempt with the escape offer) BEFORE attempting
-              // a conversational reply, so a friendly reply that keeps succeeding can't
-              // indefinitely postpone the escape hatch. If the escape offer fires here, stop — it
-              // and the off-topic-reply must never both try to render on the same turn.
-              if(_abTrackStuckStep())return;
-              _abGenerateOffTopicReply(_tt,qDef.question,opts,_abState.intentText,function(replyText){
-                if(replyText){
-                  _abRenderReasonedAck(qDef.question,replyText);
-                  var _abOtLast3=chatHistory.length?chatHistory[chatHistory.length-1]:null;
-                  if(_abOtLast3&&_abOtLast3.role==='assistant'){
-                    var _abOtOpts=opts.slice();
-                    if(_abState.step>0)_abOtOpts.push('⬅ Back');
-                    _abOtOpts.push('🔄 Start over');
-                    _abOtLast3.qrOptions=_abOtOpts;
-                    _abOtLast3.abQuestion=true;
-                    _abOtLast3.abKind='single';
-                    saveChat();chSync();
-                  }
-                }else{
-                  _abReaskCanned(function(){_abAsk(qDef.question,opts);});
-                }
-              });
-            }else{
-              // relResult is 'relevant', or null (classifier unsure/timed out/failed) — a typed
-              // answer that clearly meant one of the options already canonicalised to it above.
-              // options.indexOf(answers[step])===-1 is how a reader can tell this was free text
-              // later, with no shape change and nothing to keep in sync.
-              console.log('[_abHandleAnswer] step'+_abState.step+' accepting free-text answer: '+JSON.stringify(_tt));
-              onMatchSingle(_tt);
-            }
-          });
+        if(!_tt){
+          // Nothing typed at all — unchanged from before: a positive fallback match (however that
+          // could happen on empty input) is still trusted outright, since there's no text to run
+          // a relevance check against.
+          if(matched){onMatchSingle(matched);}else{reask(function(){_abAsk(qDef.question,opts);});}
+          return;
         }
-        else{reask(function(){_abAsk(qDef.question,opts);});}
+        // A positive fallback match is no longer trusted outright here — gated behind the SAME
+        // relevance check the unmatched path already used, run BEFORE deciding what to do with
+        // `matched` rather than only after it came back null. Root cause (live-reproduced,
+        // server logs confirmed): /api/ab-match-option's prompt is a strict binary — one of the
+        // real options, or NONE — with no category for "the user is asking which one to pick." On
+        // a clarifying question like "which of these should I pick", the low-effort classifier
+        // sometimes guesses an option instead of returning NONE, and that false positive used to
+        // be accepted immediately, silently advancing past the pending question. Neither
+        // _abClassifyRelevantAnswer nor _abGenerateOffTopicReply themselves changed — this just
+        // calls the existing classifier from one place instead of two.
+        _abClassifyRelevantAnswer(_tt,qDef.question,function(relResult){
+          if(relResult==='aside'){
+            // nullStreak now counts every unresolved turn on this step, not just canned-reask
+            // misses — increment (and possibly preempt with the escape offer) BEFORE attempting
+            // a conversational reply, so a friendly reply that keeps succeeding can't
+            // indefinitely postpone the escape hatch. If the escape offer fires here, stop — it
+            // and the off-topic-reply must never both try to render on the same turn.
+            if(_abTrackStuckStep())return;
+            _abGenerateOffTopicReply(_tt,qDef.question,opts,_abState.intentText,function(replyText){
+              if(replyText){
+                _abRenderReasonedAck(qDef.question,replyText);
+                var _abOtLast3=chatHistory.length?chatHistory[chatHistory.length-1]:null;
+                if(_abOtLast3&&_abOtLast3.role==='assistant'){
+                  var _abOtOpts=opts.slice();
+                  if(_abState.step>0)_abOtOpts.push('⬅ Back');
+                  _abOtOpts.push('🔄 Start over');
+                  _abOtLast3.qrOptions=_abOtOpts;
+                  _abOtLast3.abQuestion=true;
+                  _abOtLast3.abKind='single';
+                  saveChat();chSync();
+                }
+              }else{
+                _abReaskCanned(function(){_abAsk(qDef.question,opts);});
+              }
+            });
+          }else if(matched){
+            // relResult is 'relevant' (or null/unsure) AND the fallback matcher found a real
+            // option — trust its canonicalised match over the raw typed text.
+            onMatchSingle(matched);
+          }else{
+            // relResult is 'relevant', or null (classifier unsure/timed out/failed), and the
+            // fallback matcher found nothing — a typed answer that clearly meant one of the
+            // options in its own words. options.indexOf(answers[step])===-1 is how a reader can
+            // tell this was free text later, with no shape change and nothing to keep in sync.
+            console.log('[_abHandleAnswer] step'+_abState.step+' accepting free-text answer: '+JSON.stringify(_tt));
+            onMatchSingle(_tt);
+          }
+        });
       });
       return true;
     }
