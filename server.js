@@ -2942,8 +2942,8 @@ app.post('/api/ab-offtopic-reply', requireAuth, async (req, res) => {
     console.log(`[ab-offtopic-reply] model=${MODELS.GROQ_70B} reasoningEffort=low`);
     const resp = await axios.post(
       'https://api.groq.com/openai/v1/chat/completions',
-      { model: MODELS.GROQ_70B, messages: [{ role: 'system', content: AB_OFFTOPIC_REPLY_PROMPT }, { role: 'user', content: userMsg }], max_tokens: 300, temperature: 0.7, reasoning_effort: 'low' },
-      { headers: { Authorization: `Bearer ${GROQ_KEY}` }, timeout: 4500 }
+      { model: MODELS.GROQ_70B, messages: [{ role: 'system', content: AB_OFFTOPIC_REPLY_PROMPT }, { role: 'user', content: userMsg }], max_tokens: 600, temperature: 0.7, reasoning_effort: 'low' },
+      { headers: { Authorization: `Bearer ${GROQ_KEY}` }, timeout: 8000 }
     );
     try { updateGroqQuota(MODELS.GROQ_70B, resp.headers); } catch (e) { console.warn('[quota-track]', e.message); }
     const reply = (resp.data?.choices?.[0]?.message?.content || '').trim();
