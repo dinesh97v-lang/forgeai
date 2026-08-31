@@ -2906,6 +2906,17 @@ function _abBeginGeneratedFlow(intentText){
   var _abSeedQuestions=_abPlatformAlreadyStated(intentText)?_abDefaultQuestions.filter(function(q){return q.label!=='Platform';}):_abDefaultQuestions.slice();
   var _abSession=_abState=_abNewState({step:0,phase:'asking',questions:_abSeedQuestions,answers:[],intentText:intentText});
   _abUILock();
+  // _abState is fully seeded above — synchronously, right down to a complete fallback question
+  // set — well before the /api/app-build-intro fetch below resolves and proceedToCard() actually
+  // pushes/renders the first question. Nothing else locks send for that gap: _sendPending was
+  // already cleared by the earlier, separate classify call that routed here. Without this lock, a
+  // message sent during that window finds _abState "ready" but chatHistory still tail-less of any
+  // tagged question, so send()'s staleness check (_abTailHasPendingTag()) discards _abState as
+  // stale and silently falls through to ordinary chat — a real, live-reproduced race (confirmed
+  // this session: window measured up to ~35s in a slow case). Unlocked in every exit path of the
+  // fetch below, including the stale-session discard, so this flow's own lock/unlock pair never
+  // depends on a different (newer) flow's cleanup to release it.
+  _lockSend();
   var msgs=document.getElementById('chat-msgs');
   var typ=document.createElement('div');typ.id='ab-intro-typ';typ.className='msg';
   typ.innerHTML='<div class="mav ai">F</div><div class="bub"><div class="typing"><div class="dot"></div><div class="dot"></div><div class="dot"></div></div></div>';
@@ -2922,7 +2933,7 @@ function _abBeginGeneratedFlow(intentText){
   var timeoutP=new Promise(function(resolve){setTimeout(function(){resolve(null);},35000);});
   Promise.race([fetchP,timeoutP]).then(function(d){
     var ty=document.getElementById('ab-intro-typ');if(ty)ty.remove();
-    if(_abState!==_abSession){console.log('[_abBeginGeneratedFlow] stale session — discarding intro response, not persisting');return;}
+    if(_abState!==_abSession){console.log('[_abBeginGeneratedFlow] stale session — discarding intro response, not persisting');_unlockSend();return;}
     // Store the server's own detection so every ack in this flow reuses the SAME verdict instead
     // of re-running a second, independent detection call — the two can never be guaranteed to
     // agree forever (e.g. a stale client copy vs a freshly-updated server word list).
@@ -2971,6 +2982,7 @@ function _abBeginGeneratedFlow(intentText){
       chatHistory.push({role:'assistant',content:_fallbackIntro});saveChat();chSync();
     }
     proceedToCard();
+    _unlockSend();
   });
 }
 // Fresh, specific build request: one-time warm conversational intro before the first card.
