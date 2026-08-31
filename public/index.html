@@ -1537,7 +1537,17 @@ function chOpen(id){
         // pinned strip represents them, derived fresh from _abState after this loop. abKind is only
         // present on messages saved by this build or later; older saves fall back to the pre-strip
         // behavior of always recreating a bar, which is safe since it's exactly what they were.
-        if(m.role!=='user'&&Array.isArray(m.qrOptions)&&m.qrOptions.length>=2&&m.abKind!=='single'){
+        // !m.tieback excludes a reasoned-ack/off-topic-reply bubble (_abRenderReasonedAck, the only
+        // place that ever sets tieback) that got RETROACTIVELY retagged with the pending question's
+        // own qrOptions/abKind/abQuestion — purely so _abTailHasPendingTag()'s bounded scan still
+        // recognizes the flow as pending, never as a signal that this bubble should have its own
+        // rendered bar. Live, it never gets one (_abRenderReasonedAck renders plain text, no bar) —
+        // without this exclusion, restoring the chat renders a second, duplicate bar/bubble for the
+        // SAME logical pending question wherever the tail-pending message happens to be a retagged
+        // ack instead of the original question/plan-card message itself (confirmed live: a real
+        // guided flow reaching the plan card produces exactly this — the plan card AND its own
+        // reasoned ack both tagged abKind:'plan', both getting a bar on restore before this fix).
+        if(m.role!=='user'&&Array.isArray(m.qrOptions)&&m.qrOptions.length>=2&&m.abKind!=='single'&&!m.tieback){
           var _abOpenLive=_abState&&_abState.chatId===id&&m.abQuestion===true&&i===chatHistory.length-1;
           var _abOpenBar;
           if(m.abKind==='multi'&&_abOpenLive){
@@ -1575,7 +1585,12 @@ function chOpen(id){
         _abState=null;_abClearState(id);
       }
     }else{
-      var _abPendingEntry=_abOpenBarMap[_abPendingIdx];
+      // _abPendingIdx can land on a reasoned-ack/off-topic-reply bubble that got retagged with the
+      // pending question's own qrOptions/abKind (see the loop's !m.tieback exclusion above) — that
+      // bubble never got its own bar entry, so walk backward to the nearest index that actually has
+      // one, which is always the true original question/plan-card message the tags were copied from.
+      var _abPendingEntry=null;
+      for(var _abPeI=_abPendingIdx;_abPeI>=0;_abPeI--){if(_abOpenBarMap[_abPeI]){_abPendingEntry=_abOpenBarMap[_abPeI];break;}}
       if(_abPendingEntry){
         if(chatHistory[_abPendingIdx].abKind==='multi'&&_abPendingEntry.builtVia==='generic'){
           console.log('[chOpen] repairing mis-rendered multi-select bar — step='+_abState.step);
@@ -7289,7 +7304,15 @@ function initPageAll(){
           // the pinned strip represents the current one, derived fresh from _abState after this
           // IIFE resolves. abKind is only present on messages saved by this build or later; older
           // saves fall back to always recreating a bar, which is safe since that's what they were.
-          if(m.role!=='user'&&Array.isArray(m.qrOptions)&&m.qrOptions.length>=2&&m.abKind!=='single'){
+          // !m.tieback excludes a reasoned-ack/off-topic-reply bubble (_abRenderReasonedAck, the only
+          // place that ever sets tieback) that got RETROACTIVELY retagged with the pending question's
+          // own qrOptions/abKind/abQuestion — purely so _abTailHasPendingTag()'s bounded scan still
+          // recognizes the flow as pending, never as a signal this bubble should have its own
+          // rendered bar (live, it never gets one — _abRenderReasonedAck renders plain text, no bar).
+          // Same exclusion as chOpen()'s mirror of this loop, for the same reason — confirmed live:
+          // without it, reaching the plan card renders it twice on restore (the plan card itself,
+          // plus its own reasoned ack, both tagged abKind:'plan').
+          if(m.role!=='user'&&Array.isArray(m.qrOptions)&&m.qrOptions.length>=2&&m.abKind!=='single'&&!m.tieback){
             var _abRestoreLive=_abState&&_abState.chatId===activeId&&m.abQuestion===true&&i===chatHistory.length-1;
             if(m.abKind==='multi'&&_abRestoreLive){
               // Same live-only restriction as chOpen's mirror of this block: _abState.questions[
@@ -7329,7 +7352,12 @@ function initPageAll(){
       console.log('[init] discarding stale _abState — restored session has no pending guided-flow question');
       _abState=null;_abClearState(activeId);
     }else{
-      var _abRestoreEntry=_abRestoreBarMap[_abPendingIdx];
+      // _abPendingIdx can land on a reasoned-ack/off-topic-reply bubble that got retagged with the
+      // pending question's own qrOptions/abKind (see the loop's !m.tieback exclusion above) — that
+      // bubble never got its own bar entry, so walk backward to the nearest index that actually has
+      // one, which is always the true original question/plan-card message the tags were copied from.
+      var _abRestoreEntry=null;
+      for(var _abReI=_abPendingIdx;_abReI>=0;_abReI--){if(_abRestoreBarMap[_abReI]){_abRestoreEntry=_abRestoreBarMap[_abReI];break;}}
       if(_abRestoreEntry){
         if(chatHistory[_abPendingIdx].abKind==='multi'&&_abRestoreEntry.builtVia==='generic'){
           // The pending question is multi-select but wasn't literally the last chatHistory
