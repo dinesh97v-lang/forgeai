@@ -6069,6 +6069,11 @@ function _dwUpdateSmoke(r){
   if(!_dwErrLog.length)_dwUpdateErrBadge();
 }
 var _dwCheckFiles=null,_dwCheckIssues=null;
+// One Prompt has no per-code-block ccId concept (a single global build session, not an
+// _ccStore-keyed widget like ccRunFix's), so its own fix-feedback state lives in these plain
+// module vars instead — set fresh at the top of every dwRunFix() success branch, read by
+// dwRateFix() below, mirroring st.feedbackGiven/st.files/st.fixedFiles's role for ccRateFix().
+var _dwFixId=null,_dwFeedbackGiven=false,_dwPreFixFiles=null,_dwPostFixFiles=null;
 function _dwStepHtml(active,msg,style){
   var labels=['1/3 Testing','2/3 Fixing','3/3 Download'];
   var parts=labels.map(function(lbl,i){
@@ -6124,6 +6129,17 @@ function dwCheckAndDownload(){
       wrap.innerHTML=_dwStepHtml(1,'Check failed &#8212; <button onclick="downloadDwCode()" style="background:none;border:none;cursor:pointer;color:var(--accent);font-size:11px;font-family:inherit;padding:0;font-weight:700">download anyway</button>','error');
     });
 }
+// Thumbs up/down for One Prompt's own fix result — mirrors ccRateFix() (index.html:6666-6672)
+// exactly: guards against double-rating, swaps to a static confirmation, posts to the same
+// /api/fix-feedback endpoint. State lives in the plain _dwFixId/_dwFeedbackGiven/_dwPreFixFiles/
+// _dwPostFixFiles vars set at the top of dwRunFix()'s success branch below.
+function dwRateFix(vote){
+  if(!_dwFixId||_dwFeedbackGiven)return;
+  _dwFeedbackGiven=true;
+  var rateEl=document.getElementById('dw-rate');
+  if(rateEl)rateEl.textContent='Thanks for the feedback!';
+  fetch('/api/fix-feedback',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ccId:_dwFixId,vote:vote,issues:_dwCheckIssues||[],preFiles:_dwPreFixFiles||[],postFiles:_dwPostFixFiles||[]})}).catch(function(){});
+}
 function dwRunFix(){
   var issues=_dwCheckIssues||[];
   var files=_dwCheckFiles||[];
@@ -6157,7 +6173,13 @@ function dwRunFix(){
       if(btn)btn.disabled=false;
       var ni=(_dwCheckIssues||[]).length;
       var resolvedNote=ni?' &#8212; '+ni+' issue'+(ni!==1?'s':'')+' resolved':'';
-      wrap.innerHTML=_dwStepHtml(3,'&#10003; Fix applied'+resolvedNote+' &#8212; downloading','success');
+      // Rate-buttons pair mirroring ccRateFix()'s pattern (index.html:6599-6606), reusing the same
+      // /api/fix-feedback endpoint. A fresh synthetic id per fix (same 'dw-'+Date.now() shape
+      // live-created cc ids already use) since there's no ccId here to reuse — the endpoint only
+      // ever treated ccId as an opaque non-empty string, so this needs no endpoint changes.
+      _dwFixId='dw-'+Date.now();_dwFeedbackGiven=false;_dwPreFixFiles=files;_dwPostFixFiles=fixedFiles;
+      wrap.innerHTML=_dwStepHtml(3,'&#10003; Fix applied'+resolvedNote+' &#8212; downloading','success')+
+        '<span id="dw-rate"><button class="cc-btn sec" onclick="dwRateFix(\'up\')" title="Good fix">&#128077;</button><button class="cc-btn sec" onclick="dwRateFix(\'down\')" title="Bad fix">&#128078;</button></span>';
       console.timeEnd('dw:total');
       downloadDwCode();
     })
@@ -6668,7 +6690,7 @@ function ccRateFix(ccId,vote){
   st.feedbackGiven=true;
   var rateEl=document.getElementById(ccId+'-rate');
   if(rateEl)rateEl.textContent='Thanks for the feedback!';
-  fetch('/api/fix-feedback',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ccId:ccId,vote:vote,issues:st.lastIssues||[]})}).catch(function(){});
+  fetch('/api/fix-feedback',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ccId:ccId,vote:vote,issues:st.lastIssues||[],preFiles:st.files||[],postFiles:st.fixedFiles||[]})}).catch(function(){});
 }
 function ccRunFix(ccId){
   var wrap=document.getElementById(ccId);if(!wrap)return;

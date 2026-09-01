@@ -2821,14 +2821,23 @@ app.post('/api/ab-match-option', requireAuth, async (req, res) => {
 });
 
 // App Builder Auto-Fix Issues — thumbs up/down. No model call, just validate + log — same small
-// shape as /api/ab-match-option above. ccId/issues are passed straight from the client's own
-// _ccStore so the log line has real context without this endpoint needing to look anything up.
+// shape as /api/ab-match-option above. ccId/issues/preFiles/postFiles are passed straight from the
+// client's own already-held fix state (_ccStore for ccRunFix, the equivalent plain vars for One
+// Prompt's dwRunFix()) so the log line has real before/after context without this endpoint needing
+// to look anything up or call a model. preFiles/postFiles are optional (default to []) so this
+// stays backward-compatible with any caller that only sends the original {ccId,vote,issues} shape.
 app.post('/api/fix-feedback', requireAuth, (req, res) => {
-  const { ccId, vote, issues } = req.body;
+  const { ccId, vote, issues, preFiles, postFiles } = req.body;
   if (typeof ccId !== 'string' || !ccId.trim() || (vote !== 'up' && vote !== 'down')) {
     return res.status(400).json({ error: 'ccId and vote ("up" or "down") are required' });
   }
-  const line = JSON.stringify({ ccId, vote, issues: Array.isArray(issues) ? issues : [], ts: new Date().toISOString() });
+  const line = JSON.stringify({
+    ccId, vote,
+    issues: Array.isArray(issues) ? issues : [],
+    preFiles: Array.isArray(preFiles) ? preFiles : [],
+    postFiles: Array.isArray(postFiles) ? postFiles : [],
+    ts: new Date().toISOString()
+  });
   appendFixFeedbackLog(line);
   console.log('[fix-feedback]', line);
   res.json({ ok: true });
