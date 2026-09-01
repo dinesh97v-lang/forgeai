@@ -2469,14 +2469,109 @@ async function formatHtml(html) {
   }
 }
 
+// ── REAL LINTING (server-side, alongside runCodeCheck() below) — eslint-linter-browserify, the
+// same vendoring pattern precompileJSX()/formatHtml() use above: a standalone, zero-runtime-
+// dependency bundle in public/vendor/, no npm dependency. Unlike Prettier v3 (ESM-only, needed
+// dynamic import()), this is a UMD build with a CommonJS-compatible branch, so a plain require()
+// hands back the real ESLint Linter class directly. One Linter instance is reused across every
+// lint call — .verify() is stateless per call, per ESLint's own API.
+const { Linter: _ESLintLinter } = require(path.join(__dirname, 'public', 'vendor', 'eslint-linter-browserify.min.js'));
+const _eslintLinter = new _ESLintLinter();
+
+// Deliberately narrow, curated core-rules-only set — no stylistic/opinionated rules (Prettier
+// above already owns cosmetic formatting, so style rules here would just be redundant or
+// conflicting noise). Only ESLint core rules that are unambiguous correctness signals, never style
+// preferences — see this session's read-only investigation for the full reasoning on scope.
+//
+// no-unused-vars uses { vars: 'local' } rather than plain 'error' — live-testing this
+// implementation surfaced a systemic false positive without it: this codebase's generated apps
+// near-universally wire top-level functions to inline HTML handlers (onclick="increment()"), which
+// ESLint's static analysis of the extracted <script> block alone can't see (the reference lives in
+// HTML markup, outside the linted JS). Without this option, EVERY such function — the dominant,
+// essentially only, event-handling pattern these apps use — was flagged as "unused," even on
+// otherwise clean code. { vars: 'local' } skips only top-level/global-scope declarations, while
+// still catching genuinely unused LOCAL variables inside function bodies (verified live: a variable
+// declared and never used INSIDE a handler function is still correctly flagged). The tradeoff is a
+// true-but-unused top-level variable no longer being caught — accepted deliberately, since a
+// false positive on nearly every fix is the more damaging failure mode this rule set is meant to
+// avoid (per the original investigation's own reasoning on why the set must stay narrow).
+const LINT_RULES = {
+  'no-undef': 'error', 'no-unused-vars': ['error', { vars: 'local' }], 'no-dupe-keys': 'error',
+  'no-dupe-args': 'error', 'no-unreachable': 'error', 'no-const-assign': 'error',
+  'no-redeclare': 'error', 'no-fallthrough': 'error', 'use-isnan': 'error',
+  'valid-typeof': 'error', 'no-eval': 'error'
+};
+
+// Common browser/React globals a generated single-file app legitimately references — without
+// these, no-undef would false-positive on nearly every real app (document, fetch, localStorage,
+// etc.), which is exactly the "too strict → noise on every fix" failure mode this session's
+// investigation flagged as the real risk of adding a linter here.
+const LINT_GLOBALS = {
+  window: 'readonly', document: 'readonly', console: 'readonly', localStorage: 'readonly',
+  sessionStorage: 'readonly', fetch: 'readonly', setTimeout: 'readonly', setInterval: 'readonly',
+  clearTimeout: 'readonly', clearInterval: 'readonly', alert: 'readonly', confirm: 'readonly',
+  prompt: 'readonly', navigator: 'readonly', location: 'readonly', history: 'readonly',
+  React: 'readonly', ReactDOM: 'readonly', Promise: 'readonly', Math: 'readonly', JSON: 'readonly',
+  Date: 'readonly', Array: 'readonly', Object: 'readonly', parseInt: 'readonly', parseFloat: 'readonly',
+  isNaN: 'readonly', isFinite: 'readonly', requestAnimationFrame: 'readonly', Event: 'readonly',
+  CustomEvent: 'readonly', URLSearchParams: 'readonly', Blob: 'readonly', FormData: 'readonly'
+};
+
+// Lints every inline <script> block in an HTML document — ESLint's Linter only understands a raw
+// JS string, it has no HTML-aware wrapper the way Prettier's HTML plugin does, so blocks are
+// extracted with the same script-tag regex precompileJSX() already uses above, linted
+// independently, and each message's line number is remapped from "line within the extracted
+// block" back to "line within the original full document" by counting newlines that precede the
+// block's own start. type="text/babel" blocks are linted as raw JSX source (ecmaFeatures.jsx),
+// never the Babel-transpiled output, so line numbers match what the model actually generated.
+// Never throws — a lint-parse failure on one block is skipped, not fatal to the whole check, same
+// defensive stance formatHtml() takes on a formatting failure.
+function lintCode(html) {
+  const issues = [];
+  const str = String(html || '');
+  const scriptRe = /<script\b([^>]*)>([\s\S]*?)<\/script>/gi;
+  let match;
+  while ((match = scriptRe.exec(str)) !== null) {
+    const attrs = match[1] || '';
+    const body = match[2] || '';
+    if (/\bsrc\s*=/i.test(attrs)) continue; // external script tag — no inline content to lint
+    if (!body.trim()) continue;
+    const bodyStart = match.index + match[0].indexOf(body);
+    const lineOffset = (str.slice(0, bodyStart).match(/\n/g) || []).length;
+    const isJsx = /\btype\s*=\s*["']text\/babel["']/i.test(attrs);
+    let messages;
+    try {
+      messages = _eslintLinter.verify(body, {
+        languageOptions: {
+          ecmaVersion: 2022,
+          sourceType: 'script',
+          parserOptions: { ecmaFeatures: { jsx: isJsx } },
+          globals: LINT_GLOBALS
+        },
+        rules: LINT_RULES
+      });
+    } catch (err) {
+      continue;
+    }
+    for (const m of messages) {
+      if (!m.ruleId) continue; // skip fatal-parse/config-meta entries — not a real rule finding
+      issues.push(`${m.ruleId}: ${m.message} (line ${lineOffset + m.line})`);
+    }
+  }
+  return issues;
+}
+
 async function runCodeCheck(files, model = MODELS.GROQ_70B, endpointLabel = '/api/code-check') {
   // Real parse check ahead of the LLM review below — Babel.transform() throws a genuine
   // SyntaxError on malformed JSX, catching a class of bug the LLM-only review can miss entirely.
-  const jsxIssues = [];
+  // lintCode() alongside it adds real static-analysis findings (unused/undefined vars, etc.) the
+  // same way — both are non-LLM, deterministic checks prepended to the LLM's own issue list below.
+  const staticIssues = [];
   for (const f of files) {
     if (!/\.html?$/i.test(f.filename || '')) continue;
     try { precompileJSX(String(f.content || '')); }
-    catch (err) { jsxIssues.push(`${f.filename}: JSX syntax error — ${err.message}`); }
+    catch (err) { staticIssues.push(`${f.filename}: JSX syntax error — ${err.message}`); }
+    for (const li of lintCode(f.content)) staticIssues.push(`${f.filename}: ${li}`);
   }
   const content = files.map(f => `=== ${f.filename} ===\n${f.content}`).join('\n\n').slice(0, 8000);
   const sysMsg = 'You are a code reviewer. Check the following files for syntax errors, obvious bugs, missing dependencies, and security issues (hardcoded secrets, eval). Respond in this exact JSON format only: { "status": "pass" or "issues", "issues": ["issue 1", "issue 2"] }. If code is fine, status is pass with empty issues array.';
@@ -2511,7 +2606,7 @@ async function runCodeCheck(files, model = MODELS.GROQ_70B, endpointLabel = '/ap
   const llmResult = (parsed && (parsed.status === 'pass' || parsed.status === 'issues'))
     ? parsed
     : { status: 'issues', issues: ['Could not parse check result'] };
-  if (jsxIssues.length) return { status: 'issues', issues: [...jsxIssues, ...(llmResult.issues || [])] };
+  if (staticIssues.length) return { status: 'issues', issues: [...staticIssues, ...(llmResult.issues || [])] };
   return llmResult;
 }
 
