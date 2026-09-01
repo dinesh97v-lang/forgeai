@@ -338,6 +338,13 @@ body.ab-flow-active .mac[onclick^="regenMsg"]{display:none!important}
 #panels-wrap.pv-open .panel.active{flex:0 0 55%;min-width:0;overflow:hidden}
 #panels-wrap.pv-open #preview-panel{display:flex;flex:1;min-width:0;animation:pvIn .18s ease}
 @keyframes pvIn{from{opacity:0;transform:translateX(16px)}to{opacity:1;transform:translateX(0)}}
+/* Shared "just auto-refreshed" cue for BOTH preview mechanisms (pv-iframe's destroy/recreate
+   model and dw-preview-frame's same-element srcdoc-reload model) — an inset glow ring that fades
+   out, applied via _pvFlashUpdated(). Inset (not an outer shadow) so it renders correctly on
+   #pv-live despite its own overflow:hidden, and works identically on dw-preview-frame's plain
+   bordered iframe box. */
+@keyframes pvFlash{0%{box-shadow:inset 0 0 0 3px var(--accent)}100%{box-shadow:inset 0 0 0 0 transparent}}
+.pv-flash-updated{animation:pvFlash .6s ease-out}
 #preview-panel{display:none;flex-direction:column;background:var(--bg);border-left:1px solid var(--border)}
 #pvh{display:flex;align-items:center;gap:6px;padding:7px 10px;border-bottom:1px solid var(--border);flex-shrink:0;background:var(--bg2)}
 .pv-tabs{display:flex;background:var(--bg3);border-radius:6px;padding:2px;gap:2px}
@@ -2502,9 +2509,26 @@ function scanChatFiles(){
     }
   }
 }
+// Shared visual cue for "the preview just auto-refreshed" — wired into pvAutoUpdate() (covers
+// ccRunFix's and App Builder's shared auto-refresh trigger, since both funnel through it) and
+// separately into One Prompt's _dwApplyCode()/dwRunFix() below, since those don't share pvAutoUpdate
+// at all. Purely additive: never forces anything open, never touches pvBuild()'s remount model or
+// any refresh-trigger logic — just adds/removes a CSS class on whichever element is actually
+// STABLE across that flow's own refresh (pv-live never gets destroyed even though its child
+// pv-iframe does; dw-preview-frame itself is stable there, only its srcdoc reloads). No-ops
+// harmlessly if targetId isn't currently in the DOM (e.g. the panel is closed) — animating a
+// nonexistent element is simply skipped, matching pvAutoUpdate()'s own closed-panel no-op.
+function _pvFlashUpdated(targetId){
+  var el=document.getElementById(targetId);
+  if(!el)return;
+  el.classList.remove('pv-flash-updated');
+  void el.offsetWidth; // force reflow so a rapid repeat (e.g. two fixes in quick succession) restarts the animation instead of being a no-op
+  el.classList.add('pv-flash-updated');
+  setTimeout(function(){el.classList.remove('pv-flash-updated');},650);
+}
 function pvAutoUpdate(){
   var pw=document.getElementById('panels-wrap');
-  if(pw&&pw.classList.contains('pv-open'))pvRender();
+  if(pw&&pw.classList.contains('pv-open')){pvRender();_pvFlashUpdated('pv-live');}
 }
 function pvOpen(preId,fileKey){
   // Safety net: if all pvFiles are empty, scan chat history now
@@ -5887,6 +5911,8 @@ function showResult(inp,code){
     '</div>'+
     '<button class="btn ghost" style="width:100%;border-style:dashed" onclick="resetBuild()">Build Another App</button>';
   document.getElementById('dw-generated-code').textContent=code;
+  // The initial reveal, not a refresh — deliberately no _pvFlashUpdated() call here (matches
+  // pv-iframe's pvOpen()-vs-pvAutoUpdate() split: a first appearance isn't "something updated").
   _dwLoadPreview();
   _dwUpdatePrevBtn();
 }
@@ -5908,6 +5934,12 @@ function _dwApplyCode(code){
   var codeEl=document.getElementById('dw-generated-code');
   if(codeEl)codeEl.textContent=code;
   _dwLoadPreview();
+  // Only ever called for a genuine subsequent update (updateApp()'s success path,
+  // dwRestorePreviousVersion()) — the initial build reveal calls _dwLoadPreview() directly instead
+  // (see that call site's own comment), so this never fires on first reveal, matching pv-iframe's
+  // pvOpen()-vs-pvAutoUpdate() split. Targets dw-preview-frame itself (stable across a srcdoc
+  // reload here, unlike pv-iframe which gets destroyed/recreated) — same shared helper as pvAutoUpdate().
+  _pvFlashUpdated('dw-preview-frame');
 }
 function _dwUpdatePrevBtn(){
   var btn=document.getElementById('dw-prev-ver-btn');
@@ -6120,6 +6152,7 @@ function dwRunFix(){
         var codeEl=document.getElementById('dw-generated-code');
         if(codeEl)codeEl.textContent=window._dwCode;
         _dwLoadPreview();
+        _pvFlashUpdated('dw-preview-frame'); // bypasses _dwApplyCode() (sets window._dwCode directly), so needs its own call — same shared helper
       }
       if(btn)btn.disabled=false;
       var ni=(_dwCheckIssues||[]).length;
