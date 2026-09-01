@@ -3094,6 +3094,15 @@ app.post('/api/code-fix', requireAuth, async (req, res) => {
       return res.json({ error: true, reason: 'parse' });
     }
     console.log(`[code-fix] parse OK — outputFiles:${parsed.files.length} outputChars:${(parsed.files[0]?.content || '').length}`);
+    // Auto-format (Prettier, cosmetic only) — same formatHtml() /api/export-zip already uses, same
+    // vendored bundle, same fallback-on-error design (a formatting failure never blocks or corrupts
+    // the fix — it just ships the already-correct unformatted content instead). Runs before the
+    // recheck below so the recheck (and every response branch after it, all of which return this
+    // same parsed.files) sees the final formatted content.
+    parsed.files = await Promise.all(parsed.files.map(async f => {
+      if (!/\.html?$/i.test(f.filename || '')) return f;
+      return { ...f, content: await formatHtml(String(f.content || '')) };
+    }));
     let recheck;
     if (groqWas429 || groqTruncated) {
       // 70B was already rate-limited, or truncated on both the initial attempt and the
