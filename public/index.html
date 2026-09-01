@@ -1190,6 +1190,7 @@ body.ab-flow-active .mac[onclick^="regenMsg"]{display:none!important}
 <script src="/lib/ab-match-option.js"></script>
 <script src="/lib/ab-null-streak.js"></script>
 <script src="/lib/ab-continue-build-guards.js"></script>
+<script src="/lib/cc-versions.js"></script>
 <script>
 const FEATURES={
   deploy:false,
@@ -1525,10 +1526,11 @@ function chOpen(id){
         cm.appendChild(div);
         if(m.role!=='user'&&/```/.test(m.content)){
           var ccId='cc-r'+i;
-          _ccStore[ccId]={files:null,fixedFiles:null,lastIssues:[]};
+          _ccStore[ccId]={files:null,fixedFiles:null,lastIssues:[],msgIdx:i};
           var ccWrap=document.createElement('div');ccWrap.className='cc-wrap';ccWrap.id=ccId;
           ccWrap.innerHTML='<button class="cc-check-btn" onclick="ccRunCheck(\''+ccId+'\')">&#10003; Check &amp; Download ZIP</button>'
-            +'<button class="cc-check-btn" onclick="_ccSaveMsgToProject('+i+',this)">&#128193; Save to Project</button>';
+            +'<button class="cc-check-btn" onclick="_ccSaveMsgToProject('+i+',this)">&#128193; Save to Project</button>'
+            +_ccVersionHistoryHtml(ccId);
           cm.appendChild(ccWrap);
         }
         // Live only if this card belongs to the chat _abState now carries (chatId, set/rehydrated
@@ -5102,10 +5104,11 @@ function send(){
         msgs.appendChild(ai);msgs.scrollTop=msgs.scrollHeight;
         if(/```/.test(_reply)){
           var ccId='cc-'+Date.now();
-          _ccStore[ccId]={files:null,fixedFiles:null,lastIssues:[]};
+          _ccStore[ccId]={files:null,fixedFiles:null,lastIssues:[],msgIdx:chatHistory.length-1};
           var ccWrap=document.createElement('div');ccWrap.className='cc-wrap';ccWrap.id=ccId;
           ccWrap.innerHTML='<button class="cc-check-btn" onclick="ccRunCheck(\''+ccId+'\')">&#10003; Check &amp; Download ZIP</button>'
-            +'<button class="cc-check-btn" onclick="_ccSaveMsgToProject('+(chatHistory.length-1)+',this)">&#128193; Save to Project</button>';
+            +'<button class="cc-check-btn" onclick="_ccSaveMsgToProject('+(chatHistory.length-1)+',this)">&#128193; Save to Project</button>'
+            +_ccVersionHistoryHtml(ccId);
           // "Request a change" follow-up — show what actually changed vs the app's previous
           // version, reusing the SAME _ccDiffLines/_ccRenderDiffRows primitives ccRunFix()'s own
           // diff view already uses, unmodified. Only applies to a genuine postBuildFollowup reply,
@@ -6433,6 +6436,99 @@ function _ccToggleDiff(diffId){
   el.style.display=isOpen?'none':'block';
   if(arrow)arrow.innerHTML=isOpen?'&#9662;':'&#9652;';
 }
+// Version history for ccRunFix()'s Auto-Fix Issues — durable, unlike _ccStore[ccId] (wiped on
+// every chOpen()/initPageAll() render pass, never survives a refresh at all). Lives directly on
+// the chatHistory message object itself (chatHistory[msgIdx].ccVersions) rather than a new
+// localStorage key: ccId is unstable across a reload (cc-<Date.now()> when first created vs
+// cc-r<index> on replay), while the message's position/identity in chatHistory is the one stable
+// anchor available, and piggybacking here means this persists via the exact same saveChat()/
+// chSync() machinery every other chatHistory mutation already uses — no new storage key, no
+// separate quota/cleanup-on-chat-delete concern. Each entry is a full snapshot of the message's
+// PRIOR content (not a diff), matching One Prompt's proven window._dwVersions shape (untouched,
+// out of scope) — a plain undo stack, oldest-to-newest, capped so storage stays bounded even
+// though full single-file-app snapshots can run several KB each.
+var CC_MAX_VERSIONS=4;
+// _ccReplaceMatchingFence/_ccComputeAppliedFix: pure logic, defined in public/lib/cc-versions.js
+// (loaded above) — unit-tested in test/pure-logic.test.js. This is the thin DOM/state wrapper:
+// resolves the message from chatHistory, calls the pure computation, and — only if it actually
+// changed anything — commits the result and persists it. Writing a completed fix durably into
+// chatHistory resolves the gap where a fix previously only ever lived in the ephemeral
+// _ccStore[ccId].fixedFiles, invisible again after any refresh or chat switch. ccGetFiles() scans
+// the WHOLE chat, not just this message, so preFiles can legitimately include a file that actually
+// came from a DIFFERENT message — that file is deliberately left untouched (no write-back
+// attempted for it), matching today's existing behavior (nothing was ever written back anywhere
+// for it before this change either), so this is additive, never a regression.
+function _ccApplyFixToMessage(msgIdx,preFiles,postFiles){
+  var m=chatHistory[msgIdx];if(!m)return false;
+  var result=_ccComputeAppliedFix(m.content,preFiles,postFiles,m.ccVersions,CC_MAX_VERSIONS,Date.now());
+  if(!result.changed)return false;
+  m.ccVersions=result.newVersions;
+  m.content=result.newContent;
+  saveChat();chSync();
+  return true;
+}
+// Re-renders the visible chat bubble text for ccId's message after its chatHistory content has
+// been changed out from under the DOM (a fix applied, or a revert) — the bubble is otherwise only
+// ever rendered once, at message-creation/restore time. ccWrap is always appended as the sibling
+// immediately after its .msg div (both creation sites and both restore loops), so that ordering is
+// how the bubble is found — no id on the .msg itself to look up directly instead.
+function _ccRefreshBubbleDom(ccId){
+  var wrap=document.getElementById(ccId);if(!wrap)return;
+  var st=_ccStore[ccId];
+  var m=(st&&st.msgIdx!=null)?chatHistory[st.msgIdx]:null;
+  if(!m)return;
+  var msgDiv=wrap.previousElementSibling;
+  var bubEl=msgDiv&&msgDiv.querySelector('.bub');
+  if(bubEl)bubEl.innerHTML=formatMarkdown(m.content);
+}
+// Collapsed-by-default version-history strip — visually parallel to _ccDiffToggleHtml, reusing the
+// same _ccToggleDiff show/hide handler unmodified. Independent of st.fixedFiles (which chOpen()/
+// initPageAll() wipe every render pass) — reads chatHistory[msgIdx].ccVersions directly, the
+// durable record, so this is visible immediately on restore, before any Check has run this
+// session. Most-recent-first so the common "undo my last fix" case is the top entry.
+function _ccVersionHistoryHtml(ccId){
+  var st=_ccStore[ccId];
+  var m=(st&&st.msgIdx!=null)?chatHistory[st.msgIdx]:null;
+  var versions=(m&&Array.isArray(m.ccVersions))?m.ccVersions:[];
+  if(!versions.length)return '';
+  var toggleId=ccId+'-vh';
+  var rows=versions.map(function(v,idx){
+    var label=new Date(v.ts).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'});
+    return '<div style="display:flex;align-items:center;justify-content:space-between;padding:3px 0;font-size:11px;color:var(--text2)">'
+      +'<span>Version '+(idx+1)+' — '+esc(label)+'</span>'
+      +'<button class="cc-btn sec" style="padding:2px 8px;font-size:10px" onclick="ccRevertVersion(\''+ccId+'\','+idx+')">Revert</button></div>';
+  }).reverse().join('');
+  return '<div onclick="_ccToggleDiff(\''+toggleId+'\')" style="cursor:pointer;font-size:11px;color:var(--text2);margin:6px 0;user-select:none">'
+    +'<span id="'+toggleId+'-arrow">&#9662;</span> Version history ('+versions.length+')</div>'
+    +'<div id="'+toggleId+'" style="display:none;border:1px solid var(--border);border-radius:var(--r);padding:4px 8px;margin-bottom:8px">'+rows+'</div>';
+}
+// General N-step revert — jumps directly to any stored version, not just one step back (the
+// history list can show several entries at once). Truncates ccVersions to what's strictly older
+// than the picked entry: a plain undo stack with no redo, same semantics as One Prompt's proven
+// window._dwVersions (untouched, out of scope) — whatever was stepped away from isn't retained.
+// Renders a neutral "reverted" state rather than a stale pass/fail card, since the reverted content
+// hasn't actually been (re-)checked — st.fixedFiles/st.files from before the revert no longer
+// describe it, so Download/diff-view would otherwise show stale results.
+function ccRevertVersion(ccId,versionIdx){
+  var st=_ccStore[ccId];if(!st||st.msgIdx==null)return;
+  var m=chatHistory[st.msgIdx];if(!m)return;
+  var versions=Array.isArray(m.ccVersions)?m.ccVersions:[];
+  if(versionIdx<0||versionIdx>=versions.length)return;
+  var wrap=document.getElementById(ccId);if(!wrap)return;
+  var oldContent=m.content;
+  m.content=versions[versionIdx].content;
+  m.ccVersions=versions.slice(0,versionIdx);
+  saveChat();chSync();
+  var oldCode=_ccExtractFirstCode(oldContent),newCode=_ccExtractFirstCode(m.content);
+  if(oldCode&&newCode&&oldCode!==newCode){
+    _ccMaybeRefreshPreview([{filename:'index.html',content:oldCode}],[{filename:'index.html',content:newCode}]);
+  }
+  _ccRefreshBubbleDom(ccId);
+  st.fixedFiles=null;
+  wrap.innerHTML='<div class="cc-card"><div style="color:var(--text2);margin-bottom:6px">&#8617; Reverted to an earlier version.</div>'
+    +_ccVersionHistoryHtml(ccId)
+    +'<button class="cc-btn prim" onclick="ccRunCheck(\''+ccId+'\')">Check &amp; Download ZIP</button></div>';
+}
 function ccRunCheck(ccId){
   var wrap=document.getElementById(ccId);if(!wrap)return;
   var allFiles=ccGetFiles();
@@ -6444,7 +6540,11 @@ function ccRunCheck(ccId){
     wrap.innerHTML='<div class="cc-card" style="color:var(--text2)">No code files found in this conversation.'+skipNote+'</div>';
     return;
   }
-  _ccStore[ccId]={files:files,fixedFiles:null,lastIssues:[],skippedCount:skippedCount};
+  // msgIdx preserved across this reassignment — it's set once at ccWrap-creation time (chOpen/
+  // initPageAll/the live-render site) and never changes for this ccId's lifetime; losing it here
+  // would break every version-history lookup for the rest of this render pass.
+  var _ccPrevMsgIdx=(_ccStore[ccId]||{}).msgIdx;
+  _ccStore[ccId]={files:files,fixedFiles:null,lastIssues:[],skippedCount:skippedCount,msgIdx:_ccPrevMsgIdx};
   wrap.innerHTML='<div style="font-size:11px;color:var(--text2);padding:4px 0">Checking code...</div>';
   fetch('/api/code-check',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({files:files})})
     .then(function(r){return r.json();})
@@ -6455,30 +6555,28 @@ function ccShowResult(ccId,result,isRecheck){
   var wrap=document.getElementById(ccId);if(!wrap)return;
   var st=_ccStore[ccId]||{};
   if(result.issues)st.lastIssues=result.issues;
-  // Only ever shown once a fix has actually been applied (st.fixedFiles truthy) — never on the
-  // first check, before Auto-Fix Issues has ever run. One-level undo only, matching what
-  // st.files/st.fixedFiles currently store — there's no path to a second fix on the same ccId
-  // today (fixBtn below is never shown once isRecheck is true), so there's nothing beyond this
-  // one pre-fix/post-fix pair to revert across.
-  var undoBtn=(st.fixedFiles&&st.fixedFiles.length)?'<button class="cc-btn sec" onclick="ccUndoFix(\''+ccId+'\')">Undo Fix</button>':'';
-  // Thumbs up/down — same gating as Undo Fix (only once a fix has actually been applied). One
-  // rating per fix: st.feedbackGiven (set by ccRateFix) swaps the buttons for a static
-  // confirmation on every re-render, same as it looks right after the real click. Wrapped in a
-  // stable-id span so ccRateFix can update just this slot in place instead of re-rendering the
-  // whole card.
+  // Version-history strip (chatHistory-backed, durable) replaces the old single-slot Undo Fix
+  // button — its most-recent entry covers exactly the same "undo my last fix" case, plus any
+  // earlier version is now directly reachable too, not just the immediately-previous one.
+  var versionHistoryHtml=_ccVersionHistoryHtml(ccId);
+  // Thumbs up/down — only once a fix has actually been applied THIS session (st.fixedFiles
+  // truthy). Deliberately left keyed to the in-session fix, not chatHistory's durable version
+  // history — feedback is about "was the fix I just watched happen good," not a general prompt
+  // that would need to reappear on every restore.
   var rateBtns=(st.fixedFiles&&st.fixedFiles.length)?('<span id="'+ccId+'-rate">'+(st.feedbackGiven
     ?'Thanks for the feedback!'
     :'<button class="cc-btn sec" onclick="ccRateFix(\''+ccId+'\',\'up\')" title="Good fix">&#128077;</button><button class="cc-btn sec" onclick="ccRateFix(\''+ccId+'\',\'down\')" title="Bad fix">&#128078;</button>')+'</span>'):'';
   if(result.status==='pass'){
     wrap.innerHTML='<div class="cc-card"><div style="color:var(--success);font-weight:700;margin-bottom:6px">'+(isRecheck?'Issues fixed and verified ✓':'All checks passed ✓')+'</div>'
       +(isRecheck?_ccDiffToggleHtml(ccId):'')
-      +'<button class="cc-btn prim" onclick="ccDownload(\''+ccId+'\')">Download ZIP</button>'+undoBtn+rateBtns+'</div>';
+      +versionHistoryHtml
+      +'<button class="cc-btn prim" onclick="ccDownload(\''+ccId+'\')">Download ZIP</button>'+rateBtns+'</div>';
   }else{
     var issueHtml=(result.issues||[]).map(function(i){return '<div class="cc-issue">• '+esc(i)+'</div>';}).join('');
     var note=isRecheck?'<div style="color:var(--text2);font-size:11px;margin-bottom:4px">Some issues remain after auto-fix.</div>':'';
     var fixBtn=!isRecheck?'<button class="cc-btn prim" onclick="ccRunFix(\''+ccId+'\')">Auto-Fix Issues</button>':'';
-    wrap.innerHTML='<div class="cc-card">'+note+issueHtml+(isRecheck?_ccDiffToggleHtml(ccId):'')+'<div>'+fixBtn
-      +'<button class="cc-btn sec" onclick="ccDownload(\''+ccId+'\')">'+(isRecheck?'Download ZIP':'Download Anyway')+'</button>'+undoBtn+rateBtns+'</div></div>';
+    wrap.innerHTML='<div class="cc-card">'+note+issueHtml+(isRecheck?_ccDiffToggleHtml(ccId):'')+versionHistoryHtml+'<div>'+fixBtn
+      +'<button class="cc-btn sec" onclick="ccDownload(\''+ccId+'\')">'+(isRecheck?'Download ZIP':'Download Anyway')+'</button>'+rateBtns+'</div></div>';
   }
   if((st.skippedCount||0)>0){
     var el=wrap.querySelector('.cc-card');
@@ -6513,22 +6611,17 @@ function _ccMaybeRefreshPreview(preFixFiles,fixedFiles){
   pvStore('html',escaped,null);
   pvAutoUpdate();
 }
-// One-level undo for ccRunFix()'s Auto-Fix Issues — reverts _ccStore[ccId] back to its pre-fix
-// state. Ordering matters: the preview-refresh call runs FIRST, while st.fixedFiles still holds
-// the fix that's about to be undone — _ccMaybeRefreshPreview needs that old value intact to match
-// against whatever's currently shown in pvFiles.html (which, if the preview is open, is the fixed
-// content). Called with (st.fixedFiles, st.files) — the exact reverse of ccRunFix's own
-// (st.files, st.fixedFiles) call — reusing the same function unmodified, just fixed/original
-// swapped, since it's already generic ("does pvFiles.html match something in the first array? if
-// so, replace it with the corresponding entry from the second"). Only one level: st.files/
-// st.fixedFiles hold exactly one pre-fix/post-fix pair, and ccShowResult never offers a second
-// Auto-Fix Issues run on the same ccId (fixBtn stays empty once isRecheck is true) — there's
-// nothing beyond this one pair to revert across.
+// "Undo my last fix" — a thin convenience wrapper over the general ccRevertVersion(), always
+// targeting the most recent entry in chatHistory[msgIdx].ccVersions. Kept as its own named
+// function (rather than inlining versions.length-1 at each call site) since it's still reachable
+// from the version-history list's own most-recent row, and as a stable name for anything else
+// that might want a one-step undo without needing to know the current version count.
 function ccUndoFix(ccId){
-  var st=_ccStore[ccId];if(!st||!st.fixedFiles)return;
-  _ccMaybeRefreshPreview(st.fixedFiles,st.files);
-  st.fixedFiles=null;
-  ccShowResult(ccId,{status:'issues',issues:st.lastIssues},false);
+  var st=_ccStore[ccId];if(!st||st.msgIdx==null)return;
+  var m=chatHistory[st.msgIdx];if(!m)return;
+  var versions=Array.isArray(m.ccVersions)?m.ccVersions:[];
+  if(!versions.length)return;
+  ccRevertVersion(ccId,versions.length-1);
 }
 // Thumbs up/down on an applied fix — POST to the small /api/fix-feedback utility endpoint (log-
 // only, no model call) and swap the buttons for a static confirmation in place. One rating per
@@ -6565,15 +6658,24 @@ function ccRunFix(ccId){
       }
       _ccStore[ccId].fixedFiles=d.files;
       _ccMaybeRefreshPreview(files,d.files);
+      // Writes the fix durably into chatHistory (a new version pushed, message content updated)
+      // so it survives a refresh/chat switch — resolves the gap where a completed fix previously
+      // only ever lived in the ephemeral _ccStore[ccId].fixedFiles. Runs for every successful fix
+      // outcome below (verified, unverifiable, or skipped-verification alike — the fix itself was
+      // still genuinely applied in all three), not just the normal recheck path.
+      var _ccMsgIdx=_ccStore[ccId].msgIdx;
+      if(_ccMsgIdx!=null&&_ccApplyFixToMessage(_ccMsgIdx,files,d.files))_ccRefreshBubbleDom(ccId);
       if(d.recheck&&d.recheck.status==='check-failed'){
         wrap.innerHTML='<div class="cc-card"><div style="color:var(--text2);margin-bottom:6px">Fix applied — verification unavailable (model busy). Download to review.</div>'
           +_ccDiffToggleHtml(ccId)
+          +_ccVersionHistoryHtml(ccId)
           +'<button class="cc-btn prim" onclick="ccDownload(\''+ccId+'\')">Download ZIP</button></div>';
         return;
       }
       if(d.recheck&&d.recheck.status==='check-skipped'){
         wrap.innerHTML='<div class="cc-card"><div style="color:var(--text2);margin-bottom:6px">Fix applied — couldn\'t auto-verify right now, download to review.</div>'
           +_ccDiffToggleHtml(ccId)
+          +_ccVersionHistoryHtml(ccId)
           +'<button class="cc-btn prim" onclick="ccDownload(\''+ccId+'\')">Download ZIP</button></div>';
         return;
       }
@@ -7292,10 +7394,11 @@ function initPageAll(){
           cm.appendChild(div);
           if(m.role!=='user'&&/```/.test(m.content)){
             var ccId='cc-r'+i;
-            _ccStore[ccId]={files:null,fixedFiles:null,lastIssues:[]};
+            _ccStore[ccId]={files:null,fixedFiles:null,lastIssues:[],msgIdx:i};
             var ccWrap=document.createElement('div');ccWrap.className='cc-wrap';ccWrap.id=ccId;
             ccWrap.innerHTML='<button class="cc-check-btn" onclick="ccRunCheck(\''+ccId+'\')">&#10003; Check &amp; Download ZIP</button>'
-              +'<button class="cc-check-btn" onclick="_ccSaveMsgToProject('+i+',this)">&#128193; Save to Project</button>';
+              +'<button class="cc-check-btn" onclick="_ccSaveMsgToProject('+i+',this)">&#128193; Save to Project</button>'
+              +_ccVersionHistoryHtml(ccId);
             cm.appendChild(ccWrap);
           }
           // Render every historical card disabled by default — re-armed below, but only the

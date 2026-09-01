@@ -16,6 +16,7 @@ const {
   _abDetectSplitOpeningTag,
   _abDetectExprMismatch,
 } = require('../public/lib/ab-continue-build-guards.js');
+const { _ccReplaceMatchingFence, _ccComputeAppliedFix } = require('../public/lib/cc-versions.js');
 
 // ── _abMatchOption ──────────────────────────────────────────────────────────
 
@@ -199,4 +200,109 @@ test('_abDetectExprMismatch: does NOT fire when no ={ appears at all', () => {
 test('_abDetectExprMismatch: whitespace between ={ and content is tolerated', () => {
   const code = 'style={   { color: "red" }}';
   assert.equal(_abDetectExprMismatch(code), null);
+});
+
+// ── _ccReplaceMatchingFence ──────────────────────────────────────────────────
+
+test('_ccReplaceMatchingFence: replaces the matching fenced block, preserving the language tag', () => {
+  const text = 'Here is your app:\n```html\nold code\n```\nEnjoy!';
+  const out = _ccReplaceMatchingFence(text, 'old code', 'new code');
+  assert.equal(out, 'Here is your app:\n```html\nnew code\n```\nEnjoy!');
+});
+
+test('_ccReplaceMatchingFence: matches by trimmed content, tolerant of surrounding whitespace', () => {
+  const text = '```js\n  console.log(1);  \n```';
+  const out = _ccReplaceMatchingFence(text, 'console.log(1);', 'console.log(2);');
+  assert.equal(out, '```js\nconsole.log(2);\n```');
+});
+
+test('_ccReplaceMatchingFence: only replaces the ONE block matching, leaves other blocks in the same message untouched', () => {
+  const text = '```js\nfile a\n```\nsome prose\n```js\nfile b\n```';
+  const out = _ccReplaceMatchingFence(text, 'file b', 'file b fixed');
+  assert.equal(out, '```js\nfile a\n```\nsome prose\n```js\nfile b fixed\n```');
+});
+
+test('_ccReplaceMatchingFence: returns null when no fence matches the given old content', () => {
+  const text = '```html\nsome other code\n```';
+  assert.equal(_ccReplaceMatchingFence(text, 'code that is not here', 'new code'), null);
+});
+
+test('_ccReplaceMatchingFence: returns null on empty/falsy oldCode rather than matching an empty fence', () => {
+  assert.equal(_ccReplaceMatchingFence('```html\n\n```', '', 'new code'), null);
+  assert.equal(_ccReplaceMatchingFence('```html\ncode\n```', null, 'new code'), null);
+});
+
+// ── _ccComputeAppliedFix ─────────────────────────────────────────────────────
+
+test('_ccComputeAppliedFix: applies a matching fix, pushes the prior content as a new version', () => {
+  const content = 'Your app:\n```html\nbuggy\n```';
+  const pre = [{ filename: 'index.html', content: 'buggy' }];
+  const post = [{ filename: 'index.html', content: 'fixed' }];
+  const result = _ccComputeAppliedFix(content, pre, post, [], 4, 1000);
+  assert.equal(result.changed, true);
+  assert.equal(result.newContent, 'Your app:\n```html\nfixed\n```');
+  assert.deepEqual(result.newVersions, [{ content: 'Your app:\n```html\nbuggy\n```', ts: 1000 }]);
+});
+
+test('_ccComputeAppliedFix: no-op (changed:false) when the fix result is identical to the input', () => {
+  const content = '```html\nsame\n```';
+  const pre = [{ filename: 'index.html', content: 'same' }];
+  const post = [{ filename: 'index.html', content: 'same' }];
+  const result = _ccComputeAppliedFix(content, pre, post, [], 4, 1000);
+  assert.equal(result.changed, false);
+  assert.equal(result.newContent, content);
+});
+
+test('_ccComputeAppliedFix: no-op when the pre-fix content is not found in this message at all (file came from elsewhere)', () => {
+  const content = '```html\nunrelated content\n```';
+  const pre = [{ filename: 'index.html', content: 'content from a different message' }];
+  const post = [{ filename: 'index.html', content: 'fixed elsewhere' }];
+  const result = _ccComputeAppliedFix(content, pre, post, [], 4, 1000);
+  assert.equal(result.changed, false);
+  assert.equal(result.newContent, content);
+});
+
+test('_ccComputeAppliedFix: appends to existing version history rather than replacing it', () => {
+  const content = '```html\nv3\n```';
+  const pre = [{ filename: 'index.html', content: 'v3' }];
+  const post = [{ filename: 'index.html', content: 'v4' }];
+  const existing = [{ content: 'v1 msg', ts: 100 }, { content: 'v2 msg', ts: 200 }];
+  const result = _ccComputeAppliedFix(content, pre, post, existing, 4, 300);
+  assert.equal(result.changed, true);
+  assert.deepEqual(result.newVersions, [
+    { content: 'v1 msg', ts: 100 },
+    { content: 'v2 msg', ts: 200 },
+    { content: '```html\nv3\n```', ts: 300 },
+  ]);
+});
+
+test('_ccComputeAppliedFix: caps version history at maxVersions, dropping the oldest first', () => {
+  const content = '```html\nv5\n```';
+  const pre = [{ filename: 'index.html', content: 'v5' }];
+  const post = [{ filename: 'index.html', content: 'v6' }];
+  const existing = [
+    { content: 'v1', ts: 1 },
+    { content: 'v2', ts: 2 },
+    { content: 'v3', ts: 3 },
+    { content: 'v4', ts: 4 },
+  ];
+  const result = _ccComputeAppliedFix(content, pre, post, existing, 4, 5);
+  assert.equal(result.newVersions.length, 4);
+  // oldest (v1) dropped, v2/v3/v4 kept, new snapshot appended last
+  assert.deepEqual(result.newVersions.map(v => v.content), ['v2', 'v3', 'v4', '```html\nv5\n```']);
+});
+
+test('_ccComputeAppliedFix: only writes back files that actually match in THIS message, ignoring unrelated fixed files', () => {
+  const content = '```html\nmy file\n```';
+  const pre = [
+    { filename: 'index.html', content: 'my file' },
+    { filename: 'other.js', content: 'not in this message' },
+  ];
+  const post = [
+    { filename: 'index.html', content: 'my file fixed' },
+    { filename: 'other.js', content: 'other file fixed' },
+  ];
+  const result = _ccComputeAppliedFix(content, pre, post, [], 4, 1000);
+  assert.equal(result.changed, true);
+  assert.equal(result.newContent, '```html\nmy file fixed\n```');
 });
