@@ -2979,6 +2979,8 @@ app.post('/api/code-fix', requireAuth, async (req, res) => {
 
     let raw = null;
     let groqWas429 = false;
+    let groqTruncated = false;
+    let finishReason = null;
 
     // Try GROQ_70B first
     console.log(`[code-fix] attempting ${MODELS.GROQ_70B} (timeout:30s) reasoningEffort=high...`);
@@ -2989,7 +2991,7 @@ app.post('/api/code-fix', requireAuth, async (req, res) => {
         { headers: { Authorization: `Bearer ${GROQ_KEY}` }, timeout: 30000 }
       );
       raw = resp.data?.choices?.[0]?.message?.content || '';
-      const finishReason = resp.data?.choices?.[0]?.finish_reason || 'unknown';
+      finishReason = resp.data?.choices?.[0]?.finish_reason || 'unknown';
       {
         const _usage = resp.data?.usage || null;
         const _reasoningTokens = _usage?.completion_tokens_details?.reasoning_tokens ?? 'unavailable';
@@ -3017,6 +3019,73 @@ app.post('/api/code-fix', requireAuth, async (req, res) => {
       }
     }
 
+    // A 200 response cut off by finish_reason:'length' is a different failure shape than a 429 —
+    // no exception was thrown, Groq just ran out of budget before emitting visible content. Live
+    // testing this session confirmed hidden reasoning (reasoning_effort:'high') scales with
+    // whatever max_tokens it's given (99.95% of 4000, 98.65% of 8000 consumed on the same task) —
+    // raising max_tokens doesn't fix this and risks new 413s, so instead retry the SAME model once
+    // with reasoning_effort stepped down to 'medium', directly targeting the actual cause (reasoning
+    // eating the budget) before falling back to a weaker model. !groqWas429 keeps this fully
+    // separate from the 429 path above, which already got its own (untouched) recovery.
+    if (finishReason === 'length' && !groqWas429) {
+      console.log(`[code-fix] ${MODELS.GROQ_70B} truncated (finish_reason:length) — retrying same model with reasoningEffort=medium...`);
+      try {
+        const retryResp = await axios.post(
+          'https://api.groq.com/openai/v1/chat/completions',
+          { model: MODELS.GROQ_70B, messages: [{ role: 'system', content: fixSys }, { role: 'user', content: fixUser }], max_tokens: 4000, temperature: 0, reasoning_effort: 'medium' },
+          { headers: { Authorization: `Bearer ${GROQ_KEY}` }, timeout: 30000 }
+        );
+        raw = retryResp.data?.choices?.[0]?.message?.content || '';
+        const retryFinishReason = retryResp.data?.choices?.[0]?.finish_reason || 'unknown';
+        {
+          const _usage = retryResp.data?.usage || null;
+          const _reasoningTokens = _usage?.completion_tokens_details?.reasoning_tokens ?? 'unavailable';
+          const _completionTokens = _usage?.completion_tokens ?? 'unavailable';
+          const _logLine = `[code-fix] endpoint=/api/code-fix model=${MODELS.GROQ_70B} reasoningEffort=medium (retry after length) finish_reason:${retryFinishReason} rawLen:${raw.length} reasoning_tokens=${_reasoningTokens} completion_tokens=${_completionTokens} ts=${new Date().toISOString()}`;
+          console.log(_logLine);
+          appendReasoningLog(_logLine);
+        }
+        if (retryFinishReason === 'length') {
+          // Lighter reasoning still left no room — likely a genuinely large fix, not just heavy
+          // reasoning, so escalate to the same Gemini fallback the 429 path already uses (Gemini
+          // has no reasoning_effort/reasoning_tokens concept here, so its whole budget goes to
+          // visible content) rather than giving up on a task that might still be fixable.
+          console.log(`[code-fix] medium-effort retry also truncated — trying Gemini Flash fallback`);
+          groqTruncated = true;
+          try {
+            raw = await callGeminiModel(MODELS.GEM_FLASH, fixUser, fixSys, [], 4000);
+            console.log(`[code-fix] Gemini Flash OK — rawLen:${raw ? raw.length : 0}`);
+          } catch (gemErr) {
+            console.log('[code-fix] Gemini fallback also failed:', gemErr.message);
+            return res.json({ busy: true });
+          }
+        }
+      } catch (retryErr) {
+        // Live-observed during testing: the retry itself can hit a 429 (same account, back-to-back
+        // calls). Reuses the exact same Gemini fallback the first attempt's 429 case already has —
+        // giving up here would discard a request that a proven recovery path might still resolve.
+        // Sets groqWas429 (not a new flag) so the existing skip-recheck condition below covers this
+        // case too, same reasoning as the first-attempt 429: 70B has already shown it's struggling.
+        const retryStatus = retryErr.response?.status;
+        if (retryStatus === 429) {
+          groqWas429 = true;
+          console.log(`[code-fix] ${MODELS.GROQ_70B} medium-effort retry also rate-limited (429) — trying Gemini Flash fallback`);
+          try {
+            raw = await callGeminiModel(MODELS.GEM_FLASH, fixUser, fixSys, [], 4000);
+            console.log(`[code-fix] Gemini Flash OK — rawLen:${raw ? raw.length : 0}`);
+          } catch (gemErr) {
+            console.log('[code-fix] Gemini fallback also failed:', gemErr.message);
+            return res.json({ busy: true });
+          }
+        } else {
+          // Non-429 failure on the retry (network/HTTP error) — same recovery as any other
+          // non-429 Groq failure on the first attempt: propagate unchanged.
+          console.error(`[code-fix] ${MODELS.GROQ_70B} medium-effort retry failed — HTTP:${retryStatus ?? 'ERR'} code:${retryErr.code || '-'} msg:${retryErr.message}`);
+          throw retryErr;
+        }
+      }
+    }
+
     console.log('[code-fix] parsing JSON response...');
     const cleanRaw = (raw || '').replace(/^```(?:json)?\s*/i, '').replace(/\s*```[\s\S]*$/i, '').trim();
     const parsed = extractFirstJson(cleanRaw);
@@ -3026,9 +3095,11 @@ app.post('/api/code-fix', requireAuth, async (req, res) => {
     }
     console.log(`[code-fix] parse OK — outputFiles:${parsed.files.length} outputChars:${(parsed.files[0]?.content || '').length}`);
     let recheck;
-    if (groqWas429) {
-      // 70B was already rate-limited during the fix — skip recheck to avoid a guaranteed 429 wasted call
-      console.log('[code-fix] skipping recheck — 70B rate-limited during fix');
+    if (groqWas429 || groqTruncated) {
+      // 70B was already rate-limited, or truncated on both the initial attempt and the
+      // reasoning-stepped-down retry, during the fix — skip recheck to avoid a likely-wasted call
+      // (same reasoning as the 429 case: 70B has already shown it's struggling on this request).
+      console.log('[code-fix] skipping recheck — 70B rate-limited or truncated during fix');
       recheck = { status: 'check-skipped' };
     } else {
       try {
