@@ -3287,10 +3287,17 @@ function _abResolveEscape(t){
   saveChat();chSync();
 }
 // Question N is reached by answering question N-1 — going Back means returning to N-1 and
-// clearing exactly the answer that led here, so it can be picked again.
+// clearing exactly the answer that led here, so it can be picked again. Also reachable from
+// phase:'confirm' (the plan-confirm card's own "⬅ Back" button, added in 261b454 without ever
+// extending this guard to allow it — a real bug, confirmed live and fixed this session): every
+// path that enters phase:'confirm' (normal flow completion, _abStartWithDetailedPlan(),
+// _abStartWithTemplate()) leaves step===questions.length, so flipping phase back to 'asking' here
+// lets the exact same step-decrement/clear/re-ask body below reach the last question unmodified —
+// no special-casing needed.
 function _abGoBack(){
-  if(!_abState||_abState.phase!=='asking')return;
+  if(!_abState||(_abState.phase!=='asking'&&_abState.phase!=='confirm'))return;
   if(_abState.step<1)return; // no Back from the first question
+  if(_abState.phase==='confirm')_abState.phase='asking';
   _abState.step--;
   _abState.answers[_abState.step]=undefined;
   _abState.awaitingCustomFeature=false; // don't let a pending "+ Add your own" leak into whatever's typed on the step we just moved back to
