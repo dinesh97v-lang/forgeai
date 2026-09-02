@@ -2985,7 +2985,7 @@ function _abBeginGeneratedFlow(intentText){
     console.log('[_abBeginGeneratedFlow] after scaffold-strip — length='+_cleanIntro.length+' text='+JSON.stringify(_cleanIntro));
     if(_cleanIntro){
       var div=document.createElement('div');div.className='msg';
-      div.innerHTML='<div class="mav ai">F</div><div><div class="bub">'+formatMarkdown(_cleanIntro)+'</div></div>';
+      div.innerHTML='<div class="mav ai">F</div><div><div class="bub">'+formatMarkdown(_cleanIntro)+_abTemplateSuggestHtml(_abFlowIsTa())+'</div></div>';
       msgs.appendChild(div);msgs.scrollTop=msgs.scrollHeight;
       chatHistory.push({role:'assistant',content:_cleanIntro});saveChat();chSync();
     }
@@ -3018,7 +3018,7 @@ function _abBeginGeneratedFlow(intentText){
         _abState.answers=[];
       }
       var _fbDiv=document.createElement('div');_fbDiv.className='msg';
-      _fbDiv.innerHTML='<div class="mav ai">F</div><div><div class="bub">'+esc(_fallbackIntro)+'</div></div>';
+      _fbDiv.innerHTML='<div class="mav ai">F</div><div><div class="bub">'+esc(_fallbackIntro)+_abTemplateSuggestHtml(_abFbThanglish)+'</div></div>';
       msgs.appendChild(_fbDiv);msgs.scrollTop=msgs.scrollHeight;
       chatHistory.push({role:'assistant',content:_fallbackIntro});saveChat();chSync();
     }
@@ -3065,6 +3065,66 @@ function _abStartWithDetailedPlan(text){
     _abState.phase='confirm';
     _abRenderPlanCard();
   });
+}
+// Static starter-kit bundles for the "pick a starting point" shortcut offered alongside the
+// guided flow's intro message. Same {questions,answers,buildHints} shape _abStartWithDetailedPlan
+// adopts from a live /api/ab-extract-plan response above — these are just hand-authored instead of
+// model-extracted. questions reuse _abDefaultQuestions verbatim (same question/label/options/multi
+// shape the rest of the flow already renders/serializes) so the plan card and _abTriggerBuild()'s
+// own qa-serialization need zero special-casing; only answers/intentText/buildHints vary per
+// template. techStack/styleGuide values are exactly AB_ALLOWED_TECH_STACK/AB_ALLOWED_STYLE_GUIDE's
+// existing options (server.js) — no new values invented.
+var _AB_TEMPLATES={
+  todo:{
+    intentText:'A simple todo list app to manage my daily tasks',
+    answers:['Both','Simple HTML/CSS/JS',['Data Storage'],'Minimal'],
+    buildHints:{techStack:'Plain HTML/CSS/JS',styleGuide:'Minimal'}
+  },
+  landing:{
+    intentText:'A landing page to promote my product or service',
+    answers:['Both','Simple HTML/CSS/JS',[],'Professional'],
+    buildHints:{techStack:'Plain HTML/CSS/JS',styleGuide:'Professional'}
+  },
+  portfolio:{
+    intentText:'A personal portfolio site to showcase my projects and skills',
+    answers:['Both','Simple HTML/CSS/JS',[],'Minimal'],
+    buildHints:{techStack:'Plain HTML/CSS/JS',styleGuide:'Minimal'}
+  },
+  quiz:{
+    intentText:'A simple quiz app with multiple choice questions and a score at the end',
+    answers:['Both','Simple HTML/CSS/JS',['Data Storage'],'Colorful'],
+    buildHints:{techStack:'Plain HTML/CSS/JS',styleGuide:'Colorful'}
+  }
+};
+// Parallel entry point to _abStartWithDetailedPlan() above — same destination shape/phase, just
+// seeded from _AB_TEMPLATES' static data instead of a live extraction, so there's no fetch/typing-
+// indicator/stale-session race to guard here. Deep-copies questions/answers/buildHints so repeat
+// use of the same template (or a later "⬅ Back" edit mutating _abState.answers in place) never
+// mutates the shared _AB_TEMPLATES bundle itself.
+function _abStartWithTemplate(templateId){
+  var tpl=_AB_TEMPLATES[templateId];
+  if(!tpl)return;
+  _abState=_abNewState({
+    step:_abDefaultQuestions.length,
+    phase:'confirm',
+    questions:_abDefaultQuestions.slice(),
+    answers:tpl.answers.map(function(a){return Array.isArray(a)?a.slice():a;}),
+    intentText:tpl.intentText,
+    buildHints:{techStack:tpl.buildHints.techStack,styleGuide:tpl.buildHints.styleGuide}
+  });
+  _abUILock();
+  _abRenderPlanCard();
+}
+// Inline, plain-text starting-point suggestions appended to the guided flow's own intro bubble
+// (both the LLM-generated and the fallback branch in _abBeginGeneratedFlow below) — deliberately
+// NOT a persistent pill/card element, just tappable text inside the same message bubble. isTa
+// mirrors _abFlowIsTa()'s language convention (server-detected lang when available, else a
+// client-side re-detect for the fallback path).
+function _abTemplateSuggestHtml(isTa){
+  var lead=isTa?'Illa, template vachu fast-a start pannanuma? Pick pannunga:':'Or pick a starting point:';
+  var items=[['todo','todo app'],['landing','landing page'],['portfolio','portfolio'],['quiz','quiz/form']];
+  var links=items.map(function(it){return '<a href="javascript:void(0)" onclick="_abStartWithTemplate(\''+it[0]+'\')" style="color:var(--accent);text-decoration:none">'+it[1]+'</a>';}).join(' &middot; ');
+  return '<div style="margin-top:8px;font-size:11px;color:var(--text3)">'+lead+' '+links+'</div>';
 }
 function _abPick(arr){return arr[Math.floor(Math.random()*arr.length)];}
 // Client-side mirror of server.js's detectLanguage() — same logic, so guided-flow acknowledgments
