@@ -2637,6 +2637,12 @@ function qCancel(){
 
 // ── Attachment ────────────────────────────────────────────────────────────────
 var attachData=null;
+// isAttaching/_sendQueuedAfterAttach: fix a confirmed race — send() could fire (e.g. a fast
+// paste-then-Enter) while attachHandle()'s async FileReader read + Image decode/resize is still
+// in flight, silently dropping the attachment since attachData was still null at snapshot time.
+// See attachHandle()/send() for the full mechanism.
+var isAttaching=false;
+var _sendQueuedAfterAttach=false;
 function lbOpen(src){var lb=document.getElementById('img-lb');if(!lb||!src)return;document.getElementById('img-lb-img').src=src;lb.classList.add('show');}
 function lbClose(){var lb=document.getElementById('img-lb');if(lb){lb.classList.remove('show');document.getElementById('img-lb-img').src='';}}
 function attachPick(){var m=document.getElementById('attach-menu');if(m)m.classList.toggle('open');}
@@ -4721,7 +4727,20 @@ function attachHandle(file){
   if(!isImg&&!isTxt){notify('Unsupported file. Use images (JPG/PNG/WEBP) or text files (txt/md/csv/json/js/py/html/css).');return;}
   if(isImg&&file.size>5*1024*1024){notify('Image must be under 5MB');return;}
   if(isTxt&&file.size>1*1024*1024){notify('Text file must be under 1MB');return;}
+  // isAttaching is true for exactly the span of the async work below (FileReader read, plus for
+  // images an Image decode to check dimensions/resize) — see send()'s own matching check.
+  // _finishAttach() is called from every exit path below, success or failure, so this can never
+  // get left stuck true.
+  isAttaching=true;
+  function _finishAttach(){
+    isAttaching=false;
+    if(_sendQueuedAfterAttach){_sendQueuedAfterAttach=false;send();}
+  }
   var reader=new FileReader();
+  reader.onerror=function(){
+    notify('Could not read the attached file — please try again.');
+    _finishAttach();
+  };
   reader.onload=function(e){
     var data=e.target.result;
     if(isImg){
@@ -4729,6 +4748,7 @@ function attachHandle(file){
         var b64=data.split(',')[1];
         attachData={type:'image',name:file.name,mimeType:file.type,data:b64,thumb:data};
         showAttachBar('<img src="'+data+'" class="attach-thumb" alt="">',file.name);
+        _finishAttach();
       };
       var img=new Image();
       img.onerror=useOriginal;
@@ -4744,11 +4764,13 @@ function attachHandle(file){
         var b64r=resizedData.split(',')[1];
         attachData={type:'image',name:file.name,mimeType:outType,data:b64r,thumb:resizedData};
         showAttachBar('<img src="'+resizedData+'" class="attach-thumb" alt="">',file.name);
+        _finishAttach();
       };
       img.src=data;
     }else{
       attachData={type:'text',name:file.name,mimeType:'text/plain',data:data};
       showAttachBar('<span style="font-size:14px">📄</span>',file.name);
+      _finishAttach();
     }
   };
   if(isImg)reader.readAsDataURL(file);else reader.readAsText(file);
@@ -4879,7 +4901,17 @@ function _chatStreamFetch(url,opts,onDelta){
 function send(){
   if(_sendPending){_abBuildInFlight=false;return;}
   var inp=document.getElementById('chat-in');
-  var t=inp.value.trim();if(!t&&!attachData){_abBuildInFlight=false;return;}
+  var t=inp.value.trim();
+  // Fix for a confirmed race: attachHandle()'s async staging (FileReader read + Image decode/
+  // resize) may still be in flight here — e.g. a fast paste-then-Enter — in which case attachData
+  // is still null even though the user genuinely attached something. Queue this call instead of
+  // proceeding (which would either silently drop the attachment if t is non-empty, or silently do
+  // nothing at all if t is empty) — attachHandle()'s _finishAttach() re-invokes send() once
+  // attachData is actually set, at which point this same call proceeds normally below reading the
+  // now-current inp.value/attachData. No perceptible delay for the ordinary attach-then-pause-
+  // then-send case: isAttaching is only ever true for the brief span of that async work.
+  if(isAttaching){_abBuildInFlight=false;_sendQueuedAfterAttach=true;return;}
+  if(!t&&!attachData){_abBuildInFlight=false;return;}
   // Captured here, before any App Builder routing below, so every branch — including the ones
   // that construct and dispatch their own message without ever reaching the ordinary-chat tail
   // further down — can tell whether an attachment is present and warn instead of silently
