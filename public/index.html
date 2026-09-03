@@ -5074,7 +5074,14 @@ function send(){
     // (a typo, or a Thanglish phrasing outside build|create|make|...). _abSkipOpenerClassify is
     // true on the retry this fires below, so a non-confident result doesn't loop back into asking
     // about the same miss again.
-    if(!_abNi&&!_abState&&!_abSkipOpenerClassify){
+    // _abPostBuildChatId!==chCurId(): skip the classifier entirely in a chat where a build just
+    // completed — its prompt assumes this is the user's opening message to the assistant, which
+    // is false here, and it has no signal an app already exists in this conversation (unlike
+    // _abClassifyMidFlowAside, which is told what's being built). That blind spot let genuine
+    // post-build follow-up questions ("App eppadi platform-la run panrathu?") get misread as new
+    // build requests and reset the flow. Mirrors _abPostBuildSkip above, which already applies
+    // this same exclusion on the _abNi-true side.
+    if(!_abNi&&!_abState&&!_abSkipOpenerClassify&&_abPostBuildChatId!==chCurId()){
       _abClassifyOpeningBuildRequest(t,function(_abOpenResult){
         if(_abOpenResult==='build'){
           if(attSnap)notify(_abAttachWarnMsg);
