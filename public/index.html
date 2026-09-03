@@ -2696,6 +2696,42 @@ var _abDefaultQuestionsThanglish=[
   {question:'Enna features venum? Onnu illa athukku mela pick pannunga, appuram Done click pannunga.',label:'Features',options:['User Login','Data Storage','Search','Notifications','Payment','Maps','Charts','Chat'],multi:true},
   {question:'Enna design style venum?',label:_AB_LABEL_DESIGN_STYLE,options:['Minimal','Colorful','Professional'],multi:false}
 ];
+// Category-specific alternates to the business/CRM-flavored feature list above — same Platform/
+// Tech Stack/Design Style questions verbatim (only the Features options differ), used only on the
+// SAME guaranteed-fallback path _abDefaultQuestions itself is used on (when /api/app-build-intro
+// fails or returns invalid questions). Confirmed live this session: a "simple number guessing
+// game" idea landing on this fallback got [User Login, Data Storage, Search, Notifications,
+// Payment, Maps, Charts, Chat] — none of which fit a game. English only, mirroring the scope of
+// the bug this fixes (observed on the English fallback specifically) — the rarer true-failure +
+// Thanglish-detected corner still uses _abDefaultQuestionsThanglish unchanged, untouched here.
+var _abDefaultQuestionsGame=[
+  {question:'Where should your app run?',label:'Platform',options:['Phone only','Desktop only','Both'],multi:false},
+  {question:'Which tech stack do you prefer?',label:_AB_LABEL_TECH_STACK,options:['Simple HTML/CSS/JS','React'],multi:false},
+  {question:'Which features do you need? Pick one or more, then tap Done.',label:'Features',options:['Score tracking','Difficulty levels','Leaderboard','Sound effects','Restart/Reset'],multi:true},
+  {question:'What design style do you prefer?',label:_AB_LABEL_DESIGN_STYLE,options:['Minimal','Colorful','Professional'],multi:false}
+];
+var _abDefaultQuestionsBooking=[
+  {question:'Where should your app run?',label:'Platform',options:['Phone only','Desktop only','Both'],multi:false},
+  {question:'Which tech stack do you prefer?',label:_AB_LABEL_TECH_STACK,options:['Simple HTML/CSS/JS','React'],multi:false},
+  {question:'Which features do you need? Pick one or more, then tap Done.',label:'Features',options:['Appointment booking','Calendar/availability view','Reminders','Cancel/reschedule','Booking history'],multi:true},
+  {question:'What design style do you prefer?',label:_AB_LABEL_DESIGN_STYLE,options:['Minimal','Colorful','Professional'],multi:false}
+];
+// Picks which fallback set fits the app idea, purely by keyword — deliberately narrow/high-
+// precision (a handful of unambiguous nouns per category) rather than exhaustive, matching
+// _abPlatformAlreadyStated()'s own established style just above: a false negative here just means
+// the original generic-but-safe fallback runs, same as before this fix, so under-matching is the
+// safe failure direction, not over-matching. Only ever consulted on the fallback path itself — the
+// real dynamic questions from /api/app-build-intro are untouched and don't call this at all.
+function _abSelectFallbackQuestions(text){
+  var t=text||'';
+  if(/\b(game|quiz|puzzle|trivia)\b/i.test(t))return _abDefaultQuestionsGame;
+  // "booking", not bare "book" — bare "book" would false-positive on an address-book, notebook,
+  // cookbook, or bookstore app, exactly the over-broad-keyword risk this function is meant to avoid.
+  // (Plural forms included — "appointments"/"reservations"/"slots" are at least as common in real
+  // phrasing as the singular.)
+  if(/\b(booking|appointments?|reservations?|reserve|slots?|schedul(?:e|ing))\b/i.test(t))return _abDefaultQuestionsBooking;
+  return _abDefaultQuestions;
+}
 // Derives build-relevant hints from the fallback array's own answers, by label (not position),
 // since a generated question set's order can never be assumed. Only ever used when buildHints
 // wasn't provided (i.e. we're on the fallback array) — real generated questions always carry
@@ -2950,8 +2986,10 @@ function _abBeginGeneratedFlow(intentText){
   // The seeded fallback (adopted if the generated-questions fetch below fails or is invalid)
   // skips its own platform question when intentText already states it — see
   // _abPlatformAlreadyStated(). A successful generated-questions response further down replaces
-  // this entirely and is unaffected either way.
-  var _abSeedQuestions=_abPlatformAlreadyStated(intentText)?_abDefaultQuestions.filter(function(q){return q.label!=='Platform';}):_abDefaultQuestions.slice();
+  // this entirely and is unaffected either way. _abSelectFallbackQuestions() picks the
+  // business/game/booking variant by keyword — see its own comment above.
+  var _abFallbackQuestions=_abSelectFallbackQuestions(intentText);
+  var _abSeedQuestions=_abPlatformAlreadyStated(intentText)?_abFallbackQuestions.filter(function(q){return q.label!=='Platform';}):_abFallbackQuestions.slice();
   var _abSession=_abState=_abNewState({step:0,phase:'asking',questions:_abSeedQuestions,answers:[],intentText:intentText});
   _abUILock();
   // _abState is fully seeded above — synchronously, right down to a complete fallback question
