@@ -1485,6 +1485,7 @@ function chNewChat(){
   // instead, since _abSaveState() itself locks (for the chat it just saved), not unlocks.
   if(_abState){_abSaveState();}
   _abState=null;_abUIUnlock();_abLiveBar=null;
+  _abRenderPinnedStrip();
   document.getElementById('chat-msgs').innerHTML=welcomeHTML();
   chDraw();
   var ni=document.querySelector((isSimple()?'#simple-nav':'#pro-nav')+' .ni');if(ni)go('chat',ni);
