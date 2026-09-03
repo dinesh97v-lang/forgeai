@@ -1066,6 +1066,21 @@ async function streamChatWithFallback(primaryModel, prompt, sysPrompt, history, 
       effectiveMaxTokens = Math.min(maxTokensOverride, _MODEL_OUTPUT_BUDGET[model]);
       if (effectiveMaxTokens < 1000) { console.log(`[stream-fallback] Skip ${model} — effective output budget ${effectiveMaxTokens} too small for this request`); continue; }
     }
+    // Ordinary chat / One Prompt only (never an App Builder post-build follow-up, which stays on
+    // streamGeminiCompletion's original `?? 8192` default via meta.postBuildFollowup below) —
+    // confirmed truncating moderate-size code edits (e.g. adding several fields to an existing
+    // ~300-line component) once the fallback chain reaches gemini-flash-lite-latest. A fixed
+    // higher cap is used here rather than scaling like the GROQ_8B budget above: that scaling is
+    // calibrated against this Groq account's own shared 8,000 TPM ceiling, a Groq-specific
+    // constraint with no Gemini equivalent in this codebase to scale against. 16384 (double the
+    // previous default) directly targets the reported truncation point without an arbitrarily
+    // large budget. Math.max (not a flat overwrite) so this only ever raises the ceiling — never
+    // lowers whatever a caller may have explicitly requested (e.g. One Prompt's own
+    // maxTokensOverride:8192, itself now raised) — matching maxOutputTokens on the Gemini request
+    // exactly, since effectiveMaxTokens flows unchanged into streamGeminiCompletion() below.
+    if (isGemini(model) && !meta.postBuildFollowup) {
+      effectiveMaxTokens = Math.max(maxTokensOverride ?? 0, 16384);
+    }
     // Gemini daily-quota check for the last-resort tail only — callWithFallback's own tail loop
     // does the identical check before calling GEM_FLASH/GEM_LITE as a final fallback.
     if (tailModels.has(model)) {
@@ -1774,7 +1789,7 @@ DOES NOT APPLY TO: bug fixes, small snippets, single functions, adding one featu
       // res.status(...).json({error}) handling a non-streaming total failure gets today, since no
       // SSE headers were ever written in that case.
       await streamChatWithFallback(primaryModel, finalPrompt, sysPrompt, recentHistory, lang, maxTokensOverride, res, '/api/chat', {
-        reason: decision.reason, searched, enterprise: isEnterprise, simpleMode, startTime
+        reason: decision.reason, searched, enterprise: isEnterprise, simpleMode, startTime, postBuildFollowup
       });
       return;
     } else if (fieldMode && fieldMode.trim()) {
