@@ -3612,7 +3612,7 @@ function _abClassifyRelevantAnswer(text,question,cb){
 // response isn't one of a fixed set, there's nothing to validate it against.
 // cb(null) on failure, timeout, or a quota-guarded skip — all three look identical to
 // the caller, which renders nothing in that case.
-function _abGenerateReasonedAck(question,answer,priorQA,cb){
+function _abGenerateReasonedAck(question,answer,priorQA,intentText,cb){
   var _t0=performance.now();
   var _abAckAbort=new AbortController();
   var _abAckTimer=setTimeout(function(){_abAckAbort.abort();},5000);
@@ -3621,7 +3621,7 @@ function _abGenerateReasonedAck(question,answer,priorQA,cb){
     console.log('[abReasonedAck] question='+JSON.stringify(question)+' answer='+JSON.stringify(answer)+' result='+JSON.stringify(result)+' elapsedMs='+Math.round(performance.now()-_t0));
     cb(result);
   }
-  fetch('/api/ab-reasoned-ack',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({question:question,answer:answer,priorQA:priorQA}),signal:_abAckAbort.signal})
+  fetch('/api/ab-reasoned-ack',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({question:question,answer:answer,priorQA:priorQA,intentText:(intentText||'')}),signal:_abAckAbort.signal})
     .then(function(r){return r.json();})
     .then(function(d){
       var ack=(d&&typeof d.ack==='string'&&d.ack.trim())?d.ack.trim():null;
@@ -3919,7 +3919,7 @@ function _abHandleAnswer(t){
           var nextDef=_abState.questions[_abState.step];
           if(nextDef.multi){_abRenderFeatureSelect();}else{_abAsk(nextDef.question,nextDef.options);}
         }
-        _abGenerateReasonedAck(_abAckQuestion,_abAckAnswer,_abPriorQA,function(ackText){
+        _abGenerateReasonedAck(_abAckQuestion,_abAckAnswer,_abPriorQA,_abState.intentText,function(ackText){
           if(!ackText)return;
           if(_abState!==_abAckSession)return;
           if(_abState.answers[_abAckStep]!==_abAckAnswer)return;

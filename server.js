@@ -2961,7 +2961,18 @@ app.post('/api/fix-feedback', requireAuth, (req, res) => {
 // direct calls (see conversation) that GROQ_8B's language-following and content
 // quality were not reliable enough for this, but GROQ_70B's were.
 // ============================================
-const AB_REASONED_ACK_PROMPT = `You are a helpful product mentor guiding a non-technical founder through building an app. They were just asked a question during a guided app-planning flow and gave an answer. Write a short, warm, substantive reply (1-2 sentences) that acknowledges their specific choice, explains one concrete implication or tradeoff of that choice, and if relevant briefly recommends something to keep in mind. Reply in the SAME language/style as the answer (Tamil script in, Tamil script out; Thanglish in, Thanglish out; English in, English out — never switch or mix). Do not ask a new question. Do not repeat the question back verbatim. Output ONLY the reply text, nothing else, no labels.`;
+// Language handling mirrors AB_OFFTOPIC_REPLY_PROMPT's own fix (same session): the flow's
+// language is locked once, at flow start, from the app idea text (detectLanguage(intentText)) —
+// not re-derived per call from whatever script this one answer happens to be typed in. See the
+// comment above AB_OFFTOPIC_REPLY_PROMPT_BASE for the full rationale and why langInstructions[lang]
+// is used over getLangPreamble(lang). No real app idea available → AB_REASONED_ACK_PROMPT
+// (mirror-the-message, unchanged) is the fallback, same as off-topic-reply's equivalent case.
+const AB_REASONED_ACK_PROMPT_BASE = `You are a helpful product mentor guiding a non-technical founder through building an app. They were just asked a question during a guided app-planning flow and gave an answer. Write a short, warm, substantive reply (1-2 sentences) that acknowledges their specific choice, explains one concrete implication or tradeoff of that choice, and if relevant briefly recommends something to keep in mind. Do not ask a new question. Do not repeat the question back verbatim. Output ONLY the reply text, nothing else, no labels.`;
+
+const AB_REASONED_ACK_PROMPT = AB_REASONED_ACK_PROMPT_BASE.replace(
+  'Output ONLY the reply text, nothing else, no labels.',
+  'Reply in the SAME language/style as the answer (Tamil script in, Tamil script out; Thanglish in, Thanglish out; English in, English out — never switch or mix). Output ONLY the reply text, nothing else, no labels.'
+);
 
 // Decorative and non-blocking — the first thing shed under quota pressure rather than
 // competing with essential features (general chat, the English app-build-intro path)
@@ -2971,7 +2982,7 @@ const AB_REASONED_ACK_PROMPT = `You are a helpful product mentor guiding a non-t
 const AB_REASONED_ACK_QUOTA_THRESHOLD = 0.2;
 
 app.post('/api/ab-reasoned-ack', requireAuth, async (req, res) => {
-  const { question, answer, priorQA } = req.body;
+  const { question, answer, priorQA, intentText } = req.body;
   if (typeof question !== 'string' || !question.trim() || typeof answer !== 'string' || !answer.trim()) {
     return res.status(400).json({ error: 'question and answer are required' });
   }
@@ -2985,11 +2996,16 @@ app.post('/api/ab-reasoned-ack', requireAuth, async (req, res) => {
     priorText = 'Earlier in this conversation:\n' + priorQA.map(qa => `Q: ${qa.question}\nA: ${qa.answer}`).join('\n') + '\n\n';
   }
   const userMsg = priorText + `Question: ${question}\nAnswer: ${answer}`;
+  // Lock the reply's language to the flow's established language, same as ab-offtopic-reply.
+  const reasonedAckLang = (typeof intentText === 'string' && intentText.trim()) ? detectLanguage(intentText) : null;
+  const reasonedAckSystemPrompt = reasonedAckLang
+    ? `${langInstructions[reasonedAckLang]}\n\n${AB_REASONED_ACK_PROMPT_BASE}`
+    : AB_REASONED_ACK_PROMPT;
   try {
-    console.log(`[ab-reasoned-ack] model=${MODELS.GROQ_70B} reasoningEffort=low`);
+    console.log(`[ab-reasoned-ack] model=${MODELS.GROQ_70B} reasoningEffort=low lang=${reasonedAckLang || 'mirror-fallback'}`);
     const resp = await axios.post(
       'https://api.groq.com/openai/v1/chat/completions',
-      { model: MODELS.GROQ_70B, messages: [{ role: 'system', content: AB_REASONED_ACK_PROMPT }, { role: 'user', content: userMsg }], max_tokens: 300, temperature: 0.7, reasoning_effort: 'low' },
+      { model: MODELS.GROQ_70B, messages: [{ role: 'system', content: reasonedAckSystemPrompt }, { role: 'user', content: userMsg }], max_tokens: 300, temperature: 0.7, reasoning_effort: 'low' },
       { headers: { Authorization: `Bearer ${GROQ_KEY}` }, timeout: 4500 }
     );
     try { updateGroqQuota(MODELS.GROQ_70B, resp.headers); } catch (e) { console.warn('[quota-track]', e.message); }
