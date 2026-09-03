@@ -3026,11 +3026,27 @@ app.post('/api/ab-reasoned-ack', requireAuth, async (req, res) => {
 // below are optional in the prompt's own wording (not every call site has real ones — see the
 // confirm-phase call, which passes ['Build it 🚀','Start over']) so the model degrades to a plain
 // contextual reply rather than inventing options when none are given.
-const AB_OFFTOPIC_REPLY_PROMPT = `You are a helpful product mentor guiding a non-technical founder through building an app. They are in the middle of a guided app-planning flow and were asked a specific question with a list of options, but what they just typed is not an answer to it — it's an aside, a question, or an unrelated remark, often asking what something means or which option makes sense for their app.
+// Language handling: the flow's language is locked once, at flow start, from the app idea text
+// (same detectLanguage() call /api/app-build-intro already makes) — NOT re-derived per call from
+// whatever script this one aside happens to be typed in. Mirroring the current message's own
+// script let a single Tamil-script aside flip the reply to full Tamil script mid-Thanglish-flow,
+// even though every other reply in the same flow (questions, other off-topic replies) stayed
+// Thanglish (confirmed live this session). AB_OFFTOPIC_REPLY_PROMPT_BASE omits its own language
+// instruction entirely — langInstructions[lang] is prepended below instead (see the handler for
+// why that one, not getLangPreamble), reusing existing enforcement text already used elsewhere
+// for this exact failure mode. The one call site with no real app idea (confirm-phase:
+// options=['Build it 🚀','Start over'], no intentText) has nothing to lock onto, so it falls back
+// to AB_OFFTOPIC_REPLY_PROMPT (mirror-the-message, unchanged).
+const AB_OFFTOPIC_REPLY_PROMPT_BASE = `You are a helpful product mentor guiding a non-technical founder through building an app. They are in the middle of a guided app-planning flow and were asked a specific question with a list of options, but what they just typed is not an answer to it — it's an aside, a question, or an unrelated remark, often asking what something means or which option makes sense for their app.
 
 Write a short, natural reply (1-2 sentences): if they're asking what a term/concept means or which option to pick, briefly explain it in the context of the app idea given below (not generic advice), then recommend exactly ONE of the listed options by its actual name as a reasonable starting point. Phrase it as a suggestion, not a decision — they still need to pick it themselves (say something like "you could start with X" or "X is often a solid starting point," never "I've chosen X for you" or anything implying the choice is already made). If no options are given below, or their message genuinely isn't asking for guidance on the pending question, just respond naturally to what they said instead.
 
-Do not pretend their message was an answer to the pending question. Do not repeat the pending question back verbatim — it will be shown again separately right after your reply. Reply in the SAME language/style as their message (Tamil script in, Tamil script out; Thanglish in, Thanglish out; English in, English out — never switch or mix). Output ONLY the reply text, nothing else, no labels.`;
+Do not pretend their message was an answer to the pending question. Do not repeat the pending question back verbatim — it will be shown again separately right after your reply. Output ONLY the reply text, nothing else, no labels.`;
+
+const AB_OFFTOPIC_REPLY_PROMPT = AB_OFFTOPIC_REPLY_PROMPT_BASE.replace(
+  'Output ONLY the reply text, nothing else, no labels.',
+  'Reply in the SAME language/style as their message (Tamil script in, Tamil script out; Thanglish in, Thanglish out; English in, English out — never switch or mix). Output ONLY the reply text, nothing else, no labels.'
+);
 
 const AB_OFFTOPIC_REPLY_QUOTA_THRESHOLD = 0.2;
 
@@ -3057,11 +3073,23 @@ app.post('/api/ab-offtopic-reply', requireAuth, async (req, res) => {
     optionsText = `Options for the pending question: ${options.filter(o => typeof o === 'string' && o.trim()).join(', ')}\n`;
   }
   const userMsg = appIdeaText + priorText + `Pending question: ${question}\n${optionsText}User's message (not an answer to it): ${text}`;
+  // Lock the reply's language to the flow's established language (from the app idea, same as
+  // /api/app-build-intro) rather than mirroring this one aside's own script — see comment above
+  // AB_OFFTOPIC_REPLY_PROMPT_BASE. No real app idea (confirm-phase call) → fall back to mirroring.
+  // langInstructions[lang], not getLangPreamble(lang): getLangPreamble's own wording ("detect the
+  // user's language from their LATEST message") still invites mirroring this one aside's script,
+  // confirmed live to still slip into Tamil script against a genuine-Tamil-script aside even with
+  // it prepended. langInstructions[lang] is unconditional ("the user wrote in Thanglish... you
+  // MUST reply in Thanglish") and confirmed live to hold against the same case.
+  const offTopicLang = (typeof intentText === 'string' && intentText.trim()) ? detectLanguage(intentText) : null;
+  const offTopicSystemPrompt = offTopicLang
+    ? `${langInstructions[offTopicLang]}\n\n${AB_OFFTOPIC_REPLY_PROMPT_BASE}`
+    : AB_OFFTOPIC_REPLY_PROMPT;
   try {
-    console.log(`[ab-offtopic-reply] model=${MODELS.GROQ_70B} reasoningEffort=low`);
+    console.log(`[ab-offtopic-reply] model=${MODELS.GROQ_70B} reasoningEffort=low lang=${offTopicLang || 'mirror-fallback'}`);
     const resp = await axios.post(
       'https://api.groq.com/openai/v1/chat/completions',
-      { model: MODELS.GROQ_70B, messages: [{ role: 'system', content: AB_OFFTOPIC_REPLY_PROMPT }, { role: 'user', content: userMsg }], max_tokens: 600, temperature: 0.7, reasoning_effort: 'low' },
+      { model: MODELS.GROQ_70B, messages: [{ role: 'system', content: offTopicSystemPrompt }, { role: 'user', content: userMsg }], max_tokens: 600, temperature: 0.7, reasoning_effort: 'low' },
       { headers: { Authorization: `Bearer ${GROQ_KEY}` }, timeout: 8000 }
     );
     try { updateGroqQuota(MODELS.GROQ_70B, resp.headers); } catch (e) { console.warn('[quota-track]', e.message); }
