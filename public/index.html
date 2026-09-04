@@ -1075,11 +1075,11 @@ body.ab-flow-active .mac[onclick^="regenMsg"]{display:none!important}
         <div class="aisum"><div class="aisum-l">Student Assistant — Tamil AI</div><div class="aisum-t">Upload PDF, get Tamil summary. Ask any doubt — Math, Science, History. Exam prep with quiz, notes, study plan all ready!</div></div>
         <div class="feat-grid">
           <div class="feat-card" onclick="askWithAttach(this.dataset.q)" data-q="Summarize this chapter in Tamil with key points"><div class="feat-icon" style="background:var(--ibg)">📖</div><div class="feat-title">Chapter summary</div><div class="feat-desc">PDF upload — Tamil summary instantly</div></div>
-          <div class="feat-card" onclick="ask(this.dataset.q)" data-q="Generate 10 practice questions on this topic"><div class="feat-icon" style="background:var(--sbg)">❓</div><div class="feat-title">Quiz generator</div><div class="feat-desc">Any topic — MCQ + short answer</div></div>
-          <div class="feat-card" onclick="ask(this.dataset.q)" data-q="Help me write my assignment with research"><div class="feat-icon" style="background:var(--wbg)">✏</div><div class="feat-title">Assignment help</div><div class="feat-desc">Research + draft + grammar check</div></div>
-          <div class="feat-card" onclick="ask(this.dataset.q)" data-q="Solve this math problem step by step"><div class="feat-icon" style="background:var(--dbg)">🔢</div><div class="feat-title">Math solver</div><div class="feat-desc">Step-by-step Tamil explanation</div></div>
-          <div class="feat-card" onclick="ask(this.dataset.q)" data-q="Translate this English text to Tamil"><div class="feat-icon" style="background:var(--sbg)">🌐</div><div class="feat-title">Translate</div><div class="feat-desc">English to Tamil — accurate, fast</div></div>
-          <div class="feat-card" onclick="ask(this.dataset.q)" data-q="Create a 30-day study plan for my exam"><div class="feat-icon" style="background:var(--ibg)">📅</div><div class="feat-title">Study planner</div><div class="feat-desc">Exam schedule + daily study plan</div></div>
+          <div class="feat-card" onclick="askWithTextInput(this.dataset.q,'What topic would you like the quiz to cover?')" data-q="Generate 10 practice questions on this topic"><div class="feat-icon" style="background:var(--sbg)">❓</div><div class="feat-title">Quiz generator</div><div class="feat-desc">Any topic — MCQ + short answer</div></div>
+          <div class="feat-card" onclick="askAssignmentHelp(this.dataset.q)" data-q="Help me write my assignment with research"><div class="feat-icon" style="background:var(--wbg)">✏</div><div class="feat-title">Assignment help</div><div class="feat-desc">Research + draft + grammar check</div></div>
+          <div class="feat-card" onclick="askWithTextInput(this.dataset.q,'Enter the math problem or equation to solve:')" data-q="Solve this math problem step by step"><div class="feat-icon" style="background:var(--dbg)">🔢</div><div class="feat-title">Math solver</div><div class="feat-desc">Step-by-step Tamil explanation</div></div>
+          <div class="feat-card" onclick="askWithTextInput(this.dataset.q,'Enter the English text to translate:')" data-q="Translate this English text to Tamil"><div class="feat-icon" style="background:var(--sbg)">🌐</div><div class="feat-title">Translate</div><div class="feat-desc">English to Tamil — accurate, fast</div></div>
+          <div class="feat-card" onclick="askWithTextInput(this.dataset.q,'Enter your exam subjects and dates (or other planning details):')" data-q="Create a 30-day study plan for my exam"><div class="feat-icon" style="background:var(--ibg)">📅</div><div class="feat-title">Study planner</div><div class="feat-desc">Exam schedule + daily study plan</div></div>
         </div>
       </div>
     </div>
@@ -1644,6 +1644,25 @@ function askWithAttach(t){
   var inp=document.getElementById('chat-in');
   inp.value=t;rsz(inp);
   document.getElementById('attach-file-input').click();
+}
+// Reusable minimal text-input step for the Student panel's remaining cards (Quiz generator,
+// Math solver, Translate, Study planner) that need the user's own topic/equation/text/schedule
+// before sending — reuses the native prompt() already used elsewhere in the app (see prjNew's
+// prompt('Project name:')) rather than inventing a custom modal. Cancelling or leaving it blank
+// does nothing, same as ask()/askWithAttach() never firing on an empty pick.
+function askWithTextInput(basePrompt,inputLabel){
+  var val=(prompt(inputLabel)||'').trim();
+  if(!val)return;
+  ask(basePrompt+': '+val);
+}
+// Assignment help specifically: combines a required text prompt (what the assignment is about)
+// with askWithAttach()'s existing optional-file flow, UNMODIFIED — the user always states the
+// topic, and can additionally attach reference material/instructions via the same PDF/text/image
+// picker Chapter summary already uses, or cancel the picker and just hit Send for text-only help.
+function askAssignmentHelp(basePrompt){
+  var val=(prompt('Briefly describe the assignment (topic, instructions, or requirements):')||'').trim();
+  if(!val)return;
+  askWithAttach(basePrompt+': '+val);
 }
 function esc(s){var d=document.createElement('div');d.textContent=String(s||'');return d.innerHTML;}
 function formatMarkdown(text){
