@@ -1764,6 +1764,7 @@ function finAutoFillIfEligible(){
   Object.keys(FIN_TYPICAL_SHARE).forEach(function(k){
     document.getElementById('fin-in-'+k).value=Math.round(income*FIN_TYPICAL_SHARE[k]);
   });
+  finRefreshLiveView();
 }
 // Live rebalancing: once at least one expense field is locked, the still-unlocked fields
 // redistribute whatever's left of income (after subtracting the locked fields' own values)
@@ -1772,9 +1773,11 @@ function finAutoFillIfEligible(){
 // whatever `remaining` is, rather than each keeping its old absolute auto-filled amount.
 // Floors at 0 (never negative) if the locked fields alone already meet or exceed income — see
 // finUpdateOverBudgetWarning() below, which surfaces that exact state visibly instead of leaving
-// it silent. No-ops on the redistribution itself if every field is already locked — nothing left
-// to redistribute into — but the over-budget check still runs first regardless, since an
-// all-locked state can be over budget too.
+// it silent. Skips the redistribution math itself if every field is already locked — nothing left
+// to redistribute into — but the over-budget check AND the live-view refresh below still run
+// regardless, since an all-locked state can be over budget too and its own values can still
+// change (e.g. a locked field being re-edited, or income changing) even with nothing left to
+// redistribute.
 function finRedistribute(){
   var income=parseFloat(document.getElementById('fin-in-income').value)||0;
   var lockedSum=0,unlockedKeys=[];
@@ -1783,14 +1786,16 @@ function finRedistribute(){
     else{unlockedKeys.push(k);}
   });
   finUpdateOverBudgetWarning(income,lockedSum);
-  if(!unlockedKeys.length)return;
-  var remaining=income-lockedSum;
-  if(remaining<0)remaining=0;
-  var weightSum=unlockedKeys.reduce(function(s,k){return s+FIN_TYPICAL_SHARE[k];},0);
-  unlockedKeys.forEach(function(k){
-    var share=weightSum>0?(FIN_TYPICAL_SHARE[k]/weightSum):0;
-    document.getElementById('fin-in-'+k).value=Math.round(remaining*share);
-  });
+  if(unlockedKeys.length){
+    var remaining=income-lockedSum;
+    if(remaining<0)remaining=0;
+    var weightSum=unlockedKeys.reduce(function(s,k){return s+FIN_TYPICAL_SHARE[k];},0);
+    unlockedKeys.forEach(function(k){
+      var share=weightSum>0?(FIN_TYPICAL_SHARE[k]/weightSum):0;
+      document.getElementById('fin-in-'+k).value=Math.round(remaining*share);
+    });
+  }
+  finRefreshLiveView();
 }
 // Shows/hides #fin-overbudget-warning based on the exact same condition that makes
 // finRedistribute() above floor the unlocked fields at 0 — reads that outcome, doesn't change it.
@@ -1817,6 +1822,7 @@ function finFieldEdited(key){
   FIN_LOCKED[key]=true;
   _finMarkExpensesTouched();
   finRedistribute();
+  finRefreshLiveView();
 }
 // Income field's oninput: routes to whichever behavior actually applies right now rather than
 // always calling finAutoFillIfEligible() — once any field is locked, an income edit should keep
@@ -1825,6 +1831,11 @@ function finFieldEdited(key){
 function finIncomeChanged(){
   var anyLocked=Object.keys(FIN_LOCKED).some(function(k){return FIN_LOCKED[k];});
   if(anyLocked){finRedistribute();}else{finAutoFillIfEligible();}
+  // Always refreshes, regardless of which branch ran above (both already refresh internally too —
+  // harmless to repaint the same content twice in one tick) — this is what correctly hides
+  // #fin-results again if income gets cleared back to empty/0 with nothing locked yet, since
+  // finAutoFillIfEligible() itself early-returns on income<=0 without refreshing on its own.
+  finRefreshLiveView();
 }
 function finComputeSuggestion(data){
   var income=data.income||0;
@@ -1850,11 +1861,44 @@ function finBudgetPlanPrompt(){
   var savings=data.income-totalExpenses;
   return 'Create a monthly budget plan for someone with income Rs.'+finFmt(data.income)+'/month. Current expenses — Rent: Rs.'+finFmt(data.rent)+', Groceries: Rs.'+finFmt(data.groceries)+', Transport: Rs.'+finFmt(data.transport)+', Subscriptions: Rs.'+finFmt(data.subscriptions)+' (current savings: Rs.'+finFmt(savings)+'/month). Suggest a realistic plan to save more.';
 }
-function finRender(){
-  var data=finLoad();
+// Shared paint step for #fin-stat-grid/#fin-breakdown-body/#fin-suggestion-text, factored out so
+// both the last-saved-snapshot path (finRender(), below) and the live-edit path
+// (finRefreshLiveView(), below) render from the exact same code — the bug this fixes was exactly
+// that only the former existed, so any edit that didn't go through Save left these three elements
+// showing stale data. #fin-results becomes visible whenever data.income>0, regardless of whether
+// that data came from a save or is still just sitting in the form unsaved — matches "as soon as
+// auto-fill first populates the fields", not "only after the first Save" — and stays hidden for a
+// genuinely fresh user with no income entered yet, same as before.
+function _finRenderFrom(data){
   var resultsEl=document.getElementById('fin-results');
   if(!resultsEl)return;
-  if(!data){resultsEl.style.display='none';finUpdateOverBudgetWarning(0,0);return;}
+  if(!data||!(data.income>0)){resultsEl.style.display='none';return;}
+  var totalExpenses=data.rent+data.groceries+data.transport+data.subscriptions;
+  var savings=data.income-totalExpenses;
+  var savingsRate=data.income>0?Math.round((savings/data.income)*100):0;
+  document.getElementById('fin-stat-grid').innerHTML=
+    '<div class="fin-card"><div class="fin-l">Monthly income</div><div class="fin-n">Rs.'+finFmt(data.income)+'</div></div>'
+    +'<div class="fin-card"><div class="fin-l">Total expenses</div><div class="fin-n">Rs.'+finFmt(totalExpenses)+'</div></div>'
+    +'<div class="fin-card"><div class="fin-l">Savings</div><div class="fin-n">Rs.'+finFmt(savings)+'</div><div class="fin-t '+(savings>=0?'dn':'up')+'">'+savingsRate+'% rate</div></div>';
+  var cats=[['rent','Rent'],['groceries','Groceries'],['transport','Transport'],['subscriptions','Subscriptions']];
+  document.getElementById('fin-breakdown-body').innerHTML=cats.map(function(c){
+    return '<div class="row"><span class="rl">'+c[1]+'</span><span class="rv">Rs.'+finFmt(data[c[0]])+'</span></div>';
+  }).join('');
+  document.getElementById('fin-suggestion-text').textContent=finComputeSuggestion(data);
+  resultsEl.style.display='';
+}
+// Last-saved-snapshot path — unchanged behavior, still the only place that pre-fills the input
+// fields and restores lock state from localStorage. Still called from finSave() and the
+// panel-open MutationObserver exactly as before; now just delegates its own painting to
+// _finRenderFrom() instead of duplicating that logic inline.
+function finRender(){
+  var data=finLoad();
+  if(!data){
+    var resultsEl=document.getElementById('fin-results');
+    if(resultsEl)resultsEl.style.display='none';
+    finUpdateOverBudgetWarning(0,0);
+    return;
+  }
   document.getElementById('fin-in-income').value=data.income;
   document.getElementById('fin-in-rent').value=data.rent;
   document.getElementById('fin-in-groceries').value=data.groceries;
@@ -1872,19 +1916,22 @@ function finRender(){
   var restoredLockedSum=0;
   Object.keys(FIN_TYPICAL_SHARE).forEach(function(k){if(FIN_LOCKED[k])restoredLockedSum+=data[k]||0;});
   finUpdateOverBudgetWarning(data.income,restoredLockedSum);
-  var totalExpenses=data.rent+data.groceries+data.transport+data.subscriptions;
-  var savings=data.income-totalExpenses;
-  var savingsRate=data.income>0?Math.round((savings/data.income)*100):0;
-  document.getElementById('fin-stat-grid').innerHTML=
-    '<div class="fin-card"><div class="fin-l">Monthly income</div><div class="fin-n">Rs.'+finFmt(data.income)+'</div></div>'
-    +'<div class="fin-card"><div class="fin-l">Total expenses</div><div class="fin-n">Rs.'+finFmt(totalExpenses)+'</div></div>'
-    +'<div class="fin-card"><div class="fin-l">Savings</div><div class="fin-n">Rs.'+finFmt(savings)+'</div><div class="fin-t '+(savings>=0?'dn':'up')+'">'+savingsRate+'% rate</div></div>';
-  var cats=[['rent','Rent'],['groceries','Groceries'],['transport','Transport'],['subscriptions','Subscriptions']];
-  document.getElementById('fin-breakdown-body').innerHTML=cats.map(function(c){
-    return '<div class="row"><span class="rl">'+c[1]+'</span><span class="rv">Rs.'+finFmt(data[c[0]])+'</span></div>';
-  }).join('');
-  document.getElementById('fin-suggestion-text').textContent=finComputeSuggestion(data);
-  resultsEl.style.display='';
+  _finRenderFrom(data);
+}
+// Live-edit path — reads the 5 input fields directly (same live-DOM-read technique
+// finUpdateOverBudgetWarning()/finRedistribute() already use, not localStorage) and repaints
+// through the same _finRenderFrom() finRender() uses, so the breakdown/stat cards/results
+// visibility never go stale between edits and the next Save. Wired into finFieldEdited(),
+// finRedistribute(), finIncomeChanged(), and finAutoFillIfEligible() — every path that updates
+// the live input values now also calls this.
+function finRefreshLiveView(){
+  _finRenderFrom({
+    income:parseFloat(document.getElementById('fin-in-income').value)||0,
+    rent:parseFloat(document.getElementById('fin-in-rent').value)||0,
+    groceries:parseFloat(document.getElementById('fin-in-groceries').value)||0,
+    transport:parseFloat(document.getElementById('fin-in-transport').value)||0,
+    subscriptions:parseFloat(document.getElementById('fin-in-subscriptions').value)||0
+  });
 }
 // Populates/refreshes the computed view whenever the Finance panel becomes visible, without
 // touching go() itself — go('finance',...) already adds .active to #panel-finance on navigation,
