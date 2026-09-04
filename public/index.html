@@ -1108,7 +1108,7 @@ body.ab-flow-active .mac[onclick^="regenMsg"]{display:none!important}
         </div>
         <div id="fin-results" style="display:none">
           <div class="fin-grid" id="fin-stat-grid"></div>
-          <div class="card"><div class="card-hd"><div class="card-title">Spending breakdown</div></div><div class="card-bd" id="fin-breakdown-body"></div></div>
+          <div class="card"><div class="card-hd"><div class="card-title">Spending breakdown</div></div><div class="card-bd"><div id="fin-pie-chart" style="margin-bottom:10px"></div><div id="fin-breakdown-body"></div></div></div>
           <div class="alert-box g"><div class="at g">AI Savings Suggestion</div><div class="atxt g" id="fin-suggestion-text"></div><div class="btn-row"><button class="btn prim" onclick="ask(finBudgetPlanPrompt())">Create budget plan</button></div></div>
         </div>
       </div>
@@ -1801,6 +1801,7 @@ function finReset(){
   document.getElementById('fin-in-income').value='';
   _finRenderCatRows();
   document.getElementById('fin-stat-grid').innerHTML='';
+  document.getElementById('fin-pie-chart').innerHTML='';
   document.getElementById('fin-breakdown-body').innerHTML='';
   document.getElementById('fin-suggestion-text').textContent='';
   document.getElementById('fin-results').style.display='none';
@@ -2021,8 +2022,72 @@ function finBudgetPlanPrompt(){
   var expenseText=cats.map(function(c){return c.name+': Rs.'+finFmt(c.value);}).join(', ');
   return 'Create a monthly budget plan for someone with income Rs.'+finFmt(data.income)+'/month. Current expenses — '+expenseText+' (current savings: Rs.'+finFmt(savings)+'/month). Suggest a realistic plan to save more.';
 }
-// Shared paint step for #fin-stat-grid/#fin-breakdown-body/#fin-suggestion-text, factored out so
-// both the last-saved-snapshot path (finRender(), below) and the live-edit path
+// Cycling color palette for the pie chart below — 10 visually-distinguishable hues; categories
+// beyond the 10th just repeat the cycle (index % length), matching how the rest of this panel
+// tolerates an arbitrary N of categories rather than assuming a fixed small count.
+var FIN_CHART_COLORS=['#6366f1','#22c55e','#f59e0b','#ef4444','#06b6d4','#a855f7','#ec4899','#84cc16','#f97316','#14b8a6'];
+// Pure data computation for the pie chart — no DOM access, so it's unit-testable in isolation
+// (percentages, zero-total, single-category) without a browser. Returns null when there's
+// nothing to chart (no categories, or every value is 0/total<=0) so the caller can hide the chart
+// cleanly instead of drawing an empty/broken SVG. Color assignment uses the category's index in
+// the FULL list (not the post-filter slice list), so a given category keeps the same color across
+// renders even as other categories' values move it in/out of the "has a visible slice" set.
+function _finComputePieSlices(cats){
+  var list=cats||[];
+  var total=list.reduce(function(s,c){return s+(c.value||0);},0);
+  if(!list.length||total<=0)return null;
+  var angle=0;
+  return list.map(function(c,i){
+    var value=c.value||0;
+    var frac=value/total;
+    var startAngle=angle;
+    var endAngle=angle+frac*2*Math.PI;
+    angle=endAngle;
+    return {id:c.id,name:c.name,value:value,pct:Math.round(frac*1000)/10,color:FIN_CHART_COLORS[i%FIN_CHART_COLORS.length],startAngle:startAngle,endAngle:endAngle};
+  });
+}
+// Renders #fin-pie-chart from the same category list the breakdown table/stat-cards render from
+// (called right alongside them inside _finRenderFrom(), below — one render path, no separate
+// update mechanism). A single category holding 100% of expenses is drawn as a plain <circle>
+// rather than an SVG arc path, since an arc whose start and end angle coincide (frac===1) is
+// degenerate and draws nothing — the exact "single category" edge case this exists to handle.
+// Each slice/circle carries a native <title> (hover tooltip); the legend below the chart gives
+// every category (including zero-value ones, matching the table's own always-show-every-row
+// behavior) a permanent, always-visible name+percentage label — not relying on hover alone.
+function _finRenderPieChart(cats){
+  var container=document.getElementById('fin-pie-chart');
+  if(!container)return;
+  var slices=_finComputePieSlices(cats);
+  if(!slices){container.innerHTML='';container.style.display='none';return;}
+  container.style.display='';
+  var cx=60,cy=60,r=55;
+  function polar(angle){return {x:cx+r*Math.cos(angle-Math.PI/2),y:cy+r*Math.sin(angle-Math.PI/2)};}
+  var visible=slices.filter(function(s){return s.value>0;});
+  var svgBody;
+  if(visible.length===1){
+    svgBody='<circle cx="'+cx+'" cy="'+cy+'" r="'+r+'" fill="'+visible[0].color+'"><title>'+_finEscAttr(visible[0].name)+' — '+visible[0].pct+'%</title></circle>';
+  }else{
+    svgBody=visible.map(function(s){
+      var start=polar(s.startAngle),end=polar(s.endAngle);
+      var largeArc=(s.endAngle-s.startAngle)>Math.PI?1:0;
+      var d='M'+cx+','+cy+' L'+start.x.toFixed(2)+','+start.y.toFixed(2)+' A'+r+','+r+' 0 '+largeArc+' 1 '+end.x.toFixed(2)+','+end.y.toFixed(2)+' Z';
+      return '<path d="'+d+'" fill="'+s.color+'"><title>'+_finEscAttr(s.name)+' — '+s.pct+'%</title></path>';
+    }).join('');
+  }
+  var legend=slices.map(function(s){
+    return '<div style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--text2);padding:2px 0">'
+      +'<span style="width:8px;height:8px;border-radius:50%;background:'+s.color+';flex-shrink:0"></span>'
+      +'<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+_finEscAttr(s.name)+'</span>'
+      +'<span style="font-weight:600;color:var(--text);flex-shrink:0">'+s.pct+'%</span>'
+      +'</div>';
+  }).join('');
+  container.innerHTML='<div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">'
+    +'<svg width="120" height="120" viewBox="0 0 120 120" style="flex-shrink:0">'+svgBody+'</svg>'
+    +'<div style="display:flex;flex-direction:column;flex:1;min-width:120px">'+legend+'</div>'
+    +'</div>';
+}
+// Shared paint step for #fin-pie-chart/#fin-stat-grid/#fin-breakdown-body/#fin-suggestion-text,
+// factored out so both the last-saved-snapshot path (finRender(), below) and the live-edit path
 // (finRefreshLiveView(), below) render from the exact same code — the bug this fixes was exactly
 // that only the former existed, so any edit that didn't go through Save left these three elements
 // showing stale data. #fin-results becomes visible whenever data.income>0, regardless of whether
@@ -2042,6 +2107,7 @@ function _finRenderFrom(data){
     '<div class="fin-card"><div class="fin-l">Monthly income</div><div class="fin-n">Rs.'+finFmt(data.income)+'</div></div>'
     +'<div class="fin-card"><div class="fin-l">Total expenses</div><div class="fin-n">Rs.'+finFmt(totalExpenses)+'</div></div>'
     +'<div class="fin-card"><div class="fin-l">Savings</div><div class="fin-n">Rs.'+finFmt(savings)+'</div><div class="fin-t '+(savings>=0?'dn':'up')+'">'+savingsRate+'% rate</div></div>';
+  _finRenderPieChart(cats);
   document.getElementById('fin-breakdown-body').innerHTML=cats.map(function(c){
     return '<div class="row"><span class="rl">'+_finEscAttr(c.name)+'</span><span class="rv">Rs.'+finFmt(c.value)+'</span></div>';
   }).join('');
