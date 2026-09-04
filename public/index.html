@@ -1097,10 +1097,11 @@ body.ab-flow-active .mac[onclick^="regenMsg"]{display:none!important}
           <div class="card-hd"><div class="card-title">Your monthly numbers</div><button class="btn ghost" style="padding:4px 10px;font-size:11px" onclick="finReset()">Reset</button></div>
           <div class="card-bd" style="display:flex;flex-direction:column;gap:8px">
             <div class="row"><span class="rl">Monthly income (Rs.)</span><input type="number" id="fin-in-income" min="0" placeholder="e.g. 52000" oninput="finIncomeChanged()" style="width:130px;border:1px solid var(--border);border-radius:var(--r);padding:5px 8px;font-size:13px;color:var(--text);background:var(--bg2);font-family:inherit;text-align:right"></div>
-            <div class="row"><span class="rl">Rent (Rs.)</span><input type="number" id="fin-in-rent" min="0" placeholder="0" oninput="finFieldEdited('rent')" style="width:130px;border:1px solid var(--border);border-radius:var(--r);padding:5px 8px;font-size:13px;color:var(--text);background:var(--bg2);font-family:inherit;text-align:right"></div>
-            <div class="row"><span class="rl">Groceries (Rs.)</span><input type="number" id="fin-in-groceries" min="0" placeholder="0" oninput="finFieldEdited('groceries')" style="width:130px;border:1px solid var(--border);border-radius:var(--r);padding:5px 8px;font-size:13px;color:var(--text);background:var(--bg2);font-family:inherit;text-align:right"></div>
-            <div class="row"><span class="rl">Transport (Rs.)</span><input type="number" id="fin-in-transport" min="0" placeholder="0" oninput="finFieldEdited('transport')" style="width:130px;border:1px solid var(--border);border-radius:var(--r);padding:5px 8px;font-size:13px;color:var(--text);background:var(--bg2);font-family:inherit;text-align:right"></div>
-            <div class="row"><span class="rl">Subscriptions (Rs.)</span><input type="number" id="fin-in-subscriptions" min="0" placeholder="0" oninput="finFieldEdited('subscriptions')" style="width:130px;border:1px solid var(--border);border-radius:var(--r);padding:5px 8px;font-size:13px;color:var(--text);background:var(--bg2);font-family:inherit;text-align:right"></div>
+            <div id="fin-cat-rows"></div>
+            <div style="display:flex;align-items:center;gap:6px;padding-top:4px">
+              <input type="text" id="fin-new-cat-name" placeholder="New category name" style="flex:1;min-width:0;border:1px solid var(--border);border-radius:var(--r);padding:5px 8px;font-size:12px;color:var(--text);background:var(--bg2);font-family:inherit">
+              <button type="button" class="btn ghost" style="padding:5px 10px;font-size:11px;flex-shrink:0" onclick="finAddCategoryFromInput()">+ Add category</button>
+            </div>
             <div id="fin-overbudget-warning" class="alert-box r" style="display:none"><div class="at r">Over budget</div><div class="atxt r" id="fin-overbudget-text"></div></div>
             <button class="btn prim" style="align-self:flex-start;margin-top:4px" onclick="finSave()">Save</button>
           </div>
@@ -1691,35 +1692,114 @@ function askAssignmentHelp(basePrompt){
 // live from this; #fin-results stays hidden until the user has saved at least once. Client-side
 // only — no backend call anywhere in this block.
 function _finKey(){return 'forgeai_finance'+(currentUser?'_'+currentUser.id:'');}
-function finLoad(){
-  try{var raw=localStorage.getItem(_finKey());return raw?JSON.parse(raw):null;}catch(e){return null;}
+// Attribute-safe HTML escape (also safe for text-node contexts) — used wherever a category's
+// user-typed .name gets embedded into an HTML string. Distinct from the app's shared esc()
+// (defined lower in this file) because esc()'s textContent/innerHTML trick escapes &, <, > but
+// not quote characters, which would let a category name containing a `"` break out of this
+// block's `value="..."` attributes.
+function _finEscAttr(s){
+  return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 }
 function finFmt(n){return Math.round(n||0).toLocaleString('en-IN');}
+// The 60%-of-income "typical expense" budget this panel has always targeted (leaving 40% for
+// savings by design) — shared by the default category set, and by both share-rebalancing
+// algorithms below (_finAddCategoryToShareList()/finRemoveCategory()) as the total every
+// add/remove keeps the category list's .share fields summing back to.
+var FIN_TOTAL_SHARE=0.60;
+// Brand-new-user defaults: the original Rent/Groceries/Transport/Subscriptions (30/15/10/5)
+// plus a 5th Shopping category (10%), scaled down proportionally so the 5 defaults still sum to
+// the same 60% the original 4 did — Rent 25/Groceries 12/Transport 8/Subscriptions 5/Shopping 10.
+// All 5 are ordinary categories from here on: freely rename-able and removable like any other.
+function _finDefaultCats(){
+  return [
+    {id:'rent',name:'Rent',value:0,locked:false,share:0.25},
+    {id:'groceries',name:'Groceries',value:0,locked:false,share:0.12},
+    {id:'transport',name:'Transport',value:0,locked:false,share:0.08},
+    {id:'subscriptions',name:'Subscriptions',value:0,locked:false,share:0.05},
+    {id:'shopping',name:'Shopping',value:0,locked:false,share:0.10}
+  ];
+}
+var _finCatIdSeq=0;
+function _finNewCatId(){return 'cat'+(++_finCatIdSeq)+'_'+Date.now().toString(36);}
+// Shared "a category is being added" share algorithm (point 4c): the new category gets a nominal
+// 5% typical-share, and every existing category's .share is scaled down by one common factor so
+// the grand total lands back on FIN_TOTAL_SHARE (60%) — never a flat +5% on top. Used identically
+// for a brand-new custom category, a default re-added after removal, and (see _finMigrateOldRecord()
+// below) the Shopping category gained by migrating an old 4-field record. Mutates `cats` in place
+// and pushes `newCat` onto it (newCat should not include `.share` yet — this sets it).
+function _finAddCategoryToShareList(cats,newCat){
+  var nominal=0.05;
+  if(cats.length===0){
+    newCat.share=FIN_TOTAL_SHARE;
+  }else{
+    var existingTotal=cats.reduce(function(s,c){return s+c.share;},0);
+    var factor=existingTotal>0?((FIN_TOTAL_SHARE-nominal)/existingTotal):0;
+    cats.forEach(function(c){c.share=c.share*factor;});
+    newCat.share=nominal;
+  }
+  cats.push(newCat);
+  return cats;
+}
+// Migration for a pre-category-list saved record ({income,rent,groceries,transport,subscriptions,
+// locked}): converts the 4 old fixed fields into category-list entries with zero data loss (every
+// real entered value and lock state carried over verbatim, keyed back to their original typical
+// shares of 30/15/10/5), then adds the new Shopping category on top via the exact same
+// _finAddCategoryToShareList() algorithm every other "category added" path uses — so a migrated
+// user's resulting shares are Rent 27.5/Groceries 13.75/Transport 9.17/Subscriptions 4.58/
+// Shopping 5 (scaled down from 30/15/10/5 by (60-5)/60, then Shopping added at the nominal 5%),
+// distinct from the 25/12/8/5/10 a brand-new user starts with (see _finDefaultCats()) — both sum
+// to the same 60% total, just arrived at via different starting points, exactly as point 4c and
+// point 1 both describe. Pure/deterministic: does not itself write back to localStorage — the
+// migrated shape is what finSave() persists the next time the user saves.
+function _finMigrateOldRecord(data){
+  var lockedOld=data.locked||{};
+  var oldShares={rent:0.30,groceries:0.15,transport:0.10,subscriptions:0.05};
+  var oldLabels={rent:'Rent',groceries:'Groceries',transport:'Transport',subscriptions:'Subscriptions'};
+  var cats=['rent','groceries','transport','subscriptions'].map(function(k){
+    return {id:k,name:oldLabels[k],value:data[k]||0,locked:!!lockedOld[k],share:oldShares[k]};
+  });
+  _finAddCategoryToShareList(cats,{id:'shopping',name:'Shopping',value:0,locked:false});
+  return {income:data.income||0,categories:cats};
+}
+function finLoad(){
+  try{
+    var raw=localStorage.getItem(_finKey());
+    if(!raw)return null;
+    var data=JSON.parse(raw);
+    if(!data)return null;
+    return Array.isArray(data.categories)?data:_finMigrateOldRecord(data);
+  }catch(e){return null;}
+}
+// Live in-memory category list for the currently-open panel — [{id,name,value,locked,share}].
+// This (not the DOM) is the single source of truth for both values and metadata, since rows get
+// destroyed/recreated on every add/remove and a DOM-only value would be lost in that rebuild.
+// Populated by finRender()/finReset(), kept in sync with the DOM on every value edit
+// (finFieldEdited()) and rename (finRenameCategory()).
+var FIN_CATS=[];
 function finSave(){
   var income=parseFloat(document.getElementById('fin-in-income').value)||0;
-  var rent=parseFloat(document.getElementById('fin-in-rent').value)||0;
-  var groceries=parseFloat(document.getElementById('fin-in-groceries').value)||0;
-  var transport=parseFloat(document.getElementById('fin-in-transport').value)||0;
-  var subscriptions=parseFloat(document.getElementById('fin-in-subscriptions').value)||0;
   if(income<=0){notify('Enter your monthly income to continue');return;}
-  try{localStorage.setItem(_finKey(),JSON.stringify({income:income,rent:rent,groceries:groceries,transport:transport,subscriptions:subscriptions,locked:FIN_LOCKED}));}catch(e){}
+  FIN_CATS.forEach(function(c){
+    var el=document.getElementById('fin-in-'+c.id);
+    c.value=el?(parseFloat(el.value)||0):(c.value||0);
+  });
+  try{localStorage.setItem(_finKey(),JSON.stringify({income:income,categories:FIN_CATS}));}catch(e){}
   finRender();
   notify('Saved!');
 }
 // Destructive — confirm first. Clears the saved record, re-arms auto-fill eligibility
 // (_finExpensesTouched back to false, same as a page that's never seen this user before — see
 // finAutoFillIfEligible()'s own eligibility gate), and resets the form/results DOM directly so
-// the panel matches a genuine first visit immediately, no reload needed.
+// the panel matches a genuine first visit immediately, no reload needed. Resets FIN_CATS back to
+// the 5 brand-new-user defaults (any custom-added categories are dropped, same "back to a genuine
+// first visit" intent as clearing the 4 old fixed fields always had).
 function finReset(){
   if(!confirm('Clear your saved income and expenses? This cannot be undone.'))return;
   try{localStorage.removeItem(_finKey());}catch(e){}
   _finExpensesTouched=false;
-  FIN_LOCKED.rent=false;FIN_LOCKED.groceries=false;FIN_LOCKED.transport=false;FIN_LOCKED.subscriptions=false;
+  FIN_CATS=_finDefaultCats();
   document.getElementById('fin-in-income').value='';
-  document.getElementById('fin-in-rent').value='';
-  document.getElementById('fin-in-groceries').value='';
-  document.getElementById('fin-in-transport').value='';
-  document.getElementById('fin-in-subscriptions').value='';
+  _finRenderCatRows();
   document.getElementById('fin-stat-grid').innerHTML='';
   document.getElementById('fin-breakdown-body').innerHTML='';
   document.getElementById('fin-suggestion-text').textContent='';
@@ -1727,78 +1807,144 @@ function finReset(){
   finUpdateOverBudgetWarning(0,0);
   notify('Finance data cleared');
 }
-// Simple, non-AI heuristic (no model call, no added latency/cost): flags a category as
-// unusually high when it exceeds a typical share of income (common budgeting rule-of-thumb
-// proportions), ranked by how far over that share it is. Replaces the old static "Rs.1,800 +
-// Rs.1,200" copy with a real sentence built from the user's own numbers.
-var FIN_TYPICAL_SHARE={rent:0.30,groceries:0.15,transport:0.10,subscriptions:0.05};
-var FIN_LABELS={rent:'Rent',groceries:'Groceries',transport:'Transport',subscriptions:'Subscriptions'};
-// Per-field lock state — which of the 4 expense fields the user has personally set (as opposed
-// to a value still sitting there from auto-fill/redistribution). Persisted in the saved record
-// (see finSave()/finRender()) and cleared by finReset(), same lifecycle as the values themselves.
-// A field becomes locked the instant the user edits it (finFieldEdited()) and never gets
-// overwritten again after that — redistribution only ever touches the NOT-yet-locked fields.
-var FIN_LOCKED={rent:false,groceries:false,transport:false,subscriptions:false};
-// Income-based auto-split: when income is entered and the 4 expense fields are still genuinely
-// untouched (never manually typed into, never saved before), pre-fill them with a suggested
-// split so a brand-new user isn't left staring at four empty/zero fields with no starting point.
-// Reuses FIN_TYPICAL_SHARE (30/15/10/5% — Rent/Groceries/Transport/Subscriptions, the same
-// proportions finComputeSuggestion() already treats as "typical") rather than a separate set of
-// numbers, so the auto-fill suggestion and the savings-suggestion heuristic always agree on what
-// "normal" looks like. That's 60% of income; the remaining 40% is left for savings and everything
-// else — a commonly-cited starting split, freely editable afterward.
-//
+// Renders FIN_CATS into #fin-cat-rows: one row per category, each with a rename-able name input,
+// a value input (id="fin-in-<catId>", matching the "#fin-in-"+key convention every other function
+// here already builds selectors from), and a remove button. Category ids are never derived from
+// user input (either one of the fixed semantic ids above, or _finNewCatId()'s counter+timestamp),
+// so interpolating them directly into onclick/oninput handler strings below is safe; the
+// user-typed .name goes through _finEscAttr() since it lands inside a value="..." attribute.
+function _finRenderCatRows(){
+  var container=document.getElementById('fin-cat-rows');
+  if(!container)return;
+  container.innerHTML=FIN_CATS.map(function(c){
+    return '<div class="fin-cat-row" style="display:flex;align-items:center;gap:6px;padding:5px 0;border-bottom:1px solid var(--border)">'
+      +'<input type="text" value="'+_finEscAttr(c.name)+'" oninput="finRenameCategory(\''+c.id+'\',this.value)" style="flex:1;min-width:0;border:none;background:transparent;font-size:11px;color:var(--text2);font-family:inherit;padding:2px 4px">'
+      +'<input type="number" id="fin-in-'+c.id+'" min="0" value="'+(c.value||'')+'" placeholder="0" oninput="finFieldEdited(\''+c.id+'\')" style="width:110px;border:1px solid var(--border);border-radius:var(--r);padding:5px 8px;font-size:13px;color:var(--text);background:var(--bg2);font-family:inherit;text-align:right">'
+      +'<button type="button" class="btn ghost" onclick="finRemoveCategory(\''+c.id+'\')" title="Remove category" style="padding:4px 8px;font-size:11px;flex-shrink:0">✕</button>'
+      +'</div>';
+  }).join('');
+}
+// Updates only the in-memory name (no row re-render — rebuilding #fin-cat-rows mid-keystroke
+// would steal the input's focus/cursor). Renaming never touches .value/.locked/.share, and a live
+// refresh keeps the breakdown table's label in sync as the user types, satisfying "rename doesn't
+// affect values/locks" while still feeling live.
+function finRenameCategory(id,newName){
+  var cat=FIN_CATS.find(function(c){return c.id===id;});
+  if(!cat)return;
+  cat.name=newName;
+  finRefreshLiveView();
+}
+// "+ Add category": reads the free-text name field, delegates to finAddCategory(), clears the
+// input. A blank name is rejected rather than silently creating an unnamed category.
+function finAddCategoryFromInput(){
+  var nameEl=document.getElementById('fin-new-cat-name');
+  var name=(nameEl.value||'').trim();
+  if(!name){notify('Enter a category name');return;}
+  finAddCategory(name);
+  nameEl.value='';
+}
+// Adds a new category (value 0, unlocked) via the shared share-rebalancing algorithm (point 4c),
+// then re-renders the rows and the live breakdown/stat cards. Syncs every existing category's
+// .value from its live input first, so rebuilding the row list can't drop an in-progress,
+// not-yet-locked edit sitting in the DOM.
+function finAddCategory(name){
+  FIN_CATS.forEach(function(c){
+    var el=document.getElementById('fin-in-'+c.id);
+    if(el)c.value=parseFloat(el.value)||0;
+  });
+  _finAddCategoryToShareList(FIN_CATS,{id:_finNewCatId(),name:name,value:0,locked:false});
+  _finRenderCatRows();
+  finRefreshLiveView();
+}
+// Removes a category and redistributes its freed typical-share proportionally back across the
+// remaining categories (scaling them up so the total refills FIN_TOTAL_SHARE) — point 4d. Blocks
+// removing the last remaining category (share math and a categoryless budget both break down at
+// zero). Re-rendering the rows drops the removed category's DOM input entirely, and the
+// subsequent finRedistribute() re-derives lockedSum/breakdown/stat-cards from the now-shorter
+// FIN_CATS list, so the removed category's value/lock can't leave any stale numbers behind.
+function finRemoveCategory(id){
+  if(FIN_CATS.length<=1){notify('You need at least one category');return;}
+  if(!confirm('Remove this category?'))return;
+  FIN_CATS.forEach(function(c){
+    var el=document.getElementById('fin-in-'+c.id);
+    if(el)c.value=parseFloat(el.value)||0;
+  });
+  var idx=FIN_CATS.findIndex(function(c){return c.id===id;});
+  if(idx===-1)return;
+  FIN_CATS.splice(idx,1);
+  var remainingTotal=FIN_CATS.reduce(function(s,c){return s+c.share;},0);
+  if(remainingTotal>0){
+    var factor=FIN_TOTAL_SHARE/remainingTotal;
+    FIN_CATS.forEach(function(c){c.share=c.share*factor;});
+  }
+  _finRenderCatRows();
+  finRedistribute();
+}
 // "Untouched default 0" vs "user deliberately entered 0": a bare value===0 check on its own can't
 // tell these apart (both look identical in the DOM). _finExpensesTouched is a session-local flag
-// set the moment the user types into ANY of the 4 expense fields (via _finMarkExpensesTouched(),
-// wired to each field's oninput) — that's the actual "did a human interact with this" signal, not
-// the value itself. Combined with finLoad()===null (no saved record exists yet for this user —
-// re-checked fresh every call, so it never needs manual syncing) as the second half of the
-// eligibility gate: once EITHER a field has been typed into, or real data has ever been saved,
-// auto-fill stops firing for the rest of this page view and never overwrites anything again.
-// Deliberately not persisted across a reload — an unsaved edit doesn't survive a reload anyway
-// (the browser resets the input fields themselves), so there's nothing real left to protect at
-// that point, and persisting a "touched" flag into the same key real financial data lives in
-// would blur what that key is supposed to mean.
+// set the moment the user types into ANY expense field (via _finMarkExpensesTouched(), wired to
+// finFieldEdited()) — that's the actual "did a human interact with this" signal, not the value
+// itself. Combined with finLoad()===null (no saved record exists yet for this user — re-checked
+// fresh every call, so it never needs manual syncing) as the second half of the eligibility gate:
+// once EITHER a field has been typed into, or real data has ever been saved, auto-fill stops
+// firing for the rest of this page view and never overwrites anything again. Deliberately not
+// persisted across a reload — an unsaved edit doesn't survive a reload anyway (the browser resets
+// the input fields themselves), so there's nothing real left to protect at that point, and
+// persisting a "touched" flag into the same key real financial data lives in would blur what that
+// key is supposed to mean.
 var _finExpensesTouched=false;
 function _finMarkExpensesTouched(){_finExpensesTouched=true;}
+// Income-based auto-split: when income is entered and the expense fields are still genuinely
+// untouched (never manually typed into, never saved before), pre-fill every category with its
+// share of income so a brand-new user isn't left staring at empty/zero fields with no starting
+// point. Reuses each category's own .share (the same proportions finComputeSuggestion() already
+// treats as "typical") rather than a separate set of numbers, so the auto-fill suggestion and the
+// savings-suggestion heuristic always agree on what "normal" looks like.
 function finAutoFillIfEligible(){
   if(_finExpensesTouched)return;
   if(finLoad()!==null)return;
   var income=parseFloat(document.getElementById('fin-in-income').value)||0;
   if(income<=0)return;
-  Object.keys(FIN_TYPICAL_SHARE).forEach(function(k){
-    document.getElementById('fin-in-'+k).value=Math.round(income*FIN_TYPICAL_SHARE[k]);
+  FIN_CATS.forEach(function(c){
+    c.value=Math.round(income*c.share);
+    var el=document.getElementById('fin-in-'+c.id);
+    if(el)el.value=c.value;
   });
   finRefreshLiveView();
 }
-// Live rebalancing: once at least one expense field is locked, the still-unlocked fields
-// redistribute whatever's left of income (after subtracting the locked fields' own values)
-// between themselves, keeping their relative FIN_TYPICAL_SHARE weights — e.g. if Rent gets
-// locked, Groceries:Transport:Subscriptions keep their existing 15:10:5 ratio applied to
-// whatever `remaining` is, rather than each keeping its old absolute auto-filled amount.
-// Floors at 0 (never negative) if the locked fields alone already meet or exceed income — see
-// finUpdateOverBudgetWarning() below, which surfaces that exact state visibly instead of leaving
-// it silent. Skips the redistribution math itself if every field is already locked — nothing left
-// to redistribute into — but the over-budget check AND the live-view refresh below still run
-// regardless, since an all-locked state can be over budget too and its own values can still
-// change (e.g. a locked field being re-edited, or income changing) even with nothing left to
-// redistribute.
+// Live rebalancing: once at least one category is locked, the still-unlocked categories
+// redistribute whatever's left of income (after subtracting the locked categories' own values)
+// between themselves, keeping their relative .share weights — e.g. if Rent gets locked, every
+// other unlocked category keeps its existing share ratio applied to whatever `remaining` is,
+// rather than each keeping its old absolute auto-filled amount. Floors at 0 (never negative) if
+// the locked categories alone already meet or exceed income — see finUpdateOverBudgetWarning()
+// below, which surfaces that exact state visibly instead of leaving it silent. Skips the
+// redistribution math itself if every category is already locked — nothing left to redistribute
+// into — but the over-budget check AND the live-view refresh below still run regardless, since an
+// all-locked state can be over budget too and its own values can still change (e.g. a locked
+// category being re-edited, or income changing) even with nothing left to redistribute.
 function finRedistribute(){
   var income=parseFloat(document.getElementById('fin-in-income').value)||0;
-  var lockedSum=0,unlockedKeys=[];
-  Object.keys(FIN_TYPICAL_SHARE).forEach(function(k){
-    if(FIN_LOCKED[k]){lockedSum+=parseFloat(document.getElementById('fin-in-'+k).value)||0;}
-    else{unlockedKeys.push(k);}
+  var lockedSum=0,unlocked=[];
+  FIN_CATS.forEach(function(c){
+    var el=document.getElementById('fin-in-'+c.id);
+    if(c.locked){
+      c.value=el?(parseFloat(el.value)||0):(c.value||0);
+      lockedSum+=c.value;
+    }else{
+      unlocked.push(c);
+    }
   });
   finUpdateOverBudgetWarning(income,lockedSum);
-  if(unlockedKeys.length){
+  if(unlocked.length){
     var remaining=income-lockedSum;
     if(remaining<0)remaining=0;
-    var weightSum=unlockedKeys.reduce(function(s,k){return s+FIN_TYPICAL_SHARE[k];},0);
-    unlockedKeys.forEach(function(k){
-      var share=weightSum>0?(FIN_TYPICAL_SHARE[k]/weightSum):0;
-      document.getElementById('fin-in-'+k).value=Math.round(remaining*share);
+    var weightSum=unlocked.reduce(function(s,c){return s+c.share;},0);
+    unlocked.forEach(function(c){
+      var share=weightSum>0?(c.share/weightSum):0;
+      c.value=Math.round(remaining*share);
+      var el=document.getElementById('fin-in-'+c.id);
+      if(el)el.value=c.value;
     });
   }
   finRefreshLiveView();
@@ -1818,24 +1964,26 @@ function finUpdateOverBudgetWarning(income,lockedSum){
     warnEl.style.display='none';
   }
 }
-// Wired to each of the 4 expense fields' oninput (replacing the old blanket
-// _finMarkExpensesTouched()-only handler). Locks THIS field permanently at whatever the user just
-// typed (never touched again by auto-fill or redistribution), then redistributes the remaining
-// income across whichever fields are still unlocked. Still calls _finMarkExpensesTouched()
-// unmodified so finAutoFillIfEligible()'s own existing eligibility gate keeps working exactly as
+// Wired to each category value input's oninput. Locks THIS category permanently at whatever the
+// user just typed (never touched again by auto-fill or redistribution), then redistributes the
+// remaining income across whichever categories are still unlocked. Still calls
+// _finMarkExpensesTouched() so finAutoFillIfEligible()'s eligibility gate keeps working exactly as
 // before — this only adds redistribution on top, it doesn't change what stops the wholesale fill.
-function finFieldEdited(key){
-  FIN_LOCKED[key]=true;
+function finFieldEdited(id){
+  var cat=FIN_CATS.find(function(c){return c.id===id;});
+  if(!cat)return;
+  var el=document.getElementById('fin-in-'+id);
+  cat.value=el?(parseFloat(el.value)||0):0;
+  cat.locked=true;
   _finMarkExpensesTouched();
   finRedistribute();
-  finRefreshLiveView();
 }
 // Income field's oninput: routes to whichever behavior actually applies right now rather than
-// always calling finAutoFillIfEligible() — once any field is locked, an income edit should keep
-// the still-unlocked fields in sync with the new remaining amount (finRedistribute()), not
-// attempt the (by-then-blocked) wholesale fill. finAutoFillIfEligible() itself is unmodified.
+// always calling finAutoFillIfEligible() — once any category is locked, an income edit should
+// keep the still-unlocked categories in sync with the new remaining amount (finRedistribute()),
+// not attempt the (by-then-blocked) wholesale fill. finAutoFillIfEligible() itself is unmodified.
 function finIncomeChanged(){
-  var anyLocked=Object.keys(FIN_LOCKED).some(function(k){return FIN_LOCKED[k];});
+  var anyLocked=FIN_CATS.some(function(c){return c.locked;});
   if(anyLocked){finRedistribute();}else{finAutoFillIfEligible();}
   // Always refreshes, regardless of which branch ran above (both already refresh internally too —
   // harmless to repaint the same content twice in one tick) — this is what correctly hides
@@ -1843,13 +1991,17 @@ function finIncomeChanged(){
   // finAutoFillIfEligible() itself early-returns on income<=0 without refreshing on its own.
   finRefreshLiveView();
 }
+// Simple, non-AI heuristic (no model call, no added latency/cost): flags a category as unusually
+// high when it exceeds its own typical share of income, ranked by how far over that share it is —
+// generalized to however many categories currently exist, rather than 4 fixed names.
 function finComputeSuggestion(data){
   var income=data.income||0;
+  var cats=data.categories||[];
   var flagged=[];
-  Object.keys(FIN_TYPICAL_SHARE).forEach(function(k){
-    var typicalAmt=income*FIN_TYPICAL_SHARE[k];
-    var excess=data[k]-typicalAmt;
-    if(excess>0)flagged.push({key:k,label:FIN_LABELS[k],excess:Math.round(excess)});
+  cats.forEach(function(c){
+    var typicalAmt=income*(c.share||0);
+    var excess=(c.value||0)-typicalAmt;
+    if(excess>0)flagged.push({label:c.name,excess:Math.round(excess)});
   });
   flagged.sort(function(a,b){return b.excess-a.excess;});
   if(!flagged.length){
@@ -1863,9 +2015,11 @@ function finComputeSuggestion(data){
 function finBudgetPlanPrompt(){
   var data=finLoad();
   if(!data)return 'Create a monthly budget plan';
-  var totalExpenses=data.rent+data.groceries+data.transport+data.subscriptions;
+  var cats=data.categories||[];
+  var totalExpenses=cats.reduce(function(s,c){return s+(c.value||0);},0);
   var savings=data.income-totalExpenses;
-  return 'Create a monthly budget plan for someone with income Rs.'+finFmt(data.income)+'/month. Current expenses — Rent: Rs.'+finFmt(data.rent)+', Groceries: Rs.'+finFmt(data.groceries)+', Transport: Rs.'+finFmt(data.transport)+', Subscriptions: Rs.'+finFmt(data.subscriptions)+' (current savings: Rs.'+finFmt(savings)+'/month). Suggest a realistic plan to save more.';
+  var expenseText=cats.map(function(c){return c.name+': Rs.'+finFmt(c.value);}).join(', ');
+  return 'Create a monthly budget plan for someone with income Rs.'+finFmt(data.income)+'/month. Current expenses — '+expenseText+' (current savings: Rs.'+finFmt(savings)+'/month). Suggest a realistic plan to save more.';
 }
 // Shared paint step for #fin-stat-grid/#fin-breakdown-body/#fin-suggestion-text, factored out so
 // both the last-saved-snapshot path (finRender(), below) and the live-edit path
@@ -1874,69 +2028,66 @@ function finBudgetPlanPrompt(){
 // showing stale data. #fin-results becomes visible whenever data.income>0, regardless of whether
 // that data came from a save or is still just sitting in the form unsaved — matches "as soon as
 // auto-fill first populates the fields", not "only after the first Save" — and stays hidden for a
-// genuinely fresh user with no income entered yet, same as before.
+// genuinely fresh user with no income entered yet, same as before. Generalized to render however
+// many categories data.categories holds, instead of 4 fixed names.
 function _finRenderFrom(data){
   var resultsEl=document.getElementById('fin-results');
   if(!resultsEl)return;
   if(!data||!(data.income>0)){resultsEl.style.display='none';return;}
-  var totalExpenses=data.rent+data.groceries+data.transport+data.subscriptions;
+  var cats=data.categories||[];
+  var totalExpenses=cats.reduce(function(s,c){return s+(c.value||0);},0);
   var savings=data.income-totalExpenses;
   var savingsRate=data.income>0?Math.round((savings/data.income)*100):0;
   document.getElementById('fin-stat-grid').innerHTML=
     '<div class="fin-card"><div class="fin-l">Monthly income</div><div class="fin-n">Rs.'+finFmt(data.income)+'</div></div>'
     +'<div class="fin-card"><div class="fin-l">Total expenses</div><div class="fin-n">Rs.'+finFmt(totalExpenses)+'</div></div>'
     +'<div class="fin-card"><div class="fin-l">Savings</div><div class="fin-n">Rs.'+finFmt(savings)+'</div><div class="fin-t '+(savings>=0?'dn':'up')+'">'+savingsRate+'% rate</div></div>';
-  var cats=[['rent','Rent'],['groceries','Groceries'],['transport','Transport'],['subscriptions','Subscriptions']];
   document.getElementById('fin-breakdown-body').innerHTML=cats.map(function(c){
-    return '<div class="row"><span class="rl">'+c[1]+'</span><span class="rv">Rs.'+finFmt(data[c[0]])+'</span></div>';
+    return '<div class="row"><span class="rl">'+_finEscAttr(c.name)+'</span><span class="rv">Rs.'+finFmt(c.value)+'</span></div>';
   }).join('');
   document.getElementById('fin-suggestion-text').textContent=finComputeSuggestion(data);
   resultsEl.style.display='';
 }
 // Last-saved-snapshot path — unchanged behavior, still the only place that pre-fills the input
 // fields and restores lock state from localStorage. Still called from finSave() and the
-// panel-open MutationObserver exactly as before; now just delegates its own painting to
-// _finRenderFrom() instead of duplicating that logic inline.
+// panel-open MutationObserver exactly as before; now rebuilds FIN_CATS/#fin-cat-rows from
+// data.categories (post-migration, if this was an old-format record) instead of pre-filling 4
+// fixed inputs, then delegates painting to _finRenderFrom() as before.
 function finRender(){
   var data=finLoad();
   if(!data){
+    FIN_CATS=_finDefaultCats();
+    _finRenderCatRows();
     var resultsEl=document.getElementById('fin-results');
     if(resultsEl)resultsEl.style.display='none';
     finUpdateOverBudgetWarning(0,0);
     return;
   }
   document.getElementById('fin-in-income').value=data.income;
-  document.getElementById('fin-in-rent').value=data.rent;
-  document.getElementById('fin-in-groceries').value=data.groceries;
-  document.getElementById('fin-in-transport').value=data.transport;
-  document.getElementById('fin-in-subscriptions').value=data.subscriptions;
-  // Restore per-field locks so redistribution keeps behaving correctly after a reload — a record
-  // saved before this feature existed has no .locked at all, which safely defaults every field to
-  // unlocked (loses no actual values, just means future edits on this restored record start
-  // deciding locks fresh, same as any other pre-existing-feature record encountering a new one).
-  var savedLocked=data.locked||{};
-  FIN_LOCKED.rent=!!savedLocked.rent;
-  FIN_LOCKED.groceries=!!savedLocked.groceries;
-  FIN_LOCKED.transport=!!savedLocked.transport;
-  FIN_LOCKED.subscriptions=!!savedLocked.subscriptions;
+  FIN_CATS=(data.categories||[]).map(function(c){
+    return {id:c.id,name:c.name,value:c.value||0,locked:!!c.locked,share:c.share||0};
+  });
+  _finRenderCatRows();
   var restoredLockedSum=0;
-  Object.keys(FIN_TYPICAL_SHARE).forEach(function(k){if(FIN_LOCKED[k])restoredLockedSum+=data[k]||0;});
+  FIN_CATS.forEach(function(c){if(c.locked)restoredLockedSum+=c.value||0;});
   finUpdateOverBudgetWarning(data.income,restoredLockedSum);
   _finRenderFrom(data);
 }
-// Live-edit path — reads the 5 input fields directly (same live-DOM-read technique
+// Live-edit path — reads FIN_CATS' live DOM value inputs directly (same live-DOM-read technique
 // finUpdateOverBudgetWarning()/finRedistribute() already use, not localStorage) and repaints
 // through the same _finRenderFrom() finRender() uses, so the breakdown/stat cards/results
-// visibility never go stale between edits and the next Save. Wired into finFieldEdited(),
-// finRedistribute(), finIncomeChanged(), and finAutoFillIfEligible() — every path that updates
-// the live input values now also calls this.
+// visibility never go stale between edits and the next Save. Wired into finFieldEdited() (via
+// finRedistribute()), finRedistribute(), finIncomeChanged(), finAutoFillIfEligible(),
+// finRenameCategory(), and finAddCategory() — every path that changes the live category list or
+// its values now also calls this.
 function finRefreshLiveView(){
+  var cats=FIN_CATS.map(function(c){
+    var el=document.getElementById('fin-in-'+c.id);
+    return {name:c.name,value:el?(parseFloat(el.value)||0):(c.value||0),share:c.share};
+  });
   _finRenderFrom({
     income:parseFloat(document.getElementById('fin-in-income').value)||0,
-    rent:parseFloat(document.getElementById('fin-in-rent').value)||0,
-    groceries:parseFloat(document.getElementById('fin-in-groceries').value)||0,
-    transport:parseFloat(document.getElementById('fin-in-transport').value)||0,
-    subscriptions:parseFloat(document.getElementById('fin-in-subscriptions').value)||0
+    categories:cats
   });
 }
 // Populates/refreshes the computed view whenever the Finance panel becomes visible, without
