@@ -1095,6 +1095,7 @@ body.ab-flow-active .mac[onclick^="regenMsg"]{display:none!important}
             <div class="row"><span class="rl">Groceries (Rs.)</span><input type="number" id="fin-in-groceries" min="0" placeholder="0" oninput="finFieldEdited('groceries')" style="width:130px;border:1px solid var(--border);border-radius:var(--r);padding:5px 8px;font-size:13px;color:var(--text);background:var(--bg2);font-family:inherit;text-align:right"></div>
             <div class="row"><span class="rl">Transport (Rs.)</span><input type="number" id="fin-in-transport" min="0" placeholder="0" oninput="finFieldEdited('transport')" style="width:130px;border:1px solid var(--border);border-radius:var(--r);padding:5px 8px;font-size:13px;color:var(--text);background:var(--bg2);font-family:inherit;text-align:right"></div>
             <div class="row"><span class="rl">Subscriptions (Rs.)</span><input type="number" id="fin-in-subscriptions" min="0" placeholder="0" oninput="finFieldEdited('subscriptions')" style="width:130px;border:1px solid var(--border);border-radius:var(--r);padding:5px 8px;font-size:13px;color:var(--text);background:var(--bg2);font-family:inherit;text-align:right"></div>
+            <div id="fin-overbudget-warning" class="alert-box r" style="display:none"><div class="at r">Over budget</div><div class="atxt r" id="fin-overbudget-text"></div></div>
             <button class="btn prim" style="align-self:flex-start;margin-top:4px" onclick="finSave()">Save</button>
           </div>
         </div>
@@ -1717,6 +1718,7 @@ function finReset(){
   document.getElementById('fin-breakdown-body').innerHTML='';
   document.getElementById('fin-suggestion-text').textContent='';
   document.getElementById('fin-results').style.display='none';
+  finUpdateOverBudgetWarning(0,0);
   notify('Finance data cleared');
 }
 // Simple, non-AI heuristic (no model call, no added latency/cost): flags a category as
@@ -1768,9 +1770,11 @@ function finAutoFillIfEligible(){
 // between themselves, keeping their relative FIN_TYPICAL_SHARE weights — e.g. if Rent gets
 // locked, Groceries:Transport:Subscriptions keep their existing 15:10:5 ratio applied to
 // whatever `remaining` is, rather than each keeping its old absolute auto-filled amount.
-// Floors at 0 (never negative) if the locked fields alone already meet or exceed income —
-// silent, no separate warning UI for that state (flagged in the report; easy to add later if
-// wanted). No-ops if every field is already locked — nothing left to redistribute into.
+// Floors at 0 (never negative) if the locked fields alone already meet or exceed income — see
+// finUpdateOverBudgetWarning() below, which surfaces that exact state visibly instead of leaving
+// it silent. No-ops on the redistribution itself if every field is already locked — nothing left
+// to redistribute into — but the over-budget check still runs first regardless, since an
+// all-locked state can be over budget too.
 function finRedistribute(){
   var income=parseFloat(document.getElementById('fin-in-income').value)||0;
   var lockedSum=0,unlockedKeys=[];
@@ -1778,6 +1782,7 @@ function finRedistribute(){
     if(FIN_LOCKED[k]){lockedSum+=parseFloat(document.getElementById('fin-in-'+k).value)||0;}
     else{unlockedKeys.push(k);}
   });
+  finUpdateOverBudgetWarning(income,lockedSum);
   if(!unlockedKeys.length)return;
   var remaining=income-lockedSum;
   if(remaining<0)remaining=0;
@@ -1786,6 +1791,21 @@ function finRedistribute(){
     var share=weightSum>0?(FIN_TYPICAL_SHARE[k]/weightSum):0;
     document.getElementById('fin-in-'+k).value=Math.round(remaining*share);
   });
+}
+// Shows/hides #fin-overbudget-warning based on the exact same condition that makes
+// finRedistribute() above floor the unlocked fields at 0 — reads that outcome, doesn't change it.
+// income<=0 is treated as "nothing to warn about yet" (an empty/fresh form, or income not entered
+// at all, isn't an over-budget state — it's an incomplete one), matching finSave()/
+// finAutoFillIfEligible()'s own income>0 guards elsewhere on this panel.
+function finUpdateOverBudgetWarning(income,lockedSum){
+  var warnEl=document.getElementById('fin-overbudget-warning');
+  if(!warnEl)return;
+  if(income>0&&lockedSum>=income){
+    document.getElementById('fin-overbudget-text').textContent='Your locked expenses (Rs.'+finFmt(lockedSum)+') already exceed your income (Rs.'+finFmt(income)+') by Rs.'+finFmt(lockedSum-income)+' — no budget remaining for other categories.';
+    warnEl.style.display='';
+  }else{
+    warnEl.style.display='none';
+  }
 }
 // Wired to each of the 4 expense fields' oninput (replacing the old blanket
 // _finMarkExpensesTouched()-only handler). Locks THIS field permanently at whatever the user just
@@ -1834,7 +1854,7 @@ function finRender(){
   var data=finLoad();
   var resultsEl=document.getElementById('fin-results');
   if(!resultsEl)return;
-  if(!data){resultsEl.style.display='none';return;}
+  if(!data){resultsEl.style.display='none';finUpdateOverBudgetWarning(0,0);return;}
   document.getElementById('fin-in-income').value=data.income;
   document.getElementById('fin-in-rent').value=data.rent;
   document.getElementById('fin-in-groceries').value=data.groceries;
@@ -1849,6 +1869,9 @@ function finRender(){
   FIN_LOCKED.groceries=!!savedLocked.groceries;
   FIN_LOCKED.transport=!!savedLocked.transport;
   FIN_LOCKED.subscriptions=!!savedLocked.subscriptions;
+  var restoredLockedSum=0;
+  Object.keys(FIN_TYPICAL_SHARE).forEach(function(k){if(FIN_LOCKED[k])restoredLockedSum+=data[k]||0;});
+  finUpdateOverBudgetWarning(data.income,restoredLockedSum);
   var totalExpenses=data.rent+data.groceries+data.transport+data.subscriptions;
   var savings=data.income-totalExpenses;
   var savingsRate=data.income>0?Math.round((savings/data.income)*100):0;
