@@ -1090,11 +1090,11 @@ body.ab-flow-active .mac[onclick^="regenMsg"]{display:none!important}
         <div class="card">
           <div class="card-hd"><div class="card-title">Your monthly numbers</div></div>
           <div class="card-bd" style="display:flex;flex-direction:column;gap:8px">
-            <div class="row"><span class="rl">Monthly income (Rs.)</span><input type="number" id="fin-in-income" min="0" placeholder="e.g. 52000" style="width:130px;border:1px solid var(--border);border-radius:var(--r);padding:5px 8px;font-size:13px;color:var(--text);background:var(--bg2);font-family:inherit;text-align:right"></div>
-            <div class="row"><span class="rl">Rent (Rs.)</span><input type="number" id="fin-in-rent" min="0" placeholder="0" style="width:130px;border:1px solid var(--border);border-radius:var(--r);padding:5px 8px;font-size:13px;color:var(--text);background:var(--bg2);font-family:inherit;text-align:right"></div>
-            <div class="row"><span class="rl">Groceries (Rs.)</span><input type="number" id="fin-in-groceries" min="0" placeholder="0" style="width:130px;border:1px solid var(--border);border-radius:var(--r);padding:5px 8px;font-size:13px;color:var(--text);background:var(--bg2);font-family:inherit;text-align:right"></div>
-            <div class="row"><span class="rl">Transport (Rs.)</span><input type="number" id="fin-in-transport" min="0" placeholder="0" style="width:130px;border:1px solid var(--border);border-radius:var(--r);padding:5px 8px;font-size:13px;color:var(--text);background:var(--bg2);font-family:inherit;text-align:right"></div>
-            <div class="row"><span class="rl">Subscriptions (Rs.)</span><input type="number" id="fin-in-subscriptions" min="0" placeholder="0" style="width:130px;border:1px solid var(--border);border-radius:var(--r);padding:5px 8px;font-size:13px;color:var(--text);background:var(--bg2);font-family:inherit;text-align:right"></div>
+            <div class="row"><span class="rl">Monthly income (Rs.)</span><input type="number" id="fin-in-income" min="0" placeholder="e.g. 52000" oninput="finAutoFillIfEligible()" style="width:130px;border:1px solid var(--border);border-radius:var(--r);padding:5px 8px;font-size:13px;color:var(--text);background:var(--bg2);font-family:inherit;text-align:right"></div>
+            <div class="row"><span class="rl">Rent (Rs.)</span><input type="number" id="fin-in-rent" min="0" placeholder="0" oninput="_finMarkExpensesTouched()" style="width:130px;border:1px solid var(--border);border-radius:var(--r);padding:5px 8px;font-size:13px;color:var(--text);background:var(--bg2);font-family:inherit;text-align:right"></div>
+            <div class="row"><span class="rl">Groceries (Rs.)</span><input type="number" id="fin-in-groceries" min="0" placeholder="0" oninput="_finMarkExpensesTouched()" style="width:130px;border:1px solid var(--border);border-radius:var(--r);padding:5px 8px;font-size:13px;color:var(--text);background:var(--bg2);font-family:inherit;text-align:right"></div>
+            <div class="row"><span class="rl">Transport (Rs.)</span><input type="number" id="fin-in-transport" min="0" placeholder="0" oninput="_finMarkExpensesTouched()" style="width:130px;border:1px solid var(--border);border-radius:var(--r);padding:5px 8px;font-size:13px;color:var(--text);background:var(--bg2);font-family:inherit;text-align:right"></div>
+            <div class="row"><span class="rl">Subscriptions (Rs.)</span><input type="number" id="fin-in-subscriptions" min="0" placeholder="0" oninput="_finMarkExpensesTouched()" style="width:130px;border:1px solid var(--border);border-radius:var(--r);padding:5px 8px;font-size:13px;color:var(--text);background:var(--bg2);font-family:inherit;text-align:right"></div>
             <button class="btn prim" style="align-self:flex-start;margin-top:4px" onclick="finSave()">Save</button>
           </div>
         </div>
@@ -1705,6 +1705,38 @@ function finSave(){
 // Rs.1,200" copy with a real sentence built from the user's own numbers.
 var FIN_TYPICAL_SHARE={rent:0.30,groceries:0.15,transport:0.10,subscriptions:0.05};
 var FIN_LABELS={rent:'Rent',groceries:'Groceries',transport:'Transport',subscriptions:'Subscriptions'};
+// Income-based auto-split: when income is entered and the 4 expense fields are still genuinely
+// untouched (never manually typed into, never saved before), pre-fill them with a suggested
+// split so a brand-new user isn't left staring at four empty/zero fields with no starting point.
+// Reuses FIN_TYPICAL_SHARE (30/15/10/5% — Rent/Groceries/Transport/Subscriptions, the same
+// proportions finComputeSuggestion() already treats as "typical") rather than a separate set of
+// numbers, so the auto-fill suggestion and the savings-suggestion heuristic always agree on what
+// "normal" looks like. That's 60% of income; the remaining 40% is left for savings and everything
+// else — a commonly-cited starting split, freely editable afterward.
+//
+// "Untouched default 0" vs "user deliberately entered 0": a bare value===0 check on its own can't
+// tell these apart (both look identical in the DOM). _finExpensesTouched is a session-local flag
+// set the moment the user types into ANY of the 4 expense fields (via _finMarkExpensesTouched(),
+// wired to each field's oninput) — that's the actual "did a human interact with this" signal, not
+// the value itself. Combined with finLoad()===null (no saved record exists yet for this user —
+// re-checked fresh every call, so it never needs manual syncing) as the second half of the
+// eligibility gate: once EITHER a field has been typed into, or real data has ever been saved,
+// auto-fill stops firing for the rest of this page view and never overwrites anything again.
+// Deliberately not persisted across a reload — an unsaved edit doesn't survive a reload anyway
+// (the browser resets the input fields themselves), so there's nothing real left to protect at
+// that point, and persisting a "touched" flag into the same key real financial data lives in
+// would blur what that key is supposed to mean.
+var _finExpensesTouched=false;
+function _finMarkExpensesTouched(){_finExpensesTouched=true;}
+function finAutoFillIfEligible(){
+  if(_finExpensesTouched)return;
+  if(finLoad()!==null)return;
+  var income=parseFloat(document.getElementById('fin-in-income').value)||0;
+  if(income<=0)return;
+  Object.keys(FIN_TYPICAL_SHARE).forEach(function(k){
+    document.getElementById('fin-in-'+k).value=Math.round(income*FIN_TYPICAL_SHARE[k]);
+  });
+}
 function finComputeSuggestion(data){
   var income=data.income||0;
   var flagged=[];
