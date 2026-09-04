@@ -499,6 +499,7 @@ body.ab-flow-active .mac[onclick^="regenMsg"]{display:none!important}
 .auth-btn:disabled{opacity:.6;cursor:not-allowed}
 </style>
 <script src="/vendor/diff.min.js" defer></script>
+<script src="/vendor/pdf.min.js" defer></script>
 </head>
 <body>
 <div class="notif" id="notif"></div>
@@ -761,7 +762,7 @@ body.ab-flow-active .mac[onclick^="regenMsg"]{display:none!important}
       <div class="ab-pin-strip" id="ab-pin-strip"></div>
       <div class="cin-area">
         <input type="file" id="attach-img-input" accept="image/jpeg,image/png,image/webp" style="display:none" onchange="attachHandle(this.files[0])">
-        <input type="file" id="attach-file-input" accept=".txt,.md,.csv,.json,.js,.py,.html,.css" style="display:none" onchange="attachHandle(this.files[0])">
+        <input type="file" id="attach-file-input" accept=".txt,.md,.csv,.json,.js,.py,.html,.css,.pdf" style="display:none" onchange="attachHandle(this.files[0])">
         <div class="qt-bar" id="qt-bar">
           <div class="qt-accent"></div>
           <span class="qt-txt" id="qt-txt"></span>
@@ -1073,7 +1074,7 @@ body.ab-flow-active .mac[onclick^="regenMsg"]{display:none!important}
       <div class="scroll">
         <div class="aisum"><div class="aisum-l">Student Assistant — Tamil AI</div><div class="aisum-t">Upload PDF, get Tamil summary. Ask any doubt — Math, Science, History. Exam prep with quiz, notes, study plan all ready!</div></div>
         <div class="feat-grid">
-          <div class="feat-card" onclick="ask(this.dataset.q)" data-q="Summarize this chapter in Tamil with key points"><div class="feat-icon" style="background:var(--ibg)">📖</div><div class="feat-title">Chapter summary</div><div class="feat-desc">PDF upload — Tamil summary instantly</div></div>
+          <div class="feat-card" onclick="askWithAttach(this.dataset.q)" data-q="Summarize this chapter in Tamil with key points"><div class="feat-icon" style="background:var(--ibg)">📖</div><div class="feat-title">Chapter summary</div><div class="feat-desc">PDF upload — Tamil summary instantly</div></div>
           <div class="feat-card" onclick="ask(this.dataset.q)" data-q="Generate 10 practice questions on this topic"><div class="feat-icon" style="background:var(--sbg)">❓</div><div class="feat-title">Quiz generator</div><div class="feat-desc">Any topic — MCQ + short answer</div></div>
           <div class="feat-card" onclick="ask(this.dataset.q)" data-q="Help me write my assignment with research"><div class="feat-icon" style="background:var(--wbg)">✏</div><div class="feat-title">Assignment help</div><div class="feat-desc">Research + draft + grammar check</div></div>
           <div class="feat-card" onclick="ask(this.dataset.q)" data-q="Solve this math problem step by step"><div class="feat-icon" style="background:var(--dbg)">🔢</div><div class="feat-title">Math solver</div><div class="feat-desc">Step-by-step Tamil explanation</div></div>
@@ -1634,6 +1635,16 @@ function chRemove(id){
 function isSimple(){return document.getElementById('simple-btn').classList.contains('active')}
 function welcomeHTML(){var t=isSimple()?'Welcome to Forge AI! How can I help you?':'Welcome to Forge AI! I can help you code, deploy, test, search, and more. Your data stays private on your server. What shall we build today?';return '<div class="msg"><div class="mav ai">F</div><div><div class="bub" id="welcome-bub">'+t+'</div></div></div>';}
 function ask(t){document.getElementById('chat-in').value=t;send();}
+// Used only by the Student panel's "Chapter summary" card — pre-fills the prompt, same as ask(),
+// then opens the shared attach-file picker (now PDF-capable, see attachHandle()) instead of
+// sending immediately, so the summary prompt has real chapter content to work with. Does not
+// auto-send after the file is picked, matching how every other attach-then-send interaction in
+// the app already works (attach, review, then Send) rather than a one-off auto-send behavior.
+function askWithAttach(t){
+  var inp=document.getElementById('chat-in');
+  inp.value=t;rsz(inp);
+  document.getElementById('attach-file-input').click();
+}
 function esc(s){var d=document.createElement('div');d.textContent=String(s||'');return d.innerHTML;}
 function formatMarkdown(text){
   // 1. Escape HTML first (security — always before adding any markup)
@@ -4785,13 +4796,39 @@ function showAttachBar(previewHtml,name){
   }
   bar.classList.add('on');
 }
+// Extracts plain text from a PDF via the vendored pdf.js (public/vendor/pdf.min.js +
+// pdf.worker.min.js — added specifically so attachHandle() below can treat a PDF like any other
+// text attachment instead of rejecting it). The worker is only pointed at on first real use, not
+// at page load, so a page that never touches a PDF never pays for it (pdf.min.js itself is a
+// small deferred <script>; the much larger worker is fetched lazily by pdf.js itself here). Joins
+// each page's text items with a blank line between pages so a chapter summary prompt gets
+// something structurally readable, not one unbroken wall of text.
+function _extractPdfText(file){
+  return file.arrayBuffer().then(function(buf){
+    if(typeof pdfjsLib==='undefined')throw new Error('pdfjsLib not loaded');
+    if(!pdfjsLib.GlobalWorkerOptions.workerSrc)pdfjsLib.GlobalWorkerOptions.workerSrc='/vendor/pdf.worker.min.js';
+    return pdfjsLib.getDocument({data:buf}).promise;
+  }).then(function(doc){
+    var pagePromises=[];
+    for(var i=1;i<=doc.numPages;i++){
+      pagePromises.push(doc.getPage(i).then(function(page){return page.getTextContent();})
+        .then(function(tc){return tc.items.map(function(it){return it.str;}).join(' ');}));
+    }
+    return Promise.all(pagePromises).then(function(pageTexts){return pageTexts.join('\n\n');});
+  });
+}
 function attachHandle(file){
   if(!file)return;
   var isImg=/^image\/(jpeg|png|webp)$/.test(file.type);
   var isTxt=/\.(txt|md|csv|json|js|py|html|css)$/i.test(file.name);
-  if(!isImg&&!isTxt){notify('Unsupported file. Use images (JPG/PNG/WEBP) or text files (txt/md/csv/json/js/py/html/css).');return;}
+  // PDF is handled as a text attachment (extracted text, not raw binary) — see _extractPdfText()
+  // and the isPdf branch below, which mirrors the isTxt branch's attachData shape exactly so
+  // nothing server-side needs to know PDFs exist at all; it already handles type:'text'.
+  var isPdf=file.type==='application/pdf'||/\.pdf$/i.test(file.name);
+  if(!isImg&&!isTxt&&!isPdf){notify('Unsupported file. Use images (JPG/PNG/WEBP), text files (txt/md/csv/json/js/py/html/css), or PDF.');return;}
   if(isImg&&file.size>5*1024*1024){notify('Image must be under 5MB');return;}
   if(isTxt&&file.size>1*1024*1024){notify('Text file must be under 1MB');return;}
+  if(isPdf&&file.size>10*1024*1024){notify('PDF must be under 10MB');return;}
   // isAttaching is true for exactly the span of the async work below (FileReader read, plus for
   // images an Image decode to check dimensions/resize) — see send()'s own matching check.
   // _finishAttach() is called from every exit path below, success or failure, so this can never
@@ -4800,6 +4837,22 @@ function attachHandle(file){
   function _finishAttach(){
     isAttaching=false;
     if(_sendQueuedAfterAttach){_sendQueuedAfterAttach=false;send();}
+  }
+  if(isPdf){
+    _extractPdfText(file).then(function(text){
+      if(!text||!text.trim()){
+        notify('Could not find any text in this PDF — it may be a scanned image with no selectable text.');
+        _finishAttach();
+        return;
+      }
+      attachData={type:'text',name:file.name,mimeType:'text/plain',data:text};
+      showAttachBar('<span style="font-size:14px">📄</span>',file.name);
+      _finishAttach();
+    }).catch(function(){
+      notify('Could not read this PDF — please try again.');
+      _finishAttach();
+    });
+    return;
   }
   var reader=new FileReader();
   reader.onerror=function(){
