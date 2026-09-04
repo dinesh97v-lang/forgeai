@@ -1088,7 +1088,7 @@ body.ab-flow-active .mac[onclick^="regenMsg"]{display:none!important}
     <div class="panel" id="panel-finance">
       <div class="scroll">
         <div class="card">
-          <div class="card-hd"><div class="card-title">Your monthly numbers</div></div>
+          <div class="card-hd"><div class="card-title">Your monthly numbers</div><button class="btn ghost" style="padding:4px 10px;font-size:11px" onclick="finReset()">Reset</button></div>
           <div class="card-bd" style="display:flex;flex-direction:column;gap:8px">
             <div class="row"><span class="rl">Monthly income (Rs.)</span><input type="number" id="fin-in-income" min="0" placeholder="e.g. 52000" oninput="finAutoFillIfEligible()" style="width:130px;border:1px solid var(--border);border-radius:var(--r);padding:5px 8px;font-size:13px;color:var(--text);background:var(--bg2);font-family:inherit;text-align:right"></div>
             <div class="row"><span class="rl">Rent (Rs.)</span><input type="number" id="fin-in-rent" min="0" placeholder="0" oninput="_finMarkExpensesTouched()" style="width:130px;border:1px solid var(--border);border-radius:var(--r);padding:5px 8px;font-size:13px;color:var(--text);background:var(--bg2);font-family:inherit;text-align:right"></div>
@@ -1698,6 +1698,25 @@ function finSave(){
   try{localStorage.setItem(_finKey(),JSON.stringify({income:income,rent:rent,groceries:groceries,transport:transport,subscriptions:subscriptions}));}catch(e){}
   finRender();
   notify('Saved!');
+}
+// Destructive — confirm first. Clears the saved record, re-arms auto-fill eligibility
+// (_finExpensesTouched back to false, same as a page that's never seen this user before — see
+// finAutoFillIfEligible()'s own eligibility gate), and resets the form/results DOM directly so
+// the panel matches a genuine first visit immediately, no reload needed.
+function finReset(){
+  if(!confirm('Clear your saved income and expenses? This cannot be undone.'))return;
+  try{localStorage.removeItem(_finKey());}catch(e){}
+  _finExpensesTouched=false;
+  document.getElementById('fin-in-income').value='';
+  document.getElementById('fin-in-rent').value='';
+  document.getElementById('fin-in-groceries').value='';
+  document.getElementById('fin-in-transport').value='';
+  document.getElementById('fin-in-subscriptions').value='';
+  document.getElementById('fin-stat-grid').innerHTML='';
+  document.getElementById('fin-breakdown-body').innerHTML='';
+  document.getElementById('fin-suggestion-text').textContent='';
+  document.getElementById('fin-results').style.display='none';
+  notify('Finance data cleared');
 }
 // Simple, non-AI heuristic (no model call, no added latency/cost): flags a category as
 // unusually high when it exceeds a typical share of income (common budgeting rule-of-thumb
