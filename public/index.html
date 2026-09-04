@@ -672,7 +672,8 @@ body.ab-flow-active .mac[onclick^="regenMsg"]{display:none!important}
         <div class="ai-group-hd" onclick="toggleAiTools(this.parentElement)"><span class="ni-icon">🤖</span>AI Tools<span class="ai-group-arr">▾</span></div>
         <div class="ai-group-body">
           <div class="ni ni-sub active" onclick="go('chat',this)"><span class="ni-icon">💬</span>Chat</div>
-          <div class="ni ni-sub" onclick="go('search',this)"><span class="ni-icon">🔍</span>Search</div>
+          <!-- Temporarily hidden — nav entry point only, /api/search and panel-search untouched -->
+          <div class="ni ni-sub" onclick="go('search',this)" style="display:none"><span class="ni-icon">🔍</span>Search</div>
           <div class="ni ni-sub" onclick="go('oneprompt',this)"><span class="ni-icon">⚡</span>One Prompt<span class="nbadge r">New</span></div>
         </div>
       </div>
@@ -699,7 +700,8 @@ body.ab-flow-active .mac[onclick^="regenMsg"]{display:none!important}
         <div class="ai-group-hd" onclick="toggleAiTools(this.parentElement)"><span class="ni-icon">🤖</span>AI Tools<span class="ai-group-arr">▾</span></div>
         <div class="ai-group-body">
           <div class="ni ni-sub active" onclick="go('chat',this)"><span class="ni-icon">💬</span>Chat</div>
-          <div class="ni ni-sub" onclick="go('search',this)"><span class="ni-icon">🔍</span>Search</div>
+          <!-- Temporarily hidden — nav entry point only, /api/search and panel-search untouched -->
+          <div class="ni ni-sub" onclick="go('search',this)" style="display:none"><span class="ni-icon">🔍</span>Search</div>
         </div>
       </div>
       <div class="ai-group open" id="my-tools-simple">
