@@ -1090,11 +1090,11 @@ body.ab-flow-active .mac[onclick^="regenMsg"]{display:none!important}
         <div class="card">
           <div class="card-hd"><div class="card-title">Your monthly numbers</div><button class="btn ghost" style="padding:4px 10px;font-size:11px" onclick="finReset()">Reset</button></div>
           <div class="card-bd" style="display:flex;flex-direction:column;gap:8px">
-            <div class="row"><span class="rl">Monthly income (Rs.)</span><input type="number" id="fin-in-income" min="0" placeholder="e.g. 52000" oninput="finAutoFillIfEligible()" style="width:130px;border:1px solid var(--border);border-radius:var(--r);padding:5px 8px;font-size:13px;color:var(--text);background:var(--bg2);font-family:inherit;text-align:right"></div>
-            <div class="row"><span class="rl">Rent (Rs.)</span><input type="number" id="fin-in-rent" min="0" placeholder="0" oninput="_finMarkExpensesTouched()" style="width:130px;border:1px solid var(--border);border-radius:var(--r);padding:5px 8px;font-size:13px;color:var(--text);background:var(--bg2);font-family:inherit;text-align:right"></div>
-            <div class="row"><span class="rl">Groceries (Rs.)</span><input type="number" id="fin-in-groceries" min="0" placeholder="0" oninput="_finMarkExpensesTouched()" style="width:130px;border:1px solid var(--border);border-radius:var(--r);padding:5px 8px;font-size:13px;color:var(--text);background:var(--bg2);font-family:inherit;text-align:right"></div>
-            <div class="row"><span class="rl">Transport (Rs.)</span><input type="number" id="fin-in-transport" min="0" placeholder="0" oninput="_finMarkExpensesTouched()" style="width:130px;border:1px solid var(--border);border-radius:var(--r);padding:5px 8px;font-size:13px;color:var(--text);background:var(--bg2);font-family:inherit;text-align:right"></div>
-            <div class="row"><span class="rl">Subscriptions (Rs.)</span><input type="number" id="fin-in-subscriptions" min="0" placeholder="0" oninput="_finMarkExpensesTouched()" style="width:130px;border:1px solid var(--border);border-radius:var(--r);padding:5px 8px;font-size:13px;color:var(--text);background:var(--bg2);font-family:inherit;text-align:right"></div>
+            <div class="row"><span class="rl">Monthly income (Rs.)</span><input type="number" id="fin-in-income" min="0" placeholder="e.g. 52000" oninput="finIncomeChanged()" style="width:130px;border:1px solid var(--border);border-radius:var(--r);padding:5px 8px;font-size:13px;color:var(--text);background:var(--bg2);font-family:inherit;text-align:right"></div>
+            <div class="row"><span class="rl">Rent (Rs.)</span><input type="number" id="fin-in-rent" min="0" placeholder="0" oninput="finFieldEdited('rent')" style="width:130px;border:1px solid var(--border);border-radius:var(--r);padding:5px 8px;font-size:13px;color:var(--text);background:var(--bg2);font-family:inherit;text-align:right"></div>
+            <div class="row"><span class="rl">Groceries (Rs.)</span><input type="number" id="fin-in-groceries" min="0" placeholder="0" oninput="finFieldEdited('groceries')" style="width:130px;border:1px solid var(--border);border-radius:var(--r);padding:5px 8px;font-size:13px;color:var(--text);background:var(--bg2);font-family:inherit;text-align:right"></div>
+            <div class="row"><span class="rl">Transport (Rs.)</span><input type="number" id="fin-in-transport" min="0" placeholder="0" oninput="finFieldEdited('transport')" style="width:130px;border:1px solid var(--border);border-radius:var(--r);padding:5px 8px;font-size:13px;color:var(--text);background:var(--bg2);font-family:inherit;text-align:right"></div>
+            <div class="row"><span class="rl">Subscriptions (Rs.)</span><input type="number" id="fin-in-subscriptions" min="0" placeholder="0" oninput="finFieldEdited('subscriptions')" style="width:130px;border:1px solid var(--border);border-radius:var(--r);padding:5px 8px;font-size:13px;color:var(--text);background:var(--bg2);font-family:inherit;text-align:right"></div>
             <button class="btn prim" style="align-self:flex-start;margin-top:4px" onclick="finSave()">Save</button>
           </div>
         </div>
@@ -1695,7 +1695,7 @@ function finSave(){
   var transport=parseFloat(document.getElementById('fin-in-transport').value)||0;
   var subscriptions=parseFloat(document.getElementById('fin-in-subscriptions').value)||0;
   if(income<=0){notify('Enter your monthly income to continue');return;}
-  try{localStorage.setItem(_finKey(),JSON.stringify({income:income,rent:rent,groceries:groceries,transport:transport,subscriptions:subscriptions}));}catch(e){}
+  try{localStorage.setItem(_finKey(),JSON.stringify({income:income,rent:rent,groceries:groceries,transport:transport,subscriptions:subscriptions,locked:FIN_LOCKED}));}catch(e){}
   finRender();
   notify('Saved!');
 }
@@ -1707,6 +1707,7 @@ function finReset(){
   if(!confirm('Clear your saved income and expenses? This cannot be undone.'))return;
   try{localStorage.removeItem(_finKey());}catch(e){}
   _finExpensesTouched=false;
+  FIN_LOCKED.rent=false;FIN_LOCKED.groceries=false;FIN_LOCKED.transport=false;FIN_LOCKED.subscriptions=false;
   document.getElementById('fin-in-income').value='';
   document.getElementById('fin-in-rent').value='';
   document.getElementById('fin-in-groceries').value='';
@@ -1724,6 +1725,12 @@ function finReset(){
 // Rs.1,200" copy with a real sentence built from the user's own numbers.
 var FIN_TYPICAL_SHARE={rent:0.30,groceries:0.15,transport:0.10,subscriptions:0.05};
 var FIN_LABELS={rent:'Rent',groceries:'Groceries',transport:'Transport',subscriptions:'Subscriptions'};
+// Per-field lock state — which of the 4 expense fields the user has personally set (as opposed
+// to a value still sitting there from auto-fill/redistribution). Persisted in the saved record
+// (see finSave()/finRender()) and cleared by finReset(), same lifecycle as the values themselves.
+// A field becomes locked the instant the user edits it (finFieldEdited()) and never gets
+// overwritten again after that — redistribution only ever touches the NOT-yet-locked fields.
+var FIN_LOCKED={rent:false,groceries:false,transport:false,subscriptions:false};
 // Income-based auto-split: when income is entered and the 4 expense fields are still genuinely
 // untouched (never manually typed into, never saved before), pre-fill them with a suggested
 // split so a brand-new user isn't left staring at four empty/zero fields with no starting point.
@@ -1755,6 +1762,49 @@ function finAutoFillIfEligible(){
   Object.keys(FIN_TYPICAL_SHARE).forEach(function(k){
     document.getElementById('fin-in-'+k).value=Math.round(income*FIN_TYPICAL_SHARE[k]);
   });
+}
+// Live rebalancing: once at least one expense field is locked, the still-unlocked fields
+// redistribute whatever's left of income (after subtracting the locked fields' own values)
+// between themselves, keeping their relative FIN_TYPICAL_SHARE weights — e.g. if Rent gets
+// locked, Groceries:Transport:Subscriptions keep their existing 15:10:5 ratio applied to
+// whatever `remaining` is, rather than each keeping its old absolute auto-filled amount.
+// Floors at 0 (never negative) if the locked fields alone already meet or exceed income —
+// silent, no separate warning UI for that state (flagged in the report; easy to add later if
+// wanted). No-ops if every field is already locked — nothing left to redistribute into.
+function finRedistribute(){
+  var income=parseFloat(document.getElementById('fin-in-income').value)||0;
+  var lockedSum=0,unlockedKeys=[];
+  Object.keys(FIN_TYPICAL_SHARE).forEach(function(k){
+    if(FIN_LOCKED[k]){lockedSum+=parseFloat(document.getElementById('fin-in-'+k).value)||0;}
+    else{unlockedKeys.push(k);}
+  });
+  if(!unlockedKeys.length)return;
+  var remaining=income-lockedSum;
+  if(remaining<0)remaining=0;
+  var weightSum=unlockedKeys.reduce(function(s,k){return s+FIN_TYPICAL_SHARE[k];},0);
+  unlockedKeys.forEach(function(k){
+    var share=weightSum>0?(FIN_TYPICAL_SHARE[k]/weightSum):0;
+    document.getElementById('fin-in-'+k).value=Math.round(remaining*share);
+  });
+}
+// Wired to each of the 4 expense fields' oninput (replacing the old blanket
+// _finMarkExpensesTouched()-only handler). Locks THIS field permanently at whatever the user just
+// typed (never touched again by auto-fill or redistribution), then redistributes the remaining
+// income across whichever fields are still unlocked. Still calls _finMarkExpensesTouched()
+// unmodified so finAutoFillIfEligible()'s own existing eligibility gate keeps working exactly as
+// before — this only adds redistribution on top, it doesn't change what stops the wholesale fill.
+function finFieldEdited(key){
+  FIN_LOCKED[key]=true;
+  _finMarkExpensesTouched();
+  finRedistribute();
+}
+// Income field's oninput: routes to whichever behavior actually applies right now rather than
+// always calling finAutoFillIfEligible() — once any field is locked, an income edit should keep
+// the still-unlocked fields in sync with the new remaining amount (finRedistribute()), not
+// attempt the (by-then-blocked) wholesale fill. finAutoFillIfEligible() itself is unmodified.
+function finIncomeChanged(){
+  var anyLocked=Object.keys(FIN_LOCKED).some(function(k){return FIN_LOCKED[k];});
+  if(anyLocked){finRedistribute();}else{finAutoFillIfEligible();}
 }
 function finComputeSuggestion(data){
   var income=data.income||0;
@@ -1790,6 +1840,15 @@ function finRender(){
   document.getElementById('fin-in-groceries').value=data.groceries;
   document.getElementById('fin-in-transport').value=data.transport;
   document.getElementById('fin-in-subscriptions').value=data.subscriptions;
+  // Restore per-field locks so redistribution keeps behaving correctly after a reload — a record
+  // saved before this feature existed has no .locked at all, which safely defaults every field to
+  // unlocked (loses no actual values, just means future edits on this restored record start
+  // deciding locks fresh, same as any other pre-existing-feature record encountering a new one).
+  var savedLocked=data.locked||{};
+  FIN_LOCKED.rent=!!savedLocked.rent;
+  FIN_LOCKED.groceries=!!savedLocked.groceries;
+  FIN_LOCKED.transport=!!savedLocked.transport;
+  FIN_LOCKED.subscriptions=!!savedLocked.subscriptions;
   var totalExpenses=data.rent+data.groceries+data.transport+data.subscriptions;
   var savings=data.income-totalExpenses;
   var savingsRate=data.income>0?Math.round((savings/data.income)*100):0;
