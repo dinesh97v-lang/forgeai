@@ -1106,6 +1106,19 @@ body.ab-flow-active .mac[onclick^="regenMsg"]{display:none!important}
             <button class="btn prim" style="align-self:flex-start;margin-top:4px" onclick="finSave()">Save</button>
           </div>
         </div>
+        <!-- flex-shrink:0: same clipping gotcha as the "Your monthly numbers" card above (.card's
+             global overflow:hidden removes this flex item's implicit min-height inside .scroll's
+             column layout) -- locked to natural height for the same reason. Deliberately its own
+             card, outside #fin-results: the goal amount/saved-so-far are independent of monthly
+             income/expenses (no income>0 gate), so this stays visible even before that data exists. -->
+        <div class="card" style="flex-shrink:0">
+          <div class="card-hd"><div class="card-title">Savings Goal</div></div>
+          <div class="card-bd" style="display:flex;flex-direction:column;gap:8px">
+            <div class="row"><span class="rl">Goal amount (Rs.)</span><input type="number" id="fin-goal-amount" min="0" placeholder="e.g. 100000" oninput="finGoalChanged()" style="width:130px;border:1px solid var(--border);border-radius:var(--r);padding:5px 8px;font-size:13px;color:var(--text);background:var(--bg2);font-family:inherit;text-align:right"></div>
+            <div class="row"><span class="rl">Amount saved so far (Rs.)</span><input type="number" id="fin-goal-saved" min="0" placeholder="0" oninput="finGoalChanged()" style="width:130px;border:1px solid var(--border);border-radius:var(--r);padding:5px 8px;font-size:13px;color:var(--text);background:var(--bg2);font-family:inherit;text-align:right"></div>
+            <div id="fin-goal-progress"></div>
+          </div>
+        </div>
         <div id="fin-results" style="display:none">
           <div class="fin-grid" id="fin-stat-grid"></div>
           <div class="card"><div class="card-hd"><div class="card-title">Spending breakdown</div></div><div class="card-bd"><div id="fin-pie-chart" style="margin-bottom:10px"></div><div id="fin-breakdown-body"></div></div></div>
@@ -1794,7 +1807,7 @@ function finSave(){
 // the 5 brand-new-user defaults (any custom-added categories are dropped, same "back to a genuine
 // first visit" intent as clearing the 4 old fixed fields always had).
 function finReset(){
-  if(!confirm('Clear your saved income and expenses? This cannot be undone.'))return;
+  if(!confirm('Clear your saved income, expenses, and savings goal? This cannot be undone.'))return;
   try{localStorage.removeItem(_finKey());}catch(e){}
   _finExpensesTouched=false;
   FIN_CATS=_finDefaultCats();
@@ -1806,6 +1819,10 @@ function finReset(){
   document.getElementById('fin-suggestion-text').textContent='';
   document.getElementById('fin-results').style.display='none';
   finUpdateOverBudgetWarning(0,0);
+  try{localStorage.removeItem(_finGoalKey());}catch(e){}
+  document.getElementById('fin-goal-amount').value='';
+  document.getElementById('fin-goal-saved').value='';
+  document.getElementById('fin-goal-progress').innerHTML='';
   notify('Finance data cleared');
 }
 // Renders FIN_CATS into #fin-cat-rows: one row per category, each with a rename-able name input,
@@ -2114,12 +2131,88 @@ function _finRenderFrom(data){
   document.getElementById('fin-suggestion-text').textContent=finComputeSuggestion(data);
   resultsEl.style.display='';
 }
+// Savings Goal tracker — deliberately fully independent of the income/expense-category system
+// above: its own localStorage key (not _finKey()'s record), own inputs, own pure-computation +
+// render functions, and its own call sites in finRender()/finReset() (never routed through
+// _finRenderFrom()/finRefreshLiveView(), which only ever operate on income/categories data).
+// This separation matters for a real reason, not just tidiness: finAutoFillIfEligible()'s
+// eligibility gate treats "finLoad()!==null" as "this user has real saved data, don't auto-fill" —
+// if goal/saved-so-far were folded into that same record, simply typing a savings goal (with
+// income/categories still untouched) would silently disable auto-fill the next time income gets
+// entered. A separate key sidesteps that entirely.
+function _finGoalKey(){return 'forgeai_finance_goal'+(currentUser?'_'+currentUser.id:'');}
+function finGoalLoad(){
+  try{var raw=localStorage.getItem(_finGoalKey());return raw?JSON.parse(raw):null;}catch(e){return null;}
+}
+function finGoalSave(amount,saved){
+  try{localStorage.setItem(_finGoalKey(),JSON.stringify({amount:amount,saved:saved}));}catch(e){}
+}
+// Pure computation for the progress bar — no DOM access, unit-testable in isolation. Saved-so-far
+// is clamped at 0 here too (defense in depth on top of finGoalChanged()'s own input-level clamp —
+// see that function for why negative is clamped rather than rejected). Returns null when there's
+// no meaningful goal to show progress against (amount<=0: nothing entered yet, or cleared) so the
+// caller can hide the bar instead of dividing by zero. Percentage is capped at 100 even once saved
+// exceeds the goal — see `reached`/`remaining` for that "exceeded" state instead of a number over
+// 100% or a negative remaining amount.
+function _finComputeGoalProgress(amount,saved){
+  amount=amount||0;
+  saved=Math.max(0,saved||0);
+  if(!(amount>0))return null;
+  return {
+    pct:Math.min(100,Math.round((saved/amount)*100)),
+    reached:saved>=amount,
+    remaining:Math.max(0,amount-saved)
+  };
+}
+// Renders #fin-goal-progress from the given (amount, savedSoFar) pair. Called from
+// finGoalChanged() (live edits) and _finRenderGoalFromStorage() (panel open) — the same
+// read-live-values-then-repaint-immediately reactive pattern used throughout this panel, just
+// scoped to its own two inputs instead of the category list.
+function _finRenderGoalProgress(amount,saved){
+  var el=document.getElementById('fin-goal-progress');
+  if(!el)return;
+  var p=_finComputeGoalProgress(amount,saved);
+  if(!p){el.innerHTML='';return;}
+  el.innerHTML='<div style="height:10px;background:var(--bg3);border-radius:6px;overflow:hidden;margin-top:2px">'
+    +'<div style="height:100%;width:'+p.pct+'%;background:'+(p.reached?'var(--success)':'var(--accent)')+';border-radius:6px"></div>'
+    +'</div>'
+    +'<div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px;font-size:11px;color:var(--text2)">'
+    +'<span>'+p.pct+'% of goal</span>'
+    +'<span style="font-weight:600;color:'+(p.reached?'var(--success)':'var(--text)')+'">'+(p.reached?'Goal reached!':'Rs.'+finFmt(p.remaining)+' to go')+'</span>'
+    +'</div>';
+}
+// Wired to both goal inputs' oninput. Clamps "saved so far" at 0 the moment it's typed (chosen
+// over rejecting/blocking the keystroke — clamping lets the user freely edit/backspace without
+// the field fighting them, while still never persisting or displaying a negative value) and
+// persists immediately — there's no separate Save button for this section, matching "must update
+// live as either field is edited" for both the visual bar and the saved data itself.
+function finGoalChanged(){
+  var savedEl=document.getElementById('fin-goal-saved');
+  var saved=parseFloat(savedEl.value)||0;
+  if(saved<0){saved=0;savedEl.value=0;}
+  var amount=parseFloat(document.getElementById('fin-goal-amount').value)||0;
+  finGoalSave(amount,saved);
+  _finRenderGoalProgress(amount,saved);
+}
+// Loads the goal record (if any) and paints both the input fields and the progress bar — called
+// from finRender() on every panel-open, unconditionally (before the income/categories branch
+// below, and regardless of which branch runs), since goal data exists independently of whether
+// income/categories have ever been entered.
+function _finRenderGoalFromStorage(){
+  var data=finGoalLoad();
+  var amount=data?(data.amount||0):0;
+  var saved=data?(data.saved||0):0;
+  document.getElementById('fin-goal-amount').value=amount||'';
+  document.getElementById('fin-goal-saved').value=saved||'';
+  _finRenderGoalProgress(amount,saved);
+}
 // Last-saved-snapshot path — unchanged behavior, still the only place that pre-fills the input
 // fields and restores lock state from localStorage. Still called from finSave() and the
 // panel-open MutationObserver exactly as before; now rebuilds FIN_CATS/#fin-cat-rows from
 // data.categories (post-migration, if this was an old-format record) instead of pre-filling 4
 // fixed inputs, then delegates painting to _finRenderFrom() as before.
 function finRender(){
+  _finRenderGoalFromStorage();
   var data=finLoad();
   if(!data){
     FIN_CATS=_finDefaultCats();
