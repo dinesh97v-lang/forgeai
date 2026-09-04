@@ -1087,7 +1087,13 @@ body.ab-flow-active .mac[onclick^="regenMsg"]{display:none!important}
     <!-- FINANCE -->
     <div class="panel" id="panel-finance">
       <div class="scroll">
-        <div class="card">
+        <!-- flex-shrink:0: .card's global overflow:hidden (used app-wide purely to clip corners to
+             the border-radius) removes this flex item's implicit content-based min-height inside
+             .scroll's column flex layout, letting it shrink below what its 5 fields + Save button
+             actually need and clip the rest instead of the outer .scroll scrolling to fit them.
+             Locking this one card to its natural height fixes that; .scroll's own overflow-y:auto
+             then correctly takes over once the panel's total content exceeds its available space. -->
+        <div class="card" style="flex-shrink:0">
           <div class="card-hd"><div class="card-title">Your monthly numbers</div><button class="btn ghost" style="padding:4px 10px;font-size:11px" onclick="finReset()">Reset</button></div>
           <div class="card-bd" style="display:flex;flex-direction:column;gap:8px">
             <div class="row"><span class="rl">Monthly income (Rs.)</span><input type="number" id="fin-in-income" min="0" placeholder="e.g. 52000" oninput="finIncomeChanged()" style="width:130px;border:1px solid var(--border);border-radius:var(--r);padding:5px 8px;font-size:13px;color:var(--text);background:var(--bg2);font-family:inherit;text-align:right"></div>
