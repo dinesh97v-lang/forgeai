@@ -1124,6 +1124,16 @@ body.ab-flow-active .mac[onclick^="regenMsg"]{display:none!important}
           <div class="card"><div class="card-hd"><div class="card-title">Spending breakdown</div></div><div class="card-bd"><div id="fin-pie-chart" style="margin-bottom:10px"></div><div id="fin-breakdown-body"></div></div></div>
           <div class="alert-box g"><div class="at g">AI Savings Suggestion</div><div class="atxt g" id="fin-suggestion-text"></div><div class="btn-row"><button class="btn prim" onclick="ask(finBudgetPlanPrompt())">Create budget plan</button></div></div>
         </div>
+        <!-- Deliberately its own section, outside #fin-results: history is about PAST completed
+             months, so it must stay visible even when the CURRENT month has no income entered yet
+             (i.e. #fin-results is hidden) -- shown/hidden purely by whether any history exists.
+             flex-shrink:0 on the .card for the same clipping-gotcha reason as the other cards above. -->
+        <div id="fin-history-section" style="display:none">
+          <div class="card" style="flex-shrink:0">
+            <div class="card-hd"><div class="card-title">History</div></div>
+            <div class="card-bd" id="fin-history-body" style="overflow-x:auto"></div>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -1796,7 +1806,7 @@ function finSave(){
     var el=document.getElementById('fin-in-'+c.id);
     c.value=el?(parseFloat(el.value)||0):(c.value||0);
   });
-  try{localStorage.setItem(_finKey(),JSON.stringify({income:income,categories:FIN_CATS}));}catch(e){}
+  try{localStorage.setItem(_finKey(),JSON.stringify({income:income,categories:FIN_CATS,monthKey:_finMonthKey()}));}catch(e){}
   finRender();
   notify('Saved!');
 }
@@ -2206,13 +2216,127 @@ function _finRenderGoalFromStorage(){
   document.getElementById('fin-goal-saved').value=saved||'';
   _finRenderGoalProgress(amount,saved);
 }
+// Monthly history/trend tracking — deliberately its own localStorage key (_finHistoryKey(), not
+// folded into _finKey()'s income/categories record), for the same reason the Savings Goal tracker
+// got its own key: finReset() removes the ENTIRE _finKey() record wholesale (see finReset() below,
+// unchanged), and finAutoFillIfEligible()'s eligibility gate treats finLoad()!==null as "real data
+// exists, don't auto-fill" -- if history lived inside that record, Reset would either destroy the
+// archive or (if we tried to preserve it by leaving a stub record behind) permanently block
+// auto-fill after every Reset. A separate key sidesteps both problems: Reset never touches it, so
+// history survives untouched automatically with no special-casing, and finLoad() itself is
+// completely unaffected by whether any history exists.
+function _finHistoryKey(){return 'forgeai_finance_history'+(currentUser?'_'+currentUser.id:'');}
+function finHistoryLoad(){
+  try{var raw=localStorage.getItem(_finHistoryKey());var arr=raw?JSON.parse(raw):[];return Array.isArray(arr)?arr:[];}catch(e){return [];}
+}
+// Injectable "now" so month-comparison is unit-testable without waiting on real calendar time —
+// production code always calls this un-overridden; a test can override window._finGetNow, or
+// (more directly, used by this codebase's own tests) call _finMonthKey()/_finComputeRollover()
+// with an explicit date/month-key argument instead, bypassing this entirely.
+function _finGetNow(){return new Date();}
+function _finMonthKey(date){
+  var d=date||_finGetNow();
+  return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');
+}
+// Pure month-rollover computation — given the currently-saved income/categories record, the
+// currently-saved history array, and today's month key, decides whether a rollover is needed and
+// returns the resulting {record,history,archived} (never mutates its inputs; returns the exact
+// same `record`/`history` references unchanged when no rollover is needed, so callers can detect
+// "did anything actually change" with a simple reference check). No DOM/localStorage access, so
+// it's directly unit-testable with plain string month keys.
+//
+// Multi-month-gap handling is implicit, not a loop: whatever month the record was last saved
+// under gets archived exactly once (under ITS OWN correct month key), and the new record is
+// stamped directly with todayMonthKey -- there is no notion of "the months in between" to iterate
+// over or backfill, since nothing was ever recorded for them.
+function _finComputeRollover(record,history,todayMonthKey){
+  history=history||[];
+  if(!record)return {record:record,history:history,archived:null};
+  var recordMonthKey=record.monthKey;
+  if(recordMonthKey===todayMonthKey){
+    return {record:record,history:history,archived:null};
+  }
+  if(!recordMonthKey){
+    // Pre-existing record from before month-tracking existed (no monthKey at all, e.g. a
+    // freshly-migrated old 4-field record) -- nothing reliable to attribute to a prior month, so
+    // just stamp today's key and treat it as the current month's data rather than archiving it.
+    return {record:Object.assign({},record,{monthKey:todayMonthKey}),history:history,archived:null};
+  }
+  var archived={
+    monthKey:recordMonthKey,
+    income:record.income||0,
+    categories:(record.categories||[]).map(function(c){return {name:c.name,value:c.value||0};})
+  };
+  var carriedCats=(record.categories||[]).map(function(c){
+    return {id:c.id,name:c.name,value:0,locked:false,share:c.share||0};
+  });
+  var newRecord={income:0,categories:carriedCats,monthKey:todayMonthKey};
+  return {record:newRecord,history:history.concat([archived]),archived:archived};
+}
+// Side-effecting wrapper around _finComputeRollover() — reads both localStorage keys, and persists
+// back to whichever ones actually changed (reference-equality against the pure function's inputs
+// decides that, so an ordinary same-month load never re-writes anything). Called at the top of
+// finRender(), i.e. on every panel load, before anything else reads income/categories/history.
+function finCheckMonthRollover(){
+  var record=finLoad();
+  if(!record)return;
+  var history=finHistoryLoad();
+  var result=_finComputeRollover(record,history,_finMonthKey());
+  if(result.record!==record){
+    try{localStorage.setItem(_finKey(),JSON.stringify(result.record));}catch(e){}
+  }
+  if(result.archived){
+    try{localStorage.setItem(_finHistoryKey(),JSON.stringify(result.history));}catch(e){}
+  }
+}
+var FIN_MONTH_NAMES=['January','February','March','April','May','June','July','August','September','October','November','December'];
+function _finMonthLabel(monthKey){
+  var parts=(monthKey||'').split('-');
+  var y=parseInt(parts[0],10),m=parseInt(parts[1],10);
+  if(!y||!m||m<1||m>12)return monthKey||'';
+  return FIN_MONTH_NAMES[m-1]+' '+y;
+}
+// Renders #fin-history-body (and toggles #fin-history-section's visibility) from the given
+// archived-months array. Most-recent-month-first regardless of storage order (sorts by monthKey
+// string, which sorts correctly since it's always "YYYY-MM"). Summary columns only (Income/Total
+// Expenses/Savings/Savings rate) -- deliberately no per-category breakdown, since categories can
+// differ from month to month and a fixed column set can't represent that. Empty history hides the
+// section entirely rather than rendering an empty table.
+function _finRenderHistory(history){
+  var section=document.getElementById('fin-history-section');
+  var body=document.getElementById('fin-history-body');
+  if(!section||!body)return;
+  var list=(history||[]).slice().sort(function(a,b){return a.monthKey<b.monthKey?1:(a.monthKey>b.monthKey?-1:0);});
+  if(!list.length){section.style.display='none';body.innerHTML='';return;}
+  section.style.display='';
+  body.innerHTML='<table style="width:100%;border-collapse:collapse;font-size:11px">'
+    +'<thead><tr style="text-align:left;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;font-size:10px">'
+    +'<th style="padding:0 6px 6px 0">Month</th><th style="padding:0 6px 6px 0;text-align:right">Income</th><th style="padding:0 6px 6px 0;text-align:right">Expenses</th><th style="padding:0 6px 6px 0;text-align:right">Savings</th><th style="padding:0 0 6px 0;text-align:right">Rate</th>'
+    +'</tr></thead><tbody>'+list.map(function(h){
+      var totalExpenses=(h.categories||[]).reduce(function(s,c){return s+(c.value||0);},0);
+      var savings=(h.income||0)-totalExpenses;
+      var rate=h.income>0?Math.round((savings/h.income)*100):0;
+      return '<tr style="border-top:1px solid var(--border)">'
+        +'<td style="padding:6px 6px 6px 0;color:var(--text)">'+_finEscAttr(_finMonthLabel(h.monthKey))+'</td>'
+        +'<td style="padding:6px 6px 6px 0;text-align:right">Rs.'+finFmt(h.income)+'</td>'
+        +'<td style="padding:6px 6px 6px 0;text-align:right">Rs.'+finFmt(totalExpenses)+'</td>'
+        +'<td style="padding:6px 6px 6px 0;text-align:right">Rs.'+finFmt(savings)+'</td>'
+        +'<td style="padding:6px 0 6px 0;text-align:right">'+rate+'%</td>'
+        +'</tr>';
+    }).join('')+'</tbody></table>';
+}
 // Last-saved-snapshot path — unchanged behavior, still the only place that pre-fills the input
 // fields and restores lock state from localStorage. Still called from finSave() and the
 // panel-open MutationObserver exactly as before; now rebuilds FIN_CATS/#fin-cat-rows from
 // data.categories (post-migration, if this was an old-format record) instead of pre-filling 4
-// fixed inputs, then delegates painting to _finRenderFrom() as before.
+// fixed inputs, then delegates painting to _finRenderFrom() as before. Also runs the month-
+// rollover check and repaints the History table on every panel load (both unconditionally, ahead
+// of the income/categories branch below, since neither depends on whether current-month data
+// exists yet).
 function finRender(){
+  finCheckMonthRollover();
   _finRenderGoalFromStorage();
+  _finRenderHistory(finHistoryLoad());
   var data=finLoad();
   if(!data){
     FIN_CATS=_finDefaultCats();
