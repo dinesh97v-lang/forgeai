@@ -1087,9 +1087,22 @@ body.ab-flow-active .mac[onclick^="regenMsg"]{display:none!important}
     <!-- FINANCE -->
     <div class="panel" id="panel-finance">
       <div class="scroll">
-        <div class="fin-grid"><div class="fin-card"><div class="fin-l">Monthly income</div><div class="fin-n">Rs.52,000</div><div class="fin-t dn">Stable</div></div><div class="fin-card"><div class="fin-l">Total expenses</div><div class="fin-n">Rs.38,400</div><div class="fin-t up">+12% vs last month</div></div><div class="fin-card"><div class="fin-l">Savings</div><div class="fin-n">Rs.13,600</div><div class="fin-t dn">26% rate</div></div><div class="fin-card"><div class="fin-l">SIP Investment</div><div class="fin-n">Rs.8,000</div><div class="fin-t dn">Active</div></div></div>
-        <div class="card"><div class="card-hd"><div class="card-title">Spending breakdown</div></div><div class="card-bd"><div class="row"><span class="rl">Rent</span><span class="rv">Rs.12,000</span></div><div class="row"><span class="rl">Groceries</span><span class="rv">Rs.6,400</span></div><div class="row"><span class="rl">Transport</span><span class="rv warn">Rs.4,800 (High!)</span></div><div class="row"><span class="rl">Subscriptions</span><span class="rv warn">Rs.3,200 (3 unused!)</span></div></div></div>
-        <div class="alert-box g"><div class="at g">AI Savings Suggestion</div><div class="atxt g">Transport: Carpool/metro = save Rs.1,800/month. Cancel 3 unused subscriptions = Rs.1,200/month. Total potential savings: Rs.3,000/month!</div><div class="btn-row"><button class="btn prim" onclick="ask(this.dataset.q)" data-q="Create budget plan to save Rs.3000 more per month">Create budget plan</button></div></div>
+        <div class="card">
+          <div class="card-hd"><div class="card-title">Your monthly numbers</div></div>
+          <div class="card-bd" style="display:flex;flex-direction:column;gap:8px">
+            <div class="row"><span class="rl">Monthly income (Rs.)</span><input type="number" id="fin-in-income" min="0" placeholder="e.g. 52000" style="width:130px;border:1px solid var(--border);border-radius:var(--r);padding:5px 8px;font-size:13px;color:var(--text);background:var(--bg2);font-family:inherit;text-align:right"></div>
+            <div class="row"><span class="rl">Rent (Rs.)</span><input type="number" id="fin-in-rent" min="0" placeholder="0" style="width:130px;border:1px solid var(--border);border-radius:var(--r);padding:5px 8px;font-size:13px;color:var(--text);background:var(--bg2);font-family:inherit;text-align:right"></div>
+            <div class="row"><span class="rl">Groceries (Rs.)</span><input type="number" id="fin-in-groceries" min="0" placeholder="0" style="width:130px;border:1px solid var(--border);border-radius:var(--r);padding:5px 8px;font-size:13px;color:var(--text);background:var(--bg2);font-family:inherit;text-align:right"></div>
+            <div class="row"><span class="rl">Transport (Rs.)</span><input type="number" id="fin-in-transport" min="0" placeholder="0" style="width:130px;border:1px solid var(--border);border-radius:var(--r);padding:5px 8px;font-size:13px;color:var(--text);background:var(--bg2);font-family:inherit;text-align:right"></div>
+            <div class="row"><span class="rl">Subscriptions (Rs.)</span><input type="number" id="fin-in-subscriptions" min="0" placeholder="0" style="width:130px;border:1px solid var(--border);border-radius:var(--r);padding:5px 8px;font-size:13px;color:var(--text);background:var(--bg2);font-family:inherit;text-align:right"></div>
+            <button class="btn prim" style="align-self:flex-start;margin-top:4px" onclick="finSave()">Save</button>
+          </div>
+        </div>
+        <div id="fin-results" style="display:none">
+          <div class="fin-grid" id="fin-stat-grid"></div>
+          <div class="card"><div class="card-hd"><div class="card-title">Spending breakdown</div></div><div class="card-bd" id="fin-breakdown-body"></div></div>
+          <div class="alert-box g"><div class="at g">AI Savings Suggestion</div><div class="atxt g" id="fin-suggestion-text"></div><div class="btn-row"><button class="btn prim" onclick="ask(finBudgetPlanPrompt())">Create budget plan</button></div></div>
+        </div>
       </div>
     </div>
 
@@ -1664,6 +1677,94 @@ function askAssignmentHelp(basePrompt){
   if(!val)return;
   askWithAttach(basePrompt+': '+val);
 }
+// ── Finance panel (My Tools) ─────────────────────────────────────────────────
+// Real, user-entered monthly numbers — namespaced per user (see _chKey()/_acKey()'s own
+// currentUser.id suffix), since this is one ongoing record for the user, not per-chat like
+// _abStateKey(). Stat cards, spending breakdown, and the savings suggestion are all computed
+// live from this; #fin-results stays hidden until the user has saved at least once. Client-side
+// only — no backend call anywhere in this block.
+function _finKey(){return 'forgeai_finance'+(currentUser?'_'+currentUser.id:'');}
+function finLoad(){
+  try{var raw=localStorage.getItem(_finKey());return raw?JSON.parse(raw):null;}catch(e){return null;}
+}
+function finFmt(n){return Math.round(n||0).toLocaleString('en-IN');}
+function finSave(){
+  var income=parseFloat(document.getElementById('fin-in-income').value)||0;
+  var rent=parseFloat(document.getElementById('fin-in-rent').value)||0;
+  var groceries=parseFloat(document.getElementById('fin-in-groceries').value)||0;
+  var transport=parseFloat(document.getElementById('fin-in-transport').value)||0;
+  var subscriptions=parseFloat(document.getElementById('fin-in-subscriptions').value)||0;
+  if(income<=0){notify('Enter your monthly income to continue');return;}
+  try{localStorage.setItem(_finKey(),JSON.stringify({income:income,rent:rent,groceries:groceries,transport:transport,subscriptions:subscriptions}));}catch(e){}
+  finRender();
+  notify('Saved!');
+}
+// Simple, non-AI heuristic (no model call, no added latency/cost): flags a category as
+// unusually high when it exceeds a typical share of income (common budgeting rule-of-thumb
+// proportions), ranked by how far over that share it is. Replaces the old static "Rs.1,800 +
+// Rs.1,200" copy with a real sentence built from the user's own numbers.
+var FIN_TYPICAL_SHARE={rent:0.30,groceries:0.15,transport:0.10,subscriptions:0.05};
+var FIN_LABELS={rent:'Rent',groceries:'Groceries',transport:'Transport',subscriptions:'Subscriptions'};
+function finComputeSuggestion(data){
+  var income=data.income||0;
+  var flagged=[];
+  Object.keys(FIN_TYPICAL_SHARE).forEach(function(k){
+    var typicalAmt=income*FIN_TYPICAL_SHARE[k];
+    var excess=data[k]-typicalAmt;
+    if(excess>0)flagged.push({key:k,label:FIN_LABELS[k],excess:Math.round(excess)});
+  });
+  flagged.sort(function(a,b){return b.excess-a.excess;});
+  if(!flagged.length){
+    return 'Your spending looks well-balanced relative to your income — no category stands out as unusually high right now. Keep it up!';
+  }
+  var top=flagged.slice(0,2);
+  var totalPotential=top.reduce(function(s,f){return s+f.excess;},0);
+  var sentences=top.map(function(f){return f.label+' is higher than typical for your income — trimming it could save around Rs.'+finFmt(f.excess)+'/month';});
+  return sentences.join('. ')+'. Total potential savings: Rs.'+finFmt(totalPotential)+'/month!';
+}
+function finBudgetPlanPrompt(){
+  var data=finLoad();
+  if(!data)return 'Create a monthly budget plan';
+  var totalExpenses=data.rent+data.groceries+data.transport+data.subscriptions;
+  var savings=data.income-totalExpenses;
+  return 'Create a monthly budget plan for someone with income Rs.'+finFmt(data.income)+'/month. Current expenses — Rent: Rs.'+finFmt(data.rent)+', Groceries: Rs.'+finFmt(data.groceries)+', Transport: Rs.'+finFmt(data.transport)+', Subscriptions: Rs.'+finFmt(data.subscriptions)+' (current savings: Rs.'+finFmt(savings)+'/month). Suggest a realistic plan to save more.';
+}
+function finRender(){
+  var data=finLoad();
+  var resultsEl=document.getElementById('fin-results');
+  if(!resultsEl)return;
+  if(!data){resultsEl.style.display='none';return;}
+  document.getElementById('fin-in-income').value=data.income;
+  document.getElementById('fin-in-rent').value=data.rent;
+  document.getElementById('fin-in-groceries').value=data.groceries;
+  document.getElementById('fin-in-transport').value=data.transport;
+  document.getElementById('fin-in-subscriptions').value=data.subscriptions;
+  var totalExpenses=data.rent+data.groceries+data.transport+data.subscriptions;
+  var savings=data.income-totalExpenses;
+  var savingsRate=data.income>0?Math.round((savings/data.income)*100):0;
+  document.getElementById('fin-stat-grid').innerHTML=
+    '<div class="fin-card"><div class="fin-l">Monthly income</div><div class="fin-n">Rs.'+finFmt(data.income)+'</div></div>'
+    +'<div class="fin-card"><div class="fin-l">Total expenses</div><div class="fin-n">Rs.'+finFmt(totalExpenses)+'</div></div>'
+    +'<div class="fin-card"><div class="fin-l">Savings</div><div class="fin-n">Rs.'+finFmt(savings)+'</div><div class="fin-t '+(savings>=0?'dn':'up')+'">'+savingsRate+'% rate</div></div>';
+  var cats=[['rent','Rent'],['groceries','Groceries'],['transport','Transport'],['subscriptions','Subscriptions']];
+  document.getElementById('fin-breakdown-body').innerHTML=cats.map(function(c){
+    return '<div class="row"><span class="rl">'+c[1]+'</span><span class="rv">Rs.'+finFmt(data[c[0]])+'</span></div>';
+  }).join('');
+  document.getElementById('fin-suggestion-text').textContent=finComputeSuggestion(data);
+  resultsEl.style.display='';
+}
+// Populates/refreshes the computed view whenever the Finance panel becomes visible, without
+// touching go() itself — go('finance',...) already adds .active to #panel-finance on navigation,
+// this just observes that existing behavior. Only fires once the panel is actually shown (i.e.
+// after login/app-init has already run), so _finKey()'s currentUser.id suffix is always resolved
+// correctly by the time finRender() reads it — no separate init-ordering concern to solve.
+(function(){
+  var finPanel=document.getElementById('panel-finance');
+  if(!finPanel)return;
+  new MutationObserver(function(){
+    if(finPanel.classList.contains('active'))finRender();
+  }).observe(finPanel,{attributes:true,attributeFilter:['class']});
+})();
 function esc(s){var d=document.createElement('div');d.textContent=String(s||'');return d.innerHTML;}
 function formatMarkdown(text){
   // 1. Escape HTML first (security — always before adding any markup)

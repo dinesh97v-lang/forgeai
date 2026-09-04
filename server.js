@@ -395,6 +395,21 @@ const STUDENT_IDENTITY = `You are an expert teacher helping a student. Always:
 - Be encouraging and motivating, like a caring teacher
 - Match the student's language style (English/Tamil/Thanglish)`;
 
+// Finance identity — used when the request is detected as a finance panel query, mirroring
+// STUDENT_IDENTITY's shape exactly for the same reason: a generic simpleMode reply has no
+// budgeting-specific instructions (structured breakdown, grounding numbers in what was actually
+// given, non-judgmental tone) the way a real financial advisor's guidance would.
+const FINANCE_IDENTITY = `You are an expert personal finance advisor helping someone budget their money. Always:
+- Explain in SIMPLE, practical language — no jargon without a plain explanation
+- Break advice into small, actionable steps rather than vague generalities
+- For budget plans: give a clear, realistic monthly breakdown by category, not just one lump total
+- For savings suggestions: name the specific category to cut, a realistic amount, and a concrete way to do it
+- For spending analysis: compare the actual numbers given against what's typical, and say why it matters
+- Ground every number you give in the specific income/expenses the user actually provided — never invent figures
+- Use headings, numbered steps, and examples so it's easy to read
+- Be encouraging and non-judgmental, like a supportive advisor, never preachy or scolding
+- Match the user's language style (English/Tamil/Thanglish)`;
+
 // Simple Mode prompt — no code, friendly general assistant for everyday help
 const SIMPLE_MODE_PROMPT = `You are a friendly, helpful general assistant for everyday help. You assist with studies, personal finance, shopping decisions, travel planning, health questions, government services, and general business questions.
 
@@ -573,6 +588,28 @@ function isStudentRequest(prompt) {
     'trigonometry','calculus','theorem','algebra','geometry','pythagoras',
     'democracy','constitution','civics','parliament','amendment',
     'chapter summary','key points','revision','syllabus','textbook'
+  ];
+  return topics.some(t => p.includes(t));
+}
+
+// Mirrors isStudentRequest()'s shape exactly, but deliberately avoids bare single words like
+// "rent"/"transport"/"groceries" as standalone keywords — unlike Student's subject keywords
+// (e.g. "photosynthesis"), these are common everyday words that show up unrelated to budgeting
+// too (e.g. "transport" is exactly as likely in a Travel-panel prompt). Only compound, genuinely
+// finance-specific phrases are used, matching the conservative-keyword approach already applied
+// elsewhere in this app for the same reason (see _abSelectFallbackQuestions' "booking" not bare
+// "book").
+function isFinanceRequest(prompt) {
+  const p = prompt.toLowerCase();
+  // Finance panel fixed query patterns
+  if (/(create|make|build).*(budget|monthly budget)|budget.*plan/i.test(p)) return true;
+  if (/save.*more.*(money|month|income)|savings?.?(rate|plan|suggestion)/i.test(p)) return true;
+  if (/spending.*(breakdown|analysis|habit)|expense.*(breakdown|analysis)/i.test(p)) return true;
+  // Common finance/budgeting phrases — compound, not bare category words
+  const topics = [
+    'monthly income','monthly expenses','monthly budget','budget plan',
+    'personal finance','financial plan','cut expenses','save money',
+    'spending breakdown','sip investment','savings rate'
   ];
   return topics.some(t => p.includes(t));
 }
@@ -1445,6 +1482,7 @@ app.post('/api/chat', requireAuth, async (req, res) => {
   if (isProtocolContinuation) intent = 'app_dev';
   const lang       = detectLanguage(prompt);
   const isStudent  = isStudentRequest(prompt);
+  const isFinance  = isFinanceRequest(prompt);
   const tDetect    = Date.now() - startTime;
   let sysPrompt;
   let isEnterprise = false;
@@ -1507,17 +1545,18 @@ Write exactly 3 questions a beginner would naturally wonder after reading THAT s
 
 LANGUAGE RULE (STRICT): Detect the language of the user's most recent message. If it is English, your ENTIRE response must be 100% English — zero Tamil or Tanglish words, including greetings (no 'Vanakkam'), fillers ('irukku', 'pannunga', 'theriyum'), and closing questions. If the user's message is in Tamil script or Tanglish, respond fully in that same style. Never mix languages within one response.`;
   } else if (simpleMode) {
-    // isStudent messages (from the Student Assistant panel, or anything matching its keyword
-    // patterns) get the dedicated teacher persona instead of the generic simpleMode one — this
-    // branch used to win unconditionally for every simpleMode message regardless of isStudent,
+    // isStudent/isFinance messages (from the Student Assistant / Finance panels, or anything
+    // matching their keyword patterns) get their dedicated persona instead of the generic
+    // simpleMode one — this branch used to win unconditionally for every simpleMode message,
     // which made STUDENT_IDENTITY effectively unreachable, since every Student-panel message is
     // sent with simpleMode:true and always landed here before the isStudent check further below
-    // ever ran. Deliberately swaps only the identity text, not the whole branch — the QUICK_REPLY
-    // block instruction below still applies to student messages exactly as it does to every other
-    // simpleMode message, and non-student simpleMode messages (Finance/Shopping/Travel/etc.,
-    // ordinary chat) are completely unaffected since isStudentRequest() itself is untouched.
+    // ever ran. FINANCE_IDENTITY is wired in the same way, same reason. Deliberately swaps only
+    // the identity text, not the whole branch — the QUICK_REPLY block instruction below still
+    // applies to these messages exactly as it does to every other simpleMode message, and
+    // everything else (Shopping/Travel/Health/Govt/ordinary chat) is unaffected since
+    // isStudentRequest()/isFinanceRequest() themselves aren't touched by this.
     const _lp = getLangPreamble(lang);
-    const _simpleIdentity = isStudent ? STUDENT_IDENTITY : SIMPLE_MODE_PROMPT;
+    const _simpleIdentity = isStudent ? STUDENT_IDENTITY : isFinance ? FINANCE_IDENTITY : SIMPLE_MODE_PROMPT;
     sysPrompt = (_lp ? _lp + '\n\n' : '') + _simpleIdentity + '\n\n' + langInstructions[lang];
     sysPrompt += '\n\nQUICK REPLY BLOCKS — MANDATORY: Whenever you ask the user to choose between options (yes/no, topic choice, next-step choice), you MUST output the structured quick_reply block instead of a plain-text question.\n\nFormat (at the very end of your response):\n<<QUICK_REPLY>>{"type":"quick_reply","question":"Your question?","options":["Option 1","Option 2","Option 3"]}<<END_QUICK_REPLY>>\n\nRules: Maximum 4 options. Each option maximum 5 words. ONE quick_reply block per response. Regular answers stay as plain text.';
   } else {
