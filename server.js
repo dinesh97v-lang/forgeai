@@ -1507,8 +1507,18 @@ Write exactly 3 questions a beginner would naturally wonder after reading THAT s
 
 LANGUAGE RULE (STRICT): Detect the language of the user's most recent message. If it is English, your ENTIRE response must be 100% English — zero Tamil or Tanglish words, including greetings (no 'Vanakkam'), fillers ('irukku', 'pannunga', 'theriyum'), and closing questions. If the user's message is in Tamil script or Tanglish, respond fully in that same style. Never mix languages within one response.`;
   } else if (simpleMode) {
+    // isStudent messages (from the Student Assistant panel, or anything matching its keyword
+    // patterns) get the dedicated teacher persona instead of the generic simpleMode one — this
+    // branch used to win unconditionally for every simpleMode message regardless of isStudent,
+    // which made STUDENT_IDENTITY effectively unreachable, since every Student-panel message is
+    // sent with simpleMode:true and always landed here before the isStudent check further below
+    // ever ran. Deliberately swaps only the identity text, not the whole branch — the QUICK_REPLY
+    // block instruction below still applies to student messages exactly as it does to every other
+    // simpleMode message, and non-student simpleMode messages (Finance/Shopping/Travel/etc.,
+    // ordinary chat) are completely unaffected since isStudentRequest() itself is untouched.
     const _lp = getLangPreamble(lang);
-    sysPrompt = (_lp ? _lp + '\n\n' : '') + SIMPLE_MODE_PROMPT + '\n\n' + langInstructions[lang];
+    const _simpleIdentity = isStudent ? STUDENT_IDENTITY : SIMPLE_MODE_PROMPT;
+    sysPrompt = (_lp ? _lp + '\n\n' : '') + _simpleIdentity + '\n\n' + langInstructions[lang];
     sysPrompt += '\n\nQUICK REPLY BLOCKS — MANDATORY: Whenever you ask the user to choose between options (yes/no, topic choice, next-step choice), you MUST output the structured quick_reply block instead of a plain-text question.\n\nFormat (at the very end of your response):\n<<QUICK_REPLY>>{"type":"quick_reply","question":"Your question?","options":["Option 1","Option 2","Option 3"]}<<END_QUICK_REPLY>>\n\nRules: Maximum 4 options. Each option maximum 5 words. ONE quick_reply block per response. Regular answers stay as plain text.';
   } else {
     const identity = isStudent ? STUDENT_IDENTITY
